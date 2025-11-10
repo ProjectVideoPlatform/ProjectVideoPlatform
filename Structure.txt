@@ -1,0 +1,27 @@
+secure-video-platform/
+├── package.json
+├── .env
+├── .gitignore
+├── server.js
+├── config/
+│   ├── database.js
+│   ├── aws.js
+│   └── auth.js
+├── models/
+│   ├── User.js
+│   ├── Video.js
+│   └── Purchase.js
+├── middleware/
+│   └── auth.js
+├── routes/
+│   ├── auth.js
+│   ├── videos.js
+│   └── admin.js
+├── services/
+│   ├── mediaConvert.js
+│   ├── s3Upload.js
+│   └── cloudfront.js
+├── utils/
+│   └── helpers.js
+└── keys/
+    └── cloudfront-private-key.pem

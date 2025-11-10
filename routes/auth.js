@@ -1,0 +1,137 @@
+const express = require('express');
+const jwt = require('jsonwebtoken');
+const User = require('../models/User');
+const jwtConfig = require('../config/auth');
+const { authenticateToken } = require('../middleware/auth');
+
+const router = express.Router();
+
+// Register
+router.post('/register', async (req, res) => {
+  try {
+    const { email, password, role = 'user' } = req.body;
+    
+    // Validation
+    if (!email || !password) {
+      return res.status(400).json({ error: 'Email and password are required' });
+    }
+    
+    if (password.length < 6) {
+      return res.status(400).json({ error: 'Password must be at least 6 characters long' });
+    }
+    
+    // Check if user already exists
+    const existingUser = await User.findOne({ email });
+    if (existingUser) {
+      return res.status(400).json({ error: 'User already exists' });
+    }
+
+    // Create user (password will be hashed by pre-save hook)
+    const user = new User({
+      email,
+      password,
+      role: role === 'admin' ? 'admin' : 'user' // Only allow admin if explicitly set
+    });
+
+    await user.save();
+
+    // Generate JWT token
+    const token = jwt.sign(
+      { userId: user._id }, 
+      jwtConfig.secret, 
+      { expiresIn: jwtConfig.expiresIn }
+    );
+
+    res.status(201).json({ 
+      token, 
+      user: { 
+        id: user._id, 
+        email: user.email, 
+        role: user.role 
+      },
+      message: 'User registered successfully'
+    });
+  } catch (error) {
+    console.error('Registration error:', error);
+    res.status(500).json({ error: 'Registration failed' });
+  }
+});
+
+// Login
+router.post('/login', async (req, res) => {
+  try {
+    const { email, password } = req.body;
+    
+    // Validation
+    if (!email || !password) {
+      return res.status(400).json({ error: 'Email and password are required' });
+    }
+    
+    // Find user
+    const user = await User.findOne({ email });
+    if (!user) {
+      return res.status(401).json({ error: 'Invalid credentials' });
+    }
+
+    // Check password
+    const isValidPassword = await user.comparePassword(password);
+    if (!isValidPassword) {
+      return res.status(401).json({ error: 'Invalid credentials' });
+    }
+
+    // Generate JWT token
+    const token = jwt.sign(
+      { userId: user._id }, 
+      jwtConfig.secret, 
+      { expiresIn: jwtConfig.expiresIn }
+    );
+
+    res.json({ 
+      token, 
+      user: { 
+        id: user._id, 
+        email: user.email, 
+        role: user.role 
+      },
+      message: 'Login successful'
+    });
+  } catch (error) {
+    console.error('Login error:', error);
+    res.status(500).json({ error: 'Login failed' });
+  }
+});
+
+// Get current user profile
+router.get('/me', authenticateToken, async (req, res) => {
+  try {
+    const user = await User.findById(req.user._id)
+      .select('-password')
+      .populate('purchasedVideos', 'id title price');
+    
+    res.json({ user });
+  } catch (error) {
+    console.error('Profile error:', error);
+    res.status(500).json({ error: 'Failed to get profile' });
+  }
+});
+
+// Refresh token
+router.post('/refresh', authenticateToken, async (req, res) => {
+  try {
+    const token = jwt.sign(
+      { userId: req.user._id }, 
+      jwtConfig.secret, 
+      { expiresIn: jwtConfig.expiresIn }
+    );
+
+    res.json({ 
+      token,
+      message: 'Token refreshed successfully'
+    });
+  } catch (error) {
+    console.error('Token refresh error:', error);
+    res.status(500).json({ error: 'Failed to refresh token' });
+  }
+});
+
+module.exports = router;
