@@ -61,6 +61,8 @@ import { useNavigate } from 'react-router-dom';
           ...(authToken && { 'Authorization': `Bearer ${authToken}` }),
           ...options.headers
         },
+             credentials: 'include',
+        
         ...options
       });
 

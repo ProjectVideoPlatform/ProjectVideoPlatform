@@ -24,7 +24,7 @@ const api = {
   getVideos: async (params = {}) => {
     const query = new URLSearchParams(params).toString();
     const response = await fetch(`${API_BASE}/videos?${query}`, {
-      headers: { 'Authorization': `Bearer ${localStorage.getItem('authToken')}` }
+      headers: { 'Authorization': `Bearer ${localStorage.getItem('authToken')}` },     credentials: 'include'
     });
     if (!response.ok) throw new Error('Failed to fetch videos');
     return response.json();
@@ -32,7 +32,7 @@ const api = {
   
   getVideo: async (id) => {
     const response = await fetch(`${API_BASE}/videos/${id}`, {
-      headers: { 'Authorization': `Bearer ${localStorage.getItem('authToken')}` }
+      headers: { 'Authorization': `Bearer ${localStorage.getItem('authToken')}` },     credentials: 'include'
     });
     if (!response.ok) throw new Error('Failed to fetch video');
     return response.json();
@@ -44,7 +44,7 @@ const api = {
       headers: { 
         'Authorization': `Bearer ${localStorage.getItem('authToken')}`,
         'Content-Type': 'application/json'
-      }
+      },     credentials: 'include'
     });
     if (!response.ok) throw new Error('Failed to purchase video');
     return response.json();
@@ -57,7 +57,7 @@ playVideo: async (id) => {
     headers: { 
       'Authorization': `Bearer ${localStorage.getItem('authToken')}`,
       'Content-Type': 'application/json'
-    }
+    },     credentials: 'include'
   });
   if (!response.ok) throw new Error('Failed to get playback URL');
   const data = await response.json();
@@ -74,7 +74,7 @@ playVideo: async (id) => {
   getPurchasedVideos: async (params = {}) => {
     const query = new URLSearchParams(params).toString();
     const response = await fetch(`${API_BASE}/videos/purchased/list?${query}`, {
-      headers: { 'Authorization': `Bearer ${localStorage.getItem('authToken')}` }
+      headers: { 'Authorization': `Bearer ${localStorage.getItem('authToken')}` },     credentials: 'include'
     });
     if (!response.ok) throw new Error('Failed to fetch purchased videos');
     return response.json();
@@ -88,6 +88,7 @@ playVideo: async (id) => {
         'Authorization': `Bearer ${localStorage.getItem('authToken')}`,
         'Content-Type': 'application/json'
       },
+           credentials: 'include',
       body: JSON.stringify(videoData)
     });
     if (!response.ok) throw new Error('Failed to initialize upload');
@@ -100,7 +101,7 @@ playVideo: async (id) => {
       headers: { 
         'Authorization': `Bearer ${localStorage.getItem('authToken')}`,
         'Content-Type': 'application/json'
-      }
+      },     credentials: 'include'
     });
     if (!response.ok) throw new Error('Failed to complete upload');
     return response.json();
@@ -113,7 +114,8 @@ playVideo: async (id) => {
         'Authorization': `Bearer ${localStorage.getItem('authToken')}`,
         'Content-Type': 'application/json'
       },
-      body: JSON.stringify({ error })
+      body: JSON.stringify({ error }),
+           credentials: 'include'
     });
     if (!response.ok) throw new Error('Failed to record upload failure');
     return response.json();
@@ -370,7 +372,8 @@ const UploadModal = ({ isOpen, onClose, onUpload }) => {
       body: file,               // ส่งเฉพาะไฟล์
       headers: {
         'Content-Type': file.type // ต้องตรงกับตอนสร้าง Presigned URL
-      }
+      },
+           credentials: 'include'
     });
 
       if (!uploadResponse.ok) {

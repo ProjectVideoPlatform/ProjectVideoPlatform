@@ -123,7 +123,7 @@ const api = {
   get: async (endpoint) => {
     const AUTH_TOKEN = localStorage.getItem("authToken");
     const response = await fetch(`${API_BASE}${endpoint}`, {
-      headers: { 'Authorization': `Bearer ${AUTH_TOKEN}` }
+      headers: { 'Authorization': `Bearer ${AUTH_TOKEN}` },     credentials: 'include'
     });
     if (!response.ok) throw new Error('API call failed');
     return response.json();
@@ -136,6 +136,7 @@ const api = {
         'Authorization': `Bearer ${AUTH_TOKEN}`,
         'Content-Type': 'application/json'
       },
+           credentials: 'include',
       body: JSON.stringify(data)
     });
     if (!response.ok) throw new Error('API call failed');
@@ -145,7 +146,9 @@ const api = {
     const AUTH_TOKEN = localStorage.getItem("authToken");
     const response = await fetch(`${API_BASE}${endpoint}`, {
       method: 'DELETE',
-      headers: { 'Authorization': `Bearer ${AUTH_TOKEN}` }
+      headers: { 'Authorization': `Bearer ${AUTH_TOKEN}`
+       },
+            credentials: 'include'
     });
     if (!response.ok) throw new Error('API call failed');
     return response.json();
@@ -156,8 +159,10 @@ const api = {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${AUTH_TOKEN}`,
-        'Content-Type': 'application/json'
+        'Content-Type': 'application/json',
+        
       },
+           credentials: 'include',
       body: JSON.stringify(data)
     });
     if (!response.ok) throw new Error('API call failed');

@@ -8,7 +8,7 @@ const API_BASE = 'http://localhost:3000/api';
 const api = {
   getVideo: async (id) => {
     const response = await fetch(`${API_BASE}/videos/${id}`, {
-      headers: { 'Authorization': `Bearer ${localStorage.getItem('authToken')}` }
+      headers: { 'Authorization': `Bearer ${localStorage.getItem('authToken')}` },     credentials: 'include'
     });
     if (!response.ok) throw new Error('Failed to fetch video');
     return response.json();
@@ -20,7 +20,7 @@ const api = {
       headers: { 
         'Authorization': `Bearer ${localStorage.getItem('authToken')}`,
         'Content-Type': 'application/json'
-      }
+      },     credentials: 'include'
     });
     if (!response.ok) throw new Error('Failed to purchase video');
     return response.json();
@@ -32,7 +32,7 @@ const api = {
       headers: { 
         'Authorization': `Bearer ${localStorage.getItem('authToken')}`,
         'Content-Type': 'application/json'
-      }
+      },     credentials: 'include'
     });
     if (!response.ok) throw new Error('Failed to get playback URL');
     return response.json();
