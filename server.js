@@ -7,7 +7,7 @@ const connectDB = require('./config/database');
 const authRoutes = require('./routes/auth');
 const videoRoutes = require('./routes/videos');
 const adminRoutes = require('./routes/admin');
-
+const UserRoute = require('./routes/user');
 const app = express();
 
 // ====== MIDDLEWARE ======
@@ -22,7 +22,7 @@ app.use(express.text({ type: '*/*', limit: '10mb' }));
 app.use('/api/auth', authRoutes);
 app.use('/api/videos', videoRoutes);
 app.use('/api/admin', adminRoutes);
-
+app.use('/api/user', UserRoute);
 // Health check
 app.get('/api/health', (req, res) => {
   res.json({ status: 'OK', timestamp: new Date().toISOString() });
