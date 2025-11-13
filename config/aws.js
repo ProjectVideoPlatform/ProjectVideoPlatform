@@ -3,7 +3,7 @@
     require('dotenv').config({ path: path.resolve(__dirname, '../.env') });
   // AWS Configuration
   const config = {
-    region: process.env.AWS_REGION || 'ap-southeast-1',
+    region:  'ap-southeast-1',
     accessKeyId: process.env.AWS_ACCESS_KEY_ID,
     secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
     
@@ -31,7 +31,8 @@
   // Create AWS service instances
   const s3 = new AWS.S3();
   const mediaConvert = new AWS.MediaConvert({
-    endpoint: config.mediaConvertEndpoint
+    endpoint: config.mediaConvertEndpoint,
+      region:  'ap-southeast-1'
   });
 
   module.exports = {

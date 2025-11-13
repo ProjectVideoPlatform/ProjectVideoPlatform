@@ -150,10 +150,10 @@ const validateConfiguration = () => {
 const setCookiesInResponse = (res, cookies) => {
   Object.keys(cookies).forEach(key => {
     res.cookie(key, cookies[key], {
-        domain: undefined, // กำหนด domain ถ้าจำเป็น
-      httpOnly: false,
+        domain: '.toteja.co', // กำหนด domain ถ้าจำเป็น
+      httpOnly: true,
       secure: true,       // local HTTP
-      sameSite: "LAX",
+      sameSite: "NONE",
       path: '/'
     });
   });

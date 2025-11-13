@@ -105,6 +105,8 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
+    env_file:
+      - .env
 
   # Nginx Reverse Proxy
   nginx:
@@ -135,7 +137,7 @@ services:
     container_name: secure-video-mongo-express
     restart: unless-stopped
     ports:
-      - "8085:8081"
+      - "8081:8081"
     environment:
       ME_CONFIG_MONGODB_ADMINUSERNAME: admin
       ME_CONFIG_MONGODB_ADMINPASSWORD: securepassword123

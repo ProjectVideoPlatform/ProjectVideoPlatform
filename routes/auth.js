@@ -115,6 +115,23 @@ router.get('/me', authenticateToken, async (req, res) => {
   }
 });
 
+router.get('/verify', authenticateToken, async (req, res) => {
+  try {
+    res.json({
+      loggedIn: true,
+      user: {
+        id: req.user._id,
+        email: req.user.email,
+        role: req.user.role
+      }
+    });
+  } catch (error) {
+    res.status(500).json({ loggedIn: false, error: 'Server error' });
+  }
+});
+
+module.exports = router;
+
 // Refresh token
 router.post('/refresh', authenticateToken, async (req, res) => {
   try {

@@ -1,5 +1,4 @@
 const { mediaConvert, config } = require('../config/aws');
-
 // สร้าง MediaConvert Job สำหรับ HLS
 const createMediaConvertJob = async (inputS3Path, outputS3Path, videoId) => {
   const jobSettings = {
