@@ -4,7 +4,7 @@ const router = express.Router();
 const User = require('../models/User');
 const Purchase = require('../models/Purchase');
 const Video = require('../models/Video');
-const { authenticateToken } = require('../middleware/authMiddleware');
+const { authenticateToken } = require('../middleware/auth');
 const bcrypt = require('bcryptjs');
 
 // Get profile
