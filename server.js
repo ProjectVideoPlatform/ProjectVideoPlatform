@@ -14,10 +14,11 @@ const app = express();
 // ====== MIDDLEWARE ======
 // CORS
 app.use(cors({
-  origin: true,
+  origin: ['https://toteja.co','http://localhost:5173' ],
+  methods: ['GET','POST','OPTIONS'],
+  allowedHeaders: ['Content-Type','Authorization'],
   credentials: true
 }));
-
 // JSON / URL-encoded for most routes
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));

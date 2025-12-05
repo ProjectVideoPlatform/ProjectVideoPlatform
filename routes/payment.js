@@ -1,6 +1,6 @@
 const express = require("express");
 const router = express.Router();
-const { createPayment, handleKPlusCallback } = require("../controllers/paymentController");
+const { createPayment, handleKPlusCallback } = require("../services/paymentController");
 
 // Normal create QR
 router.post("/create", createPayment);

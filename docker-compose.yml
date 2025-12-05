@@ -4,7 +4,7 @@ services:
     image:  node:20-alpine
     working_dir: /app
     volumes:
-      - ./frontend/my-app:/app      # สมมุติโค้ด React อยู่โฟลเดอร์ frontend
+      - ./Frontvideo1:/app      # สมมุติโค้ด React อยู่โฟลเดอร์ frontend
       - /app/node_modules    # ป้องกันการแมปโฟลเดอร์ node_modules จาก host
     command:  sh -c "npm install && npm run dev -- --host"
     ports:
@@ -35,7 +35,8 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-  # Redis for Session/Cache (Optional)
+
+  # Redis
   redis:
     image: redis:7.2-alpine
     container_name: secure-video-redis
@@ -53,6 +54,29 @@ services:
       timeout: 10s
       retries: 3
 
+  # Vault - production-ready
+  vault:
+    image: vault:1.13.3
+    container_name: secure-video-vault
+    restart: unless-stopped
+    ports:
+      - "8200:8200"
+    environment:
+      VAULT_ADDR: https://0.0.0.0:8200
+    cap_add:
+      - IPC_LOCK
+    networks:
+      - secure-video-network
+    volumes:
+      - vault_data:/vault/data
+      - ./vault/config:/vault/config:ro
+      - ./vault/certs:/vault/certs:ro
+    command: "vault server -config=/vault/config/server.hcl"
+    healthcheck:
+      test: ["CMD", "vault", "status", "-address=https://0.0.0.0:8200"]
+      interval: 10s
+      retries: 5
+
   # Node.js Application
   app:
     build:
@@ -65,27 +89,31 @@ services:
     environment:
       NODE_ENV: production
       PORT: 3000
-      
+
       # Database
       MONGO_URI: mongodb://admin:securepassword123@mongodb:27017/secure-video?authSource=admin
       REDIS_URL: redis://:redispassword123@redis:6379
-      
+
       # JWT
       JWT_SECRET: ${JWT_SECRET}
-      
+
+      # Vault
+      VAULT_ADDR: https://vault:8200
+      VAULT_TOKEN: ${VAULT_TOKEN} # ต้อง set เป็น token ของ Vault
+
       # AWS Configuration
       AWS_REGION: ${AWS_REGION}
       AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
       AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
-      
+
       # S3 Buckets
       UPLOADS_BUCKET: ${UPLOADS_BUCKET}
       HLS_OUTPUT_BUCKET: ${HLS_OUTPUT_BUCKET}
-      
+
       # MediaConvert
       MEDIACONVERT_ENDPOINT: ${MEDIACONVERT_ENDPOINT}
       MEDIACONVERT_ROLE: ${MEDIACONVERT_ROLE}
-      
+
       # CloudFront
       CLOUDFRONT_DOMAIN: ${CLOUDFRONT_DOMAIN}
       CLOUDFRONT_KEY_PAIR_ID: ${CLOUDFRONT_KEY_PAIR_ID}
@@ -93,13 +121,13 @@ services:
     volumes:
       - ./keys:/app/keys:ro
       - app_logs:/app/logs
+      - ./vault/certs:/app/vault-certs:ro
     networks:
       - secure-video-network
     depends_on:
-      mongodb:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
+      - mongodb
+      - redis
+      - vault
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
       interval: 30s
@@ -131,7 +159,7 @@ services:
       timeout: 10s
       retries: 3
 
-  # MongoDB Admin Interface (Optional)
+  # Mongo Express (dev only)
   mongo-express:
     image: mongo-express:1.0
     container_name: secure-video-mongo-express
@@ -152,7 +180,7 @@ services:
     profiles:
       - dev
 
-  # Application Monitoring (Optional)
+  # Prometheus & Grafana (monitoring)
   prometheus:
     image: prom/prometheus:v2.47.0
     container_name: secure-video-prometheus
@@ -173,7 +201,6 @@ services:
     profiles:
       - monitoring
 
-  # Grafana Dashboard (Optional)
   grafana:
     image: grafana/grafana:10.1.0
     container_name: secure-video-grafana
@@ -196,6 +223,7 @@ services:
 networks:
   secure-video-network:
     driver: bridge
+
 volumes:
   mongodb_data:
     driver: local
@@ -204,6 +232,8 @@ volumes:
   app_logs:
     driver: local
   nginx_logs:
+    driver: local
+  vault_data:
     driver: local
   prometheus_data:
     driver: local

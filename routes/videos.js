@@ -9,6 +9,43 @@ const Video = require('../models/Video');
 const Purchase = require('../models/Purchase');
   const https = require('https');
 const router = express.Router();
+router.get('/video-progress', authenticateToken, async (req, res) => {
+  try {
+    console.log("kuy  เอ้ย fetching video progress");
+    const { videoId } = req.query;
+
+    if (!videoId) {
+      return res.status(400).json({ error: "videoId is required" });
+    }
+
+    console.log("Fetching video progress for videoId:", videoId);
+
+    const purchase = await Purchase.findOne({
+      userId: req.user._id,
+      videoId: videoId
+    });
+
+    return res.json({
+      lastTime: purchase?.lastTime || 0
+    });
+
+  } catch (err) {
+    console.error("Error fetching progress", err);
+    return res.status(500).json({ error: "Server error" });
+  }
+});
+
+// POST - บันทึก progress
+router.post('/video-progress', authenticateToken, async (req, res) => {
+  const { videoId, currentTime } = req.body;
+  const purchase = await Purchase.findOne({
+    userId: req.user._id,
+    videoId: videoId
+  });
+  purchase.lastTime = currentTime;
+  await purchase.save();
+  res.json({ success: true });
+});
 
 // Get video list (public videos or user's purchased videos)
 router.get('/', authenticateToken, async (req, res) => {
@@ -173,7 +210,7 @@ router.post('/upload/initialize', authenticateToken, requireAdmin, async (req, r
       fields: uploadData.fields,
       message: 'Upload initialized successfully',
       video: {
-        id: video.id,
+        id: video._id,
         title: video.title,
         uploadStatus: video.uploadStatus
       }
@@ -228,7 +265,7 @@ router.post('/upload/:videoId/complete', authenticateToken, requireAdmin, async 
         jobId: job.Id,
         message: 'Upload completed, processing started',
         video: {
-          id: video.id,
+          id: videoId,
           title: video.title,
           uploadStatus: video.uploadStatus
         }
@@ -257,7 +294,7 @@ router.post('/upload/:videoId/failed', authenticateToken, requireAdmin, async (r
     const { videoId } = req.params;
     const { error } = req.body;
     
-    const video = await Video.findOne({ id: videoId });
+    const video = await Video.findOne({ _id: videoId });
     
     if (!video) {
       return res.status(404).json({ error: 'Video not found' });
@@ -284,7 +321,7 @@ router.post('/upload/:videoId/failed', authenticateToken, requireAdmin, async (r
 router.post('/:id/purchase', authenticateToken, async (req, res) => {
   try {
     const video = await Video.findOne({ 
-      id: req.params.id,
+      _id: req.params.id,
       uploadStatus: 'completed',
       isActive: true 
     });
@@ -340,7 +377,7 @@ router.post('/:id/purchase', authenticateToken, async (req, res) => {
 router.post('/:id/play', authenticateToken, async (req, res) => {
   try {
     const video = await Video.findOne({ 
-      id: req.params.id,
+      _id: req.params.id,
       isActive: true 
     });
     
@@ -384,6 +421,7 @@ router.post('/:id/play', authenticateToken, async (req, res) => {
       success: true,
       manifestUrl: `https://${config.cloudFrontDomain}/videos/${video.id}/original.m3u8`,
       expiresIn,
+          videoId: video._id.toString(), // ← เพิ่มบรรทัดนี้
       message: 'Playback access granted',
       cookies: cookies
     });
@@ -393,6 +431,7 @@ router.post('/:id/play', authenticateToken, async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 });
+
 
 // SNS subscription handler
 // Middleware สำหรับ SNS / MediaConvert webhook
@@ -418,53 +457,54 @@ const parseSnsBody = (req, res, next) => {
   }
 };
 
-// ใช้ middleware ก่อน route
-router.post('/mediaconvert/subscribe', parseSnsBody, async (req, res) => {
-  console.log('SNS subscription endpoint hit');
+router.post(
+  "/mediaconvert/subscribe",
+  express.json({ type: "*/*" }),
+  async (req, res) => {
+    console.log("SNS endpoint hit");
 
-  try {
     const body = req.body;
-    console.log('SNS body:', body);
+    console.log("SNS Body:", body);
 
-    // 1. Subscription confirmation
-    if (body.Type === 'SubscriptionConfirmation' && body.SubscribeURL) {
-      const https = require('https');
-      https.get(body.SubscribeURL, () => console.log('SNS subscription confirmed'));
-      return res.send('Subscription confirmed');
-    }
+    // MediaConvert ส่งมาแบบ EventBridge Format
+    const detailType = body["detail-type"];
+    const detail = body.detail;
 
-    // 2. Notification
-    const { ['detail-type']: detailType, detail } = body;
-    console.log('SNS notification received:', detailType);
+    console.log("detail-type:", detailType);
+    console.log("detail:", detail);
 
-    if (detailType === 'MediaConvert Job State Change') {
+    if (detailType === "MediaConvert Job State Change") {
       const status = detail.status;
-      const videoId = detail.userMetadata?.VideoId || detail.userMetadata?.videoId;
+      const videoId =
+        detail.userMetadata?.VideoId ||
+        detail.userMetadata?.videoId ||
+        null;
 
-      console.log(`Job ${detail.jobId} status: ${status}, videoId: ${videoId}`);
+      console.log(`Job ${detail.jobId} status: ${status}, videoId=${videoId}`);
 
-      if (videoId) {
-        const video = await Video.findOne({ id: videoId });
-        if (video) {
-          if (status === 'COMPLETE'){
-                 video.uploadStatus = 'completed';
-                  video.thumbnailPath = `videos/${videoId}/thumbnails/`;
-          } 
-          else if (status === 'ERROR') video.uploadStatus = 'failed';
-          
-          await video.save();
-          console.log(`Video ${videoId}: status set to ${video.uploadStatus}`);
+      if (!videoId) {
+        console.log("❌ VideoId missing. userMetadata:", detail.userMetadata);
+        return res.json({ error: "VideoId missing" });
+      }
+
+      // อัปเดตฐานข้อมูล
+      const video = await Video.findOne({ id: videoId });
+      if (video) {
+        if (status === "COMPLETE") {
+          video.uploadStatus = "completed";
+          video.thumbnailPath = `videos/${videoId}/thumbnails/`;
+        } else if (status === "ERROR") {
+          video.uploadStatus = "failed";
         }
+        await video.save();
+
+        console.log(`Video ${videoId} updated to ${video.uploadStatus}`);
       }
     }
 
-    return res.json({ received: true });
-  } catch (error) {
-    console.error('Webhook error:', error);
-    res.status(500).json({ error: error.message });
+    res.json({ received: true });
   }
-});
-
+);
 
 // MediaConvert webhook handler
 router.post('/mediaconvert/webhook', async (req, res) => {
