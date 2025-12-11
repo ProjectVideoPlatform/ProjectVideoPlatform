@@ -18,38 +18,43 @@ jobs:
 
       - name: Install Trivy (Official Repository)
         run: |
+          # ... (โค้ดติดตั้ง Trivy เดิม)
           sudo apt-get update
           sudo apt-get install -y wget apt-transport-https gnupg lsb-release
           wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | sudo apt-key add -
           echo "deb https://aquasecurity.github.io/trivy-repo/deb $(lsb_release -sc) main" | sudo tee -a /etc/apt/sources.list.d/trivy.list
           sudo apt-get update
           sudo apt-get install -y trivy
-      
-      # 💡 ขั้นตอนใหม่: ดาวน์โหลดไฟล์เทมเพลต HTML
-      - name: Download HTML Report Template
-        run: |
-          # ดาวน์โหลดไฟล์ html.tpl จาก GitHub Repository ของ Trivy มาไว้ใน Working Directory
-          wget https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/html.tpl -O html-report.tpl
     
+      # 1. 🔍 Scan source code (filesystem) - สร้างแค่ JSON Output เท่านั้น
       - name: Scan source code (filesystem)
         run: |
+          # Trivy จะสแกนและสร้าง JSON Output
           trivy fs --format json --output trivy-fs.json --severity HIGH,CRITICAL . || true
-          # 🔄 แก้ไข: เปลี่ยนจาก @contrib/html.tpl เป็น html-report.tpl
-          trivy fs --format template --template "html-report.tpl" --output trivy-fs.html --severity HIGH,CRITICAL . || true
 
+      # 2. 🐳 Scan Docker image - สร้างแค่ JSON Output เท่านั้น
       - name: Scan Docker image
         run: |
-          # ⚠️ คำเตือน: ขั้นตอนนี้ต้องมีไฟล์ Dockerfile อยู่ใน Root Directory
           docker build -t myapp:latest .
           trivy image --format json --output trivy-docker.json --severity HIGH,CRITICAL myapp:latest || true
-          # 🔄 แก้ไข: เปลี่ยนจาก @contrib/html.tpl เป็น html-report.tpl
-          trivy image --format template --template "html-report.tpl" --output trivy-docker.html --severity HIGH,CRITICAL myapp:latest || true
 
+      # 3. ⚙️ Scan IaC (Terraform / K8s) - สร้างแค่ JSON Output เท่านั้น
       - name: Scan IaC (Terraform / K8s)
         run: |
           trivy config --format json --output trivy-iac.json --severity HIGH,CRITICAL . || true
-          # 🔄 แก้ไข: เปลี่ยนจาก @contrib/html.tpl เป็น html-report.tpl
-          trivy config --format template --template "html-report.tpl" --output trivy-iac.html --severity HIGH,CRITICAL . || true
+
+      # 💡 ขั้นตอนใหม่: แปลง JSON Output เป็น HTML
+      - name: Generate HTML Reports from JSON
+        # เราใช้ 'trivy post' เพื่ออ่านไฟล์ JSON แล้วแปลงเป็น HTML
+        run: |
+          # File System Report
+          trivy post --format template --template "@contrib/html.tpl" --input trivy-fs.json --output trivy-fs.html || true
+          
+          # Docker Image Report
+          trivy post --format template --template "@contrib/html.tpl" --input trivy-docker.json --output trivy-docker.html || true
+          
+          # IaC Report
+          trivy post --format template --template "@contrib/html.tpl" --input trivy-iac.json --output trivy-iac.html || true
 
       - name: Upload Reports as Artifacts
         uses: actions/upload-artifact@v4
@@ -62,14 +67,12 @@ jobs:
             trivy-docker.html
             trivy-iac.json
             trivy-iac.html
-            # สามารถเพิ่มไฟล์เทมเพลตเข้าไปใน Artifacts ได้ด้วย
-            html-report.tpl
-
+            
+      # ... (ขั้นตอน Send Slack Notification ยังคงเดิม)
       - name: Send Slack Notification
         if: always()
         run: |
           STATUS="✅ Security Scan Passed"
-          # ตรวจสอบว่ามี JSON outputs ที่ระบุช่องโหว่หรือไม่
           if grep -q '"VulnerabilityID":' trivy-fs.json trivy-docker.json trivy-iac.json; then
             STATUS="⚠️ Vulnerabilities Found! Check reports."
           fi
