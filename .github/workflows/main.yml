@@ -48,13 +48,13 @@ jobs:
         # เราใช้ 'trivy post' เพื่ออ่านไฟล์ JSON แล้วแปลงเป็น HTML
         run: |
           # File System Report
-          trivy post --format template --template "@contrib/html.tpl" --input trivy-fs.json --output trivy-fs.html || true
+          trivy post --format template --template "@contrib/html.tpl" --input trivy-fs.json --output trivy-fs.html 
           
           # Docker Image Report
-          trivy post --format template --template "@contrib/html.tpl" --input trivy-docker.json --output trivy-docker.html || true
+          trivy post --format template --template "@contrib/html.tpl" --input trivy-docker.json --output trivy-docker.html 
           
           # IaC Report
-          trivy post --format template --template "@contrib/html.tpl" --input trivy-iac.json --output trivy-iac.html || true
+          trivy post --format template --template "@contrib/html.tpl" --input trivy-iac.json --output trivy-iac.html 
 
       - name: Upload Reports as Artifacts
         uses: actions/upload-artifact@v4
