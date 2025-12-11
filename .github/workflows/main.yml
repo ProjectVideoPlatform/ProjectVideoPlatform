@@ -16,10 +16,8 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install Trivy (Official Repository)
-        # ขั้นตอนนี้ติดตั้ง Trivy CLI เพื่อให้รันคำสั่ง trivy ได้
+      - name: Install Trivy
         run: |
-          # ... (โค้ดติดตั้ง Trivy เดิม)
           sudo apt-get update
           sudo apt-get install -y wget apt-transport-https gnupg lsb-release
           wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | sudo apt-key add -
@@ -27,45 +25,70 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y trivy
     
-      # 1. 🔍 Scan source code (filesystem) - สร้างแค่ JSON Output
+      # 1. 🔍 Scan source code
       - name: Scan source code (filesystem)
         run: |
           trivy fs --format json --output trivy-fs.json --severity HIGH,CRITICAL . || true
+          trivy fs --format table --output trivy-fs-table.txt --severity HIGH,CRITICAL . || true
 
-      # 2. 🐳 Scan Docker image - สร้างแค่ JSON Output
+      # 2. 🐳 Scan Docker image
       - name: Scan Docker image
         run: |
           docker build -t myapp:latest .
           trivy image --format json --output trivy-docker.json --severity HIGH,CRITICAL myapp:latest || true
+          trivy image --format table --output trivy-docker-table.txt --severity HIGH,CRITICAL myapp:latest || true
 
-      # 3. ⚙️ Scan IaC (Terraform / K8s) - สร้างแค่ JSON Output
+      # 3. ⚙️ Scan IaC
       - name: Scan IaC (Terraform / K8s)
         run: |
           trivy config --format json --output trivy-iac.json --severity HIGH,CRITICAL . || true
+          trivy config --format table --output trivy-iac-table.txt --severity HIGH,CRITICAL . || true
 
-      # 💡 ขั้นตอนที่ 4: รวม JSON และสร้างรายงานสรุป Markdown/HTML
-      - name: Combine JSON Reports and Generate Summary (Markdown/Table)
-        # ใช้ Trivy Action เพื่อรวมไฟล์ JSON ทั้งหมดแล้วสร้างรายงานสรุป
-        uses: aquasecurity/trivy-action@master
-        with:
-          # ระบุไฟล์ JSON ทั้งหมดที่ต้องการรวมและสร้างรายงาน
-          input: 'trivy-fs.json,trivy-docker.json,trivy-iac.json'
-          format: 'table' # แสดงผลเป็นตาราง Markdown
-          output: 'trivy-combined-summary.md'
-          # *ไม่จำเป็นต้องระบุ template ในขั้นตอนนี้ถ้าใช้ format: 'table'*
-          
-      - name: Generate HTML Reports from JSON
-        # ใช้ 'trivy post' เพื่อแปลง JSON แต่ละไฟล์เป็น HTML รายงานฉบับเต็ม
+      # 4. 📊 Generate HTML Reports
+      - name: Generate HTML Reports
         run: |
-          # File System Report
-          trivy post --format template --template "@contrib/html.tpl" --input trivy-fs.json --output trivy-fs.html || true
-          
-          # Docker Image Report
-          trivy post --format template --template "@contrib/html.tpl" --input trivy-docker.json --output trivy-docker.html || true
-          
-          # IaC Report
-          trivy post --format template --template "@contrib/html.tpl" --input trivy-iac.json --output trivy-iac.html || true
+          # Convert JSON to HTML using trivy convert
+          trivy convert --format template --template "@contrib/html.tpl" --input trivy-fs.json --output trivy-fs.html || true
+          trivy convert --format template --template "@contrib/html.tpl" --input trivy-docker.json --output trivy-docker.html || true
+          trivy convert --format template --template "@contrib/html.tpl" --input trivy-iac.json --output trivy-iac.html || true
 
+      # 5. 📝 Create Combined Summary
+      - name: Create Combined Summary Report
+        run: |
+          cat > trivy-combined-summary.md << 'EOF'
+          # 🔒 Security Scan Summary
+          
+          ## 📁 Filesystem Scan
+          EOF
+          cat trivy-fs-table.txt >> trivy-combined-summary.md || echo "No filesystem vulnerabilities" >> trivy-combined-summary.md
+          
+          cat >> trivy-combined-summary.md << 'EOF'
+          
+          ## 🐳 Docker Image Scan
+          EOF
+          cat trivy-docker-table.txt >> trivy-combined-summary.md || echo "No Docker vulnerabilities" >> trivy-combined-summary.md
+          
+          cat >> trivy-combined-summary.md << 'EOF'
+          
+          ## ⚙️ IaC Scan
+          EOF
+          cat trivy-iac-table.txt >> trivy-combined-summary.md || echo "No IaC vulnerabilities" >> trivy-combined-summary.md
+
+      # 6. 📊 Count Vulnerabilities
+      - name: Count Vulnerabilities
+        id: count_vulns
+        run: |
+          FS_COUNT=$(grep -c '"Severity": "CRITICAL"\|"Severity": "HIGH"' trivy-fs.json || echo "0")
+          DOCKER_COUNT=$(grep -c '"Severity": "CRITICAL"\|"Severity": "HIGH"' trivy-docker.json || echo "0")
+          IAC_COUNT=$(grep -c '"Severity": "CRITICAL"\|"Severity": "HIGH"' trivy-iac.json || echo "0")
+          TOTAL=$((FS_COUNT + DOCKER_COUNT + IAC_COUNT))
+          
+          echo "fs_count=$FS_COUNT" >> $GITHUB_OUTPUT
+          echo "docker_count=$DOCKER_COUNT" >> $GITHUB_OUTPUT
+          echo "iac_count=$IAC_COUNT" >> $GITHUB_OUTPUT
+          echo "total=$TOTAL" >> $GITHUB_OUTPUT
+
+      # 7. 📤 Upload Reports
       - name: Upload Reports as Artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -73,30 +96,47 @@ jobs:
           path: |
             trivy-fs.json
             trivy-fs.html
+            trivy-fs-table.txt
             trivy-docker.json
             trivy-docker.html
+            trivy-docker-table.txt
             trivy-iac.json
             trivy-iac.html
-            trivy-combined-summary.md # 📌 เพิ่มไฟล์สรุป Markdown
+            trivy-iac-table.txt
+            trivy-combined-summary.md
 
+      # 8. 📢 Send Slack Notification
       - name: Send Slack Notification
         if: always()
         run: |
-          STATUS="✅ Security Scan Passed"
-          # ตรวจสอบว่ามีช่องโหว่ใน JSON outputs หรือไม่
-          if grep -q '"VulnerabilityID":' trivy-fs.json trivy-docker.json trivy-iac.json; then
-            STATUS="⚠️ Vulnerabilities Found! Check reports."
+          TOTAL_VULNS="${{ steps.count_vulns.outputs.total }}"
+          FS_VULNS="${{ steps.count_vulns.outputs.fs_count }}"
+          DOCKER_VULNS="${{ steps.count_vulns.outputs.docker_count }}"
+          IAC_VULNS="${{ steps.count_vulns.outputs.iac_count }}"
+          
+          if [ "$TOTAL_VULNS" -eq "0" ]; then
+            STATUS="✅ Security Scan Passed"
+            COLOR="good"
+          else
+            STATUS="⚠️ Vulnerabilities Found!"
+            COLOR="warning"
           fi
           
-          # 💡 ปรับปรุง: ดึงเนื้อหาสรุปจากไฟล์ Markdown มาใส่ใน Slack Message (ไม่บังคับ แต่ดีขึ้น)
-          SUMMARY=$(cat trivy-combined-summary.md | head -n 5)
+          # Get summary (first 20 lines)
+          SUMMARY=$(head -n 20 trivy-combined-summary.md | sed 's/"/\\"/g' | sed ':a;N;$!ba;s/\n/\\n/g')
           
           curl -X POST -H "Content-type: application/json" \
             --data "{
-              \"text\": \"[Security Scan] $STATUS\",
-              \"blocks\": [
-                {\"type\": \"section\", \"text\": {\"type\": \"mrkdwn\", \"text\": \"*Security Scan Result:* $STATUS\"}},
-                {\"type\": \"section\", \"text\": {\"type\": \"mrkdwn\", \"text\": \"_Artifacts available in GitHub Actions. | *Summary:*\\n$SUMMARY\"}}
-              ]
+              \"attachments\": [{
+                \"color\": \"$COLOR\",
+                \"title\": \"$STATUS\",
+                \"fields\": [
+                  {\"title\": \"Total Vulnerabilities\", \"value\": \"$TOTAL_VULNS\", \"short\": true},
+                  {\"title\": \"Filesystem\", \"value\": \"$FS_VULNS\", \"short\": true},
+                  {\"title\": \"Docker Image\", \"value\": \"$DOCKER_VULNS\", \"short\": true},
+                  {\"title\": \"IaC\", \"value\": \"$IAC_VULNS\", \"short\": true}
+                ],
+                \"text\": \"View detailed reports in GitHub Actions Artifacts\"
+              }]
             }" \
             $SLACK_WEBHOOK_URL
