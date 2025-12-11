@@ -17,6 +17,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install Trivy (Official Repository)
+        # ขั้นตอนนี้ติดตั้ง Trivy CLI เพื่อให้รันคำสั่ง trivy ได้
         run: |
           # ... (โค้ดติดตั้ง Trivy เดิม)
           sudo apt-get update
@@ -26,35 +27,44 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y trivy
     
-      # 1. 🔍 Scan source code (filesystem) - สร้างแค่ JSON Output เท่านั้น
+      # 1. 🔍 Scan source code (filesystem) - สร้างแค่ JSON Output
       - name: Scan source code (filesystem)
         run: |
-          # Trivy จะสแกนและสร้าง JSON Output
           trivy fs --format json --output trivy-fs.json --severity HIGH,CRITICAL . || true
 
-      # 2. 🐳 Scan Docker image - สร้างแค่ JSON Output เท่านั้น
+      # 2. 🐳 Scan Docker image - สร้างแค่ JSON Output
       - name: Scan Docker image
         run: |
           docker build -t myapp:latest .
           trivy image --format json --output trivy-docker.json --severity HIGH,CRITICAL myapp:latest || true
 
-      # 3. ⚙️ Scan IaC (Terraform / K8s) - สร้างแค่ JSON Output เท่านั้น
+      # 3. ⚙️ Scan IaC (Terraform / K8s) - สร้างแค่ JSON Output
       - name: Scan IaC (Terraform / K8s)
         run: |
           trivy config --format json --output trivy-iac.json --severity HIGH,CRITICAL . || true
 
-      # 💡 ขั้นตอนใหม่: แปลง JSON Output เป็น HTML
+      # 💡 ขั้นตอนที่ 4: รวม JSON และสร้างรายงานสรุป Markdown/HTML
+      - name: Combine JSON Reports and Generate Summary (Markdown/Table)
+        # ใช้ Trivy Action เพื่อรวมไฟล์ JSON ทั้งหมดแล้วสร้างรายงานสรุป
+        uses: aquasecurity/trivy-action@master
+        with:
+          # ระบุไฟล์ JSON ทั้งหมดที่ต้องการรวมและสร้างรายงาน
+          input: 'trivy-fs.json,trivy-docker.json,trivy-iac.json'
+          format: 'table' # แสดงผลเป็นตาราง Markdown
+          output: 'trivy-combined-summary.md'
+          # *ไม่จำเป็นต้องระบุ template ในขั้นตอนนี้ถ้าใช้ format: 'table'*
+          
       - name: Generate HTML Reports from JSON
-        # เราใช้ 'trivy post' เพื่ออ่านไฟล์ JSON แล้วแปลงเป็น HTML
+        # ใช้ 'trivy post' เพื่อแปลง JSON แต่ละไฟล์เป็น HTML รายงานฉบับเต็ม
         run: |
           # File System Report
-          trivy post --format template --template "@contrib/html.tpl" --input trivy-fs.json --output trivy-fs.html 
+          trivy post --format template --template "@contrib/html.tpl" --input trivy-fs.json --output trivy-fs.html || true
           
           # Docker Image Report
-          trivy post --format template --template "@contrib/html.tpl" --input trivy-docker.json --output trivy-docker.html 
+          trivy post --format template --template "@contrib/html.tpl" --input trivy-docker.json --output trivy-docker.html || true
           
           # IaC Report
-          trivy post --format template --template "@contrib/html.tpl" --input trivy-iac.json --output trivy-iac.html 
+          trivy post --format template --template "@contrib/html.tpl" --input trivy-iac.json --output trivy-iac.html || true
 
       - name: Upload Reports as Artifacts
         uses: actions/upload-artifact@v4
@@ -67,22 +77,26 @@ jobs:
             trivy-docker.html
             trivy-iac.json
             trivy-iac.html
-            
-      # ... (ขั้นตอน Send Slack Notification ยังคงเดิม)
+            trivy-combined-summary.md # 📌 เพิ่มไฟล์สรุป Markdown
+
       - name: Send Slack Notification
         if: always()
         run: |
           STATUS="✅ Security Scan Passed"
+          # ตรวจสอบว่ามีช่องโหว่ใน JSON outputs หรือไม่
           if grep -q '"VulnerabilityID":' trivy-fs.json trivy-docker.json trivy-iac.json; then
             STATUS="⚠️ Vulnerabilities Found! Check reports."
           fi
-
+          
+          # 💡 ปรับปรุง: ดึงเนื้อหาสรุปจากไฟล์ Markdown มาใส่ใน Slack Message (ไม่บังคับ แต่ดีขึ้น)
+          SUMMARY=$(cat trivy-combined-summary.md | head -n 5)
+          
           curl -X POST -H "Content-type: application/json" \
             --data "{
               \"text\": \"[Security Scan] $STATUS\",
               \"blocks\": [
                 {\"type\": \"section\", \"text\": {\"type\": \"mrkdwn\", \"text\": \"*Security Scan Result:* $STATUS\"}},
-                {\"type\": \"section\", \"text\": {\"type\": \"mrkdwn\", \"text\": \"_Artifacts available in GitHub Actions._\"}}
+                {\"type\": \"section\", \"text\": {\"type\": \"mrkdwn\", \"text\": \"_Artifacts available in GitHub Actions. | *Summary:*\\n$SUMMARY\"}}
               ]
             }" \
             $SLACK_WEBHOOK_URL
