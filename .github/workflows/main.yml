@@ -78,16 +78,20 @@ jobs:
       - name: Count Vulnerabilities
         id: count_vulns
         run: |
-          FS_COUNT=$(grep -c '"Severity": "CRITICAL"\|"Severity": "HIGH"' trivy-fs.json || echo "0")
-          DOCKER_COUNT=$(grep -c '"Severity": "CRITICAL"\|"Severity": "HIGH"' trivy-docker.json || echo "0")
-          IAC_COUNT=$(grep -c '"Severity": "CRITICAL"\|"Severity": "HIGH"' trivy-iac.json || echo "0")
-          TOTAL=$((FS_COUNT + DOCKER_COUNT + IAC_COUNT))
-          
-          echo "fs_count=$FS_COUNT" >> $GITHUB_OUTPUT
-          echo "docker_count=$DOCKER_COUNT" >> $GITHUB_OUTPUT
-          echo "iac_count=$IAC_COUNT" >> $GITHUB_OUTPUT
-          echo "total=$TOTAL" >> $GITHUB_OUTPUT
+          FS_COUNT=$(grep -c '"Severity": "\(CRITICAL\|HIGH\)"' trivy-fs.json 2>/dev/null || true)
+          DOCKER_COUNT=$(grep -c '"Severity": "\(CRITICAL\|HIGH\)"' trivy-docker.json 2>/dev/null || true)
+          IAC_COUNT=$(grep -c '"Severity": "\(CRITICAL\|HIGH\)"' trivy-iac.json 2>/dev/null || true)
 
+          FS_COUNT=${FS_COUNT:-0}
+          DOCKER_COUNT=${DOCKER_COUNT:-0}
+          IAC_COUNT=${IAC_COUNT:-0}
+
+          TOTAL=$((FS_COUNT + DOCKER_COUNT + IAC_COUNT))
+
+          echo "fs_count=$FS_COUNT" >> "$GITHUB_OUTPUT"
+          echo "docker_count=$DOCKER_COUNT" >> "$GITHUB_OUTPUT"
+          echo "iac_count=$IAC_COUNT" >> "$GITHUB_OUTPUT"
+          echo "total=$TOTAL" >> "$GITHUB_OUTPUT"
       # 7. 📤 Upload Reports
       - name: Upload Reports as Artifacts
         uses: actions/upload-artifact@v4
