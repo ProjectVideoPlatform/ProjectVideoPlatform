@@ -1,0 +1,79 @@
+version: '3.8'
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        NODE_VERSION: 18
+        APP_PORT: 3000
+      # Use BuildKit for better caching
+      cache_from:
+        - type=registry,ref=your-registry/app:cache
+    
+    image: your-registry/app:latest
+    
+    container_name: app-prod
+    
+    restart: unless-stopped
+    
+    ports:
+      - "3000:3000"
+    
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      # Add your env vars here
+      # DATABASE_URL: ${DATABASE_URL}
+      # REDIS_URL: ${REDIS_URL}
+    
+    # Security settings
+    security_opt:
+      - no-new-privileges:true
+    
+    # Drop all capabilities except what's needed
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE  # Only if binding to port < 1024
+    
+    # Read-only root filesystem (ยกเว้น directories ที่ต้องเขียน)
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /app/tmp
+      - /app/logs
+    
+    # Resource limits
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+        reservations:
+          cpus: '0.5'
+          memory: 256M
+    
+    # Health check
+    healthcheck:
+      test: ["CMD", "node", "healthcheck.js"]
+      interval: 30s
+      timeout: 5s
+      retries: 3 
+      start_period: 30s
+    
+    # Logging
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    
+    # Network
+    networks:
+      - app-network
+
+networks:
+  app-network:
+    driver: bridge

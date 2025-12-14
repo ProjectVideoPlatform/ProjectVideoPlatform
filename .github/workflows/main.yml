@@ -109,38 +109,38 @@ jobs:
             trivy-iac-table.txt
             trivy-combined-summary.md
 
-      # 8. 📢 Send Slack Notification
-      - name: Send Slack Notification
-        if: always()
-        run: |
-          TOTAL_VULNS="${{ steps.count_vulns.outputs.total }}"
-          FS_VULNS="${{ steps.count_vulns.outputs.fs_count }}"
-          DOCKER_VULNS="${{ steps.count_vulns.outputs.docker_count }}"
-          IAC_VULNS="${{ steps.count_vulns.outputs.iac_count }}"
+      # # 8. 📢 Send Slack Notification
+      # - name: Send Slack Notification
+      #   if: always()
+      #   run: |
+      #     TOTAL_VULNS="${{ steps.count_vulns.outputs.total }}"
+      #     FS_VULNS="${{ steps.count_vulns.outputs.fs_count }}"
+      #     DOCKER_VULNS="${{ steps.count_vulns.outputs.docker_count }}"
+      #     IAC_VULNS="${{ steps.count_vulns.outputs.iac_count }}"
           
-          if [ "$TOTAL_VULNS" -eq "0" ]; then
-            STATUS="✅ Security Scan Passed"
-            COLOR="good"
-          else
-            STATUS="⚠️ Vulnerabilities Found!"
-            COLOR="warning"
-          fi
+      #     if [ "$TOTAL_VULNS" -eq "0" ]; then
+      #       STATUS="✅ Security Scan Passed"
+      #       COLOR="good"
+      #     else
+      #       STATUS="⚠️ Vulnerabilities Found!"
+      #       COLOR="warning"
+      #     fi
           
-          # Get summary (first 20 lines)
-          SUMMARY=$(head -n 20 trivy-combined-summary.md | sed 's/"/\\"/g' | sed ':a;N;$!ba;s/\n/\\n/g')
+      #     # Get summary (first 20 lines)
+      #     SUMMARY=$(head -n 20 trivy-combined-summary.md | sed 's/"/\\"/g' | sed ':a;N;$!ba;s/\n/\\n/g')
           
-          curl -X POST -H "Content-type: application/json" \
-            --data "{
-              \"attachments\": [{
-                \"color\": \"$COLOR\",
-                \"title\": \"$STATUS\",
-                \"fields\": [
-                  {\"title\": \"Total Vulnerabilities\", \"value\": \"$TOTAL_VULNS\", \"short\": true},
-                  {\"title\": \"Filesystem\", \"value\": \"$FS_VULNS\", \"short\": true},
-                  {\"title\": \"Docker Image\", \"value\": \"$DOCKER_VULNS\", \"short\": true},
-                  {\"title\": \"IaC\", \"value\": \"$IAC_VULNS\", \"short\": true}
-                ],
-                \"text\": \"View detailed reports in GitHub Actions Artifacts\"
-              }]
-            }" \
-            $SLACK_WEBHOOK_URL
+      #     curl -X POST -H "Content-type: application/json" \
+      #       --data "{
+      #         \"attachments\": [{
+      #           \"color\": \"$COLOR\",
+      #           \"title\": \"$STATUS\",
+      #           \"fields\": [
+      #             {\"title\": \"Total Vulnerabilities\", \"value\": \"$TOTAL_VULNS\", \"short\": true},
+      #             {\"title\": \"Filesystem\", \"value\": \"$FS_VULNS\", \"short\": true},
+      #             {\"title\": \"Docker Image\", \"value\": \"$DOCKER_VULNS\", \"short\": true},
+      #             {\"title\": \"IaC\", \"value\": \"$IAC_VULNS\", \"short\": true}
+      #           ],
+      #           \"text\": \"View detailed reports in GitHub Actions Artifacts\"
+      #         }]
+      #       }" \
+      #       $SLACK_WEBHOOK_URL

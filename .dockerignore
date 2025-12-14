@@ -1,72 +1,107 @@
-# Dependencies
-node_modules
+# ========== RECOMMENDED .gitignore ==========
+
+# 🔒 Dependencies (DO NOT COMMIT)
+node_modules/
 npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnp/
+.pnp.js
+*.tsbuildinfo
 
-# Environment files
+# 🌍 Environment Variables (NEVER COMMIT!)
 .env
-.env.docker
+.env.*
+!.env.example      # Keep template
 .env.local
-.env.*.local
+.env.development
+.env.production
+.env.staging
+.env.docker
+.secret
+secrets/
 
-# Logs
-logs
+# 📊 Logs
+logs/
 *.log
+lerna-debug.log*
 
-# Runtime data
-pids
+# 💾 Runtime data
+pids/
 *.pid
 *.seed
 *.pid.lock
 
-# Coverage directory
-coverage
+# 📈 Coverage
+coverage/
+*.lcov
+.nyc_output/
 
-# Build outputs
-dist
-build
+# 🏗️ Build outputs
+dist/
+build/
+out/
+.next/
+.cache/
+.serverless/
+.fusebox/
+.dynamodb/
 
-# IDE
-.vscode
-.idea
+# 💻 IDEs
+.vscode/
+.idea/
 *.swp
 *.swo
+*~
+.project
+*.tmproj
+*.sublime-*
+.vs/
 
-# OS
+# 🖥️ OS files
 .DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
 Thumbs.db
 
-# Git
-.git
-.gitignore
+# 📦 Package managers
+# ⚠️ แต่ต้อง COMMIT lock files!
+# package-lock.json  <-- COMMIT นี้!
+# yarn.lock         <-- COMMIT นี้!
+# pnpm-lock.yaml    <-- COMMIT นี้!
+node_modules/
+.npm/
+.yarn/
+.yarn/cache
+.yarn/unplugged
+.yarn/build-state.yml
+.yarn/install-state.gz
+.pnpm-store/
 
-# Docker
-Dockerfile
-docker-compose*.yml
+# 🐳 Docker (เฉพาะที่ไม่ควร commit)
+docker-compose.override.yml
 .dockerignore
+.docker/
 
-# Documentation
-README.md
-docs/
+# 🧪 Testing
+.parcel-cache/
+.rollup.cache/
+.rpt2_cache/
+.rts2_cache_cjs/
+.rts2_cache_es/
+.rts2_cache_umd/
 
-# Development files
-*.test.js
-*.spec.js
-test/
-tests/
+# 🚀 Deployment
+.elasticbeanstalk/
+.ebextensions/
 
-# Backup files
-*.backup
-*.bak
-
-# Temporary files
-tmp/
-temp/
-
-# SSL certificates (should be mounted as volume)
-ssl/
-
-# Monitoring config
-monitoring/
-
-# Nginx config (should be mounted as volume)
-nginx/
+# 📁 Project specific (สำหรับ Toteja)
+uploads/           # User uploaded videos
+temp_uploads/      # Temporary uploads
+processed_videos/  # Processed videos
+transcoded/        # Transcoded video files
+ssl/               # SSL certificates (mount จาก volume)
+keys/              # Private keys
