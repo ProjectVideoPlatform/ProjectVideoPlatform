@@ -23,7 +23,7 @@ jobs:
 
       # ขั้นตอนนี้จะเปลี่ยนจาก sonarqube-scan-action เป็น sonarcloud-github-action
       - name: SonarCloud Scan
-        uses: SonarSource/sonarcloud-github-action@v1.9.1 # ใช้ Action สำหรับ SonarCloud
+        uses: SonarSource/sonarcloud-github-action@v2 # ใช้ Action สำหรับ SonarCloud
         env:
           # Token ที่ใช้สำหรับการตรวจสอบสิทธิ์กับ SonarCloud
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
