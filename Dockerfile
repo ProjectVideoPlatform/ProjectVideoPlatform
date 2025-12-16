@@ -19,7 +19,7 @@ COPY --from=deps /app/BackEnd/node_modules ./BackEnd/node_modules
 
 # Copy source code (เฉพาะที่จำเป็น)
 COPY . .
-COPY package.json ./
+COPY ./BackEnd/package.json ./
 
 # Build application
 RUN npm run build --if-present
