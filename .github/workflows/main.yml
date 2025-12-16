@@ -21,79 +21,46 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y wget apt-transport-https gnupg lsb-release
           wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | sudo apt-key add -
-          echo "deb https://aquasecurity.github.io/trivy-repo/deb $(lsb_release -sc) main" | sudo tee -a /etc/apt/sources.list.d/trivy.list
+          echo "deb https://aquasecurity.github.io/trivy-repo/deb $(lsb_release -sc) main" | sudo tee /etc/apt/sources.list.d/trivy.list
           sudo apt-get update
           sudo apt-get install -y trivy
-    
-      # 1. 🔍 Scan source code
-      - name: Scan source code (filesystem)
-        run: |
-          trivy fs --format json --output trivy-fs.json --severity HIGH,CRITICAL . || true
-          trivy fs --format table --output trivy-fs-table.txt --severity HIGH,CRITICAL . || true
 
-      # 2. 🐳 Scan Docker image
-      - name: Scan Docker image
-        run: |
-          docker build -t myapp:latest .
-          trivy image --format json --output trivy-docker.json --severity HIGH,CRITICAL myapp:latest || true
-          trivy image --format table --output trivy-docker-table.txt --severity HIGH,CRITICAL myapp:latest || true
+      # 1️⃣ Build Docker Image (ต้อง build ก่อน gate)
+      - name: Build Docker image
+        run: docker build -t myapp:latest .
 
-      # 3. ⚙️ Scan IaC
-      - name: Scan IaC (Terraform / K8s)
+      # 2️⃣ 🔥 Trivy QUALITY GATE (BLOCK CI)
+      - name: Trivy Quality Gate (CRITICAL only)
         run: |
-          trivy config --format json --output trivy-iac.json --severity HIGH,CRITICAL . || true
-          trivy config --format table --output trivy-iac-table.txt --severity HIGH,CRITICAL . || true
+          trivy fs . --severity CRITICAL --exit-code 1
+          trivy image myapp:latest --severity CRITICAL --exit-code 1
+          trivy config . --severity CRITICAL --exit-code 1
 
-      # 4. 📊 Generate HTML Reports
+      # 3️⃣ 📊 Trivy Reports (ไม่ block – เพื่อ audit)
+      - name: Scan source code (filesystem report)
+        run: |
+          trivy fs . --severity HIGH,CRITICAL --format json --output trivy-fs.json || true
+          trivy fs . --severity HIGH,CRITICAL --format table --output trivy-fs-table.txt || true
+
+      - name: Scan Docker image report
+        run: |
+          trivy image myapp:latest --severity HIGH,CRITICAL --format json --output trivy-docker.json || true
+          trivy image myapp:latest --severity HIGH,CRITICAL --format table --output trivy-docker-table.txt || true
+
+      - name: Scan IaC report
+        run: |
+          trivy config . --severity HIGH,CRITICAL --format json --output trivy-iac.json || true
+          trivy config . --severity HIGH,CRITICAL --format table --output trivy-iac-table.txt || true
+
+      # 4️⃣ Generate HTML Reports
       - name: Generate HTML Reports
         run: |
-          # Convert JSON to HTML using trivy convert
           trivy convert --format template --template "@contrib/html.tpl" --input trivy-fs.json --output trivy-fs.html || true
           trivy convert --format template --template "@contrib/html.tpl" --input trivy-docker.json --output trivy-docker.html || true
           trivy convert --format template --template "@contrib/html.tpl" --input trivy-iac.json --output trivy-iac.html || true
 
-      # 5. 📝 Create Combined Summary
-      - name: Create Combined Summary Report
-        run: |
-          cat > trivy-combined-summary.md << 'EOF'
-          # 🔒 Security Scan Summary
-          
-          ## 📁 Filesystem Scan
-          EOF
-          cat trivy-fs-table.txt >> trivy-combined-summary.md || echo "No filesystem vulnerabilities" >> trivy-combined-summary.md
-          
-          cat >> trivy-combined-summary.md << 'EOF'
-          
-          ## 🐳 Docker Image Scan
-          EOF
-          cat trivy-docker-table.txt >> trivy-combined-summary.md || echo "No Docker vulnerabilities" >> trivy-combined-summary.md
-          
-          cat >> trivy-combined-summary.md << 'EOF'
-          
-          ## ⚙️ IaC Scan
-          EOF
-          cat trivy-iac-table.txt >> trivy-combined-summary.md || echo "No IaC vulnerabilities" >> trivy-combined-summary.md
-
-      # 6. 📊 Count Vulnerabilities
-      - name: Count Vulnerabilities
-        id: count_vulns
-        run: |
-          FS_COUNT=$(grep -c '"Severity": "\(CRITICAL\|HIGH\)"' trivy-fs.json 2>/dev/null || true)
-          DOCKER_COUNT=$(grep -c '"Severity": "\(CRITICAL\|HIGH\)"' trivy-docker.json 2>/dev/null || true)
-          IAC_COUNT=$(grep -c '"Severity": "\(CRITICAL\|HIGH\)"' trivy-iac.json 2>/dev/null || true)
-
-          FS_COUNT=${FS_COUNT:-0}
-          DOCKER_COUNT=${DOCKER_COUNT:-0}
-          IAC_COUNT=${IAC_COUNT:-0}
-
-          TOTAL=$((FS_COUNT + DOCKER_COUNT + IAC_COUNT))
-
-          echo "fs_count=$FS_COUNT" >> "$GITHUB_OUTPUT"
-          echo "docker_count=$DOCKER_COUNT" >> "$GITHUB_OUTPUT"
-          echo "iac_count=$IAC_COUNT" >> "$GITHUB_OUTPUT"
-          echo "total=$TOTAL" >> "$GITHUB_OUTPUT"
-      # 7. 📤 Upload Reports
-      - name: Upload Reports as Artifacts
+      # 5️⃣ Upload Reports
+      - name: Upload Trivy Reports
         uses: actions/upload-artifact@v4
         with:
           name: trivy-reports
@@ -107,40 +74,3 @@ jobs:
             trivy-iac.json
             trivy-iac.html
             trivy-iac-table.txt
-            trivy-combined-summary.md
-
-      # # 8. 📢 Send Slack Notification
-      # - name: Send Slack Notification
-      #   if: always()
-      #   run: |
-      #     TOTAL_VULNS="${{ steps.count_vulns.outputs.total }}"
-      #     FS_VULNS="${{ steps.count_vulns.outputs.fs_count }}"
-      #     DOCKER_VULNS="${{ steps.count_vulns.outputs.docker_count }}"
-      #     IAC_VULNS="${{ steps.count_vulns.outputs.iac_count }}"
-          
-      #     if [ "$TOTAL_VULNS" -eq "0" ]; then
-      #       STATUS="✅ Security Scan Passed"
-      #       COLOR="good"
-      #     else
-      #       STATUS="⚠️ Vulnerabilities Found!"
-      #       COLOR="warning"
-      #     fi
-          
-      #     # Get summary (first 20 lines)
-      #     SUMMARY=$(head -n 20 trivy-combined-summary.md | sed 's/"/\\"/g' | sed ':a;N;$!ba;s/\n/\\n/g')
-          
-      #     curl -X POST -H "Content-type: application/json" \
-      #       --data "{
-      #         \"attachments\": [{
-      #           \"color\": \"$COLOR\",
-      #           \"title\": \"$STATUS\",
-      #           \"fields\": [
-      #             {\"title\": \"Total Vulnerabilities\", \"value\": \"$TOTAL_VULNS\", \"short\": true},
-      #             {\"title\": \"Filesystem\", \"value\": \"$FS_VULNS\", \"short\": true},
-      #             {\"title\": \"Docker Image\", \"value\": \"$DOCKER_VULNS\", \"short\": true},
-      #             {\"title\": \"IaC\", \"value\": \"$IAC_VULNS\", \"short\": true}
-      #           ],
-      #           \"text\": \"View detailed reports in GitHub Actions Artifacts\"
-      #         }]
-      #       }" \
-      #       $SLACK_WEBHOOK_URL
