@@ -3,8 +3,8 @@ name: SonarCloud Analysis
 on:
   push:
     branches:
+      - feather
       - main
-      - Feather
   pull_request:
     branches:
       - main # สำหรับการสแกน PR ที่พุ่งเข้าหา main
@@ -23,16 +23,10 @@ jobs:
 
       # ขั้นตอนนี้จะเปลี่ยนจาก sonarqube-scan-action เป็น sonarcloud-github-action
       - name: SonarCloud Scan
-        uses: SonarSource/sonarcloud-github-action@v2 # ใช้ Action สำหรับ SonarCloud
+        uses: SonarSource/sonarqube-scan-action@v6 # ใช้ Action สำหรับ SonarCloud
         env:
           # Token ที่ใช้สำหรับการตรวจสอบสิทธิ์กับ SonarCloud
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-        with:
-          # กำหนด Project Key และ Organization ให้ชัดเจน (แทนการใช้ secrets/env ทั่วไป)
-          # ควรแทนที่ค่าเหล่านี้ด้วยค่าจริงจาก sonar-project.properties ของคุณ
-          args: >
-            -Dsonar.projectKey=MANAPHAT56_ProjectVideoPlatform
-            -Dsonar.organization=manaphat56
 
       - name: Sonar Quality Gate (BLOCK if fail)
         uses: SonarSource/sonarqube-quality-gate-action@v1.1.0
