@@ -7,6 +7,7 @@ const { generateSignedCookies, setCookiesInResponse } = require('../services/clo
 const { config } = require('../config/aws');
 const Video = require('../models/Video');
 const Purchase = require('../models/Purchase');
+const escapeStringRegexp = require('escape-string-regexp');
   const https = require('https');
 const router = express.Router();
 router.get('/video-progress', authenticateToken, async (req, res) => {
@@ -50,60 +51,71 @@ router.post('/video-progress', authenticateToken, async (req, res) => {
 // Get video list (public videos or user's purchased videos)
 router.get('/', authenticateToken, async (req, res) => {
   try {
-    const { page = 1, limit = 10, search, category } = req.query;
+    let { page = 1, limit = 10, search, category } = req.query;
+
+    // ---- Validation (สำคัญ) ----
+    page = Math.max(parseInt(page), 1);
+    limit = Math.min(Math.max(parseInt(limit), 1), 50);
+
     const skip = (page - 1) * limit;
-    
-    let query = { 
+
+    let query = {
       uploadStatus: 'completed',
-      isActive: true 
+      isActive: true
     };
-    
+
     if (search) {
+      const safeSearch = escapeStringRegexp(search);
+
+      const searchRegex = new RegExp(safeSearch, 'i');
+
       query.$or = [
-        { title: { $regex: search, $options: 'i' } },
-        { description: { $regex: search, $options: 'i' } },
-        { tags: { $in: [new RegExp(search, 'i')] } }
+        { title: searchRegex },
+        { description: searchRegex },
+        { tags: { $in: [searchRegex] } }
       ];
     }
-    
+
     if (category) {
+      // allowlist แบบง่าย
       query.tags = { $in: [category] };
     }
-    
+
     const videos = await Video.find(query)
       .select('id title description price duration thumbnailPath tags createdAt')
       .sort({ createdAt: -1 })
       .skip(skip)
-      .limit(parseInt(limit));
-    
+      .limit(limit);
+
     const total = await Video.countDocuments(query);
-    
-    // Check which videos user has purchased
+
     const purchasedVideoIds = await Purchase.find({
       userId: req.user._id,
       status: 'completed'
     }).distinct('videoId');
-    
+
     const videosWithPurchaseStatus = videos.map(video => ({
       ...video.toObject(),
-      uploadStatus: "completed", // เพิ่มตรงนี้
+      uploadStatus: 'completed',
       purchased: purchasedVideoIds.some(id => id.equals(video._id)),
-      canPlay: req.user.role === 'admin' || purchasedVideoIds.some(id => id.equals(video._id)),
+      canPlay:
+        req.user.role === 'admin' ||
+        purchasedVideoIds.some(id => id.equals(video._id)),
       thumbnailPath: video.thumbnailPath
     }));
-    
+
     res.json({
       videos: videosWithPurchaseStatus,
       pagination: {
-        page: parseInt(page),
-        limit: parseInt(limit),
+        page,
+        limit,
         total,
         pages: Math.ceil(total / limit)
       }
     });
   } catch (error) {
     console.error('Get videos error:', error);
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
