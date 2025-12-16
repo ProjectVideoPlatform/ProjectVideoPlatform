@@ -4,7 +4,8 @@ on:
     branches:
       - main
   pull_request:
-    types: [opened, synchronize, reopened]
+      branches:
+       - main # สำหรับการสแกน PR ที่พุ่งเข้าหา main
 jobs:
   sonarqube:
     name: SonarQube
