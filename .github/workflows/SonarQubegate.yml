@@ -3,7 +3,7 @@ name: SonarCloud Analysis
 on:
   push:
     branches:
-      - feather
+      - Feather
       - main
   pull_request:
     branches:
