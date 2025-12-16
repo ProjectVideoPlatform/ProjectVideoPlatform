@@ -33,9 +33,6 @@ jobs:
           args: >
             -Dsonar.projectKey=MANAPHAT56_ProjectVideoPlatform
             -Dsonar.organization=manaphat56
-            
-            # (ทางเลือก) หากต้องการส่งค่าอื่นๆ จาก sonar-project.properties เข้าไปตรงๆ ก็ทำได้
-            # เช่น -Dsonar.sources=BackEnd,Frontvideo1
 
       - name: Sonar Quality Gate (BLOCK if fail)
         uses: SonarSource/sonarqube-quality-gate-action@v1.1.0
