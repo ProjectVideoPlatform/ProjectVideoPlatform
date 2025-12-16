@@ -1,7 +1,8 @@
 # ====== STAGE 1: Dependencies ======
 FROM node:18-alpine AS deps
 WORKDIR /app
-COPY package.json package-lock.json ./
+
+COPY BackEnd/package.json BackEnd/package-lock.json ./
 RUN npm ci --no-audit --prefer-offline
 
 # ====== STAGE 2: Builder ======
@@ -9,7 +10,7 @@ FROM node:18-alpine AS builder
 WORKDIR /app
 
 COPY --from=deps /app/node_modules ./node_modules
-COPY . .
+COPY BackEnd/ ./
 
 RUN npm run build --if-present
 RUN npm prune --omit=dev
@@ -28,7 +29,7 @@ WORKDIR /app
 COPY --from=builder --chown=appuser:nodejs /app/node_modules ./node_modules
 COPY --from=builder --chown=appuser:nodejs /app/package.json ./
 COPY --from=builder --chown=appuser:nodejs /app/dist ./dist
-COPY --chown=appuser:nodejs healthcheck.js ./
+COPY --from=builder --chown=appuser:nodejs /app/healthcheck.js ./healthcheck.js
 
 USER appuser
 
