@@ -15,7 +15,7 @@ FROM node:18-alpine AS builder
 WORKDIR /app
 
 # Copy dependencies from deps stage
-COPY --from=deps /app/node_modules ./node_modules
+COPY --from=deps /app/BackEnd/node_modules ./BackEnd/node_modules
 
 # Copy source code (เฉพาะที่จำเป็น)
 COPY . .
@@ -40,13 +40,11 @@ RUN addgroup -g 1001 -S nodejs && \
 WORKDIR /app
 
 # Copy from builder
-COPY --from=builder --chown=appuser:nodejs /app/node_modules ./node_modules
-COPY --from=builder --chown=appuser:nodejs /app/package.json ./
-COPY --from=builder --chown=appuser:nodejs /app/dist ./dist
-COPY --from=builder --chown=appuser:nodejs /app/public ./public
+COPY --from=builder --chown=appuser:nodejs /app/BackEnd/node_modules ./node_modules
+COPY --from=builder --chown=appuser:nodejs /app/BackEnd/package.json ./
+COPY --from=builder --chown=appuser:nodejs /app/BackEnd/dist ./dist
 
-# Copy source files if needed (สำหรับบาง framework)
-COPY --from=builder --chown=appuser:nodejs /app/src ./src
+
 
 # Copy health check
 COPY --chown=appuser:nodejs healthcheck.js ./
