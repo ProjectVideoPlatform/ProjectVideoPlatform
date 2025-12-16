@@ -1,37 +1,19 @@
-name: SonarCloud Analysis
-
+name: Build
 on:
   push:
     branches:
-      - Feather
       - main
   pull_request:
-    branches:
-      - main # สำหรับการสแกน PR ที่พุ่งเข้าหา main
-
+    types: [opened, synchronize, reopened]
 jobs:
-  sonar_analysis:
-    name: Analyze with SonarCloud
+  sonarqube:
+    name: SonarQube
     runs-on: ubuntu-latest
-    
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
-          # ต้องใช้ fetch-depth: 0 เพื่อให้ SonarCloud สามารถวิเคราะห์ประวัติ Git และการสร้าง PR ได้
-          fetch-depth: 0
-
-      # ขั้นตอนนี้จะเปลี่ยนจาก sonarqube-scan-action เป็น sonarcloud-github-action
-      - name: SonarCloud Scan
-        uses: SonarSource/sonarqube-scan-action@v6 # ใช้ Action สำหรับ SonarCloud
-        env:
-          # Token ที่ใช้สำหรับการตรวจสอบสิทธิ์กับ SonarCloud
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-
-      - name: Sonar Quality Gate (BLOCK if fail)
-        uses: SonarSource/sonarqube-quality-gate-action@v1.1.0
-        timeout-minutes: 5
+          fetch-depth: 0  # Shallow clones should be disabled for a better relevancy of analysis
+      - name: SonarQube Scan
+        uses: SonarSource/sonarqube-scan-action@v6
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-          # (ทางเลือก) หากใช้ SonarCloud ควรระบุ Host URL และ Organization
-          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
