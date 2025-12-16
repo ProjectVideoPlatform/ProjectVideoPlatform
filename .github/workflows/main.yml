@@ -2,7 +2,9 @@ name: Full Security Scan
 
 on:
   push:
-    branches: [ main ]
+    branches: 
+       - feather
+       - main
   pull_request:
     branches: [ main ]
 

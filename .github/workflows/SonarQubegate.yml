@@ -5,6 +5,7 @@ on:
   push:
     branches:
     - main
+    - feather
   pull_request:
     branches:
     - main
