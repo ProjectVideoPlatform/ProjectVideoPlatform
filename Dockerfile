@@ -18,8 +18,7 @@ WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 
 # Copy source code (เฉพาะที่จำเป็น)
-COPY src/ ./src/
-COPY public/ ./public/
+COPY . .
 COPY package.json ./
 
 # Build application

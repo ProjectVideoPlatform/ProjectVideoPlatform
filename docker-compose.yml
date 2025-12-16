@@ -27,7 +27,7 @@ services:
       - "27017:27017"
     volumes:
       - mongodb_data:/data/db
-      - ./mongo-init:/docker-entrypoint-initdb.d
+      - ./BackEnd/mongo-init:/docker-entrypoint-initdb.d
     networks:
       - secure-video-network
     healthcheck:
@@ -55,27 +55,27 @@ services:
       retries: 3
 
   # Vault - production-ready
-  vault:
-    image: vault:1.13.3
-    container_name: secure-video-vault
-    restart: unless-stopped
-    ports:
-      - "8200:8200"
-    environment:
-      VAULT_ADDR: https://0.0.0.0:8200
-    cap_add:
-      - IPC_LOCK
-    networks:
-      - secure-video-network
-    volumes:
-      - vault_data:/vault/data
-      - ./vault/config:/vault/config:ro
-      - ./vault/certs:/vault/certs:ro
-    command: "vault server -config=/vault/config/server.hcl"
-    healthcheck:
-      test: ["CMD", "vault", "status", "-address=https://0.0.0.0:8200"]
-      interval: 10s
-      retries: 5
+  # vault:
+  #   image: vault:1.13.3
+  #   container_name: secure-video-vault
+  #   restart: unless-stopped
+  #   ports:
+  #     - "8200:8200"
+  #   environment:
+  #     VAULT_ADDR: https://0.0.0.0:8200
+  #   cap_add:
+  #     - IPC_LOCK
+  #   networks:
+  #     - secure-video-network
+  #   volumes:
+  #     - vault_data:/vault/data
+  #     - ./vault/config:/vault/config:ro
+  #     - ./vault/certs:/vault/certs:ro
+  #   command: "vault server -config=/vault/config/server.hcl"
+  #   healthcheck:
+  #     test: ["CMD", "vault", "status", "-address=https://0.0.0.0:8200"]
+  #     interval: 10s
+  #     retries: 5
 
   # Node.js Application
   app:
@@ -119,9 +119,9 @@ services:
       CLOUDFRONT_KEY_PAIR_ID: ${CLOUDFRONT_KEY_PAIR_ID}
       CLOUDFRONT_PRIVATE_KEY_PATH: /app/keys/cloudfront-private-key.pem
     volumes:
-      - ./keys:/app/keys:ro
+      - ./BackEnd/keys:/app/keys:ro
       - app_logs:/app/logs
-      - ./vault/certs:/app/vault-certs:ro
+      - ./BackEnd/vault/certs:/app/vault-certs:ro
     networks:
       - secure-video-network
     depends_on:
@@ -145,9 +145,9 @@ services:
       - "80:80"
       - "443:443"
     volumes:
-      - ./nginx.conf:/etc/nginx/nginx.conf:ro
-      - ./nginx/conf.d:/etc/nginx/conf.d:ro
-      - ./ssl:/etc/nginx/ssl:ro
+      - ./BackEnd/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./BackEnd/nginx/conf.d:/etc/nginx/conf.d:ro
+      - ./BackEnd/ssl:/etc/nginx/ssl:ro
       - nginx_logs:/var/log/nginx
     networks:
       - secure-video-network
@@ -201,24 +201,24 @@ services:
     profiles:
       - monitoring
 
-  grafana:
-    image: grafana/grafana:10.1.0
-    container_name: secure-video-grafana
-    restart: unless-stopped
-    ports:
-      - "3001:3000"
-    environment:
-      GF_SECURITY_ADMIN_PASSWORD: grafana123
-    volumes:
-      - grafana_data:/var/lib/grafana
-      - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
-      - ./monitoring/grafana/datasources:/etc/grafana/provisioning/datasources:ro
-    networks:
-      - secure-video-network
-    depends_on:
-      - prometheus
-    profiles:
-      - monitoring
+  # grafana:
+  #   image: grafana/grafana:10.1.0
+  #   container_name: secure-video-grafana
+  #   restart: unless-stopped
+  #   ports:
+  #     - "3001:3000"
+  #   environment:
+  #     GF_SECURITY_ADMIN_PASSWORD: grafana123
+  #   volumes:
+  #     - grafana_data:/var/lib/grafana
+  #     - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+  #     - ./monitoring/grafana/datasources:/etc/grafana/provisioning/datasources:ro
+  #   networks:
+  #     - secure-video-network
+  #   depends_on:
+  #     - prometheus
+  #   profiles:
+  #     - monitoring
 
 networks:
   secure-video-network:
@@ -233,9 +233,9 @@ volumes:
     driver: local
   nginx_logs:
     driver: local
-  vault_data:
-    driver: local
+  # vault_data:
+  #   driver: local
   prometheus_data:
     driver: local
-  grafana_data:
-    driver: local
+  # grafana_data:
+  #   driver: local
