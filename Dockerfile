@@ -1,18 +1,18 @@
 # ====== STAGE 1: Dependencies ======
 FROM node:18-alpine AS deps
-WORKDIR /app
+WORKDIR /app/BackEnd
 
 COPY BackEnd/package.json BackEnd/package-lock.json ./
 RUN npm ci --no-audit --prefer-offline
 
 # ====== STAGE 2: Builder ======
 FROM node:18-alpine AS builder
-WORKDIR /app
+WORKDIR /app/BackEnd
 
-COPY --from=deps /app/node_modules ./node_modules
+COPY --from=deps /app/BackEnd/node_modules ./node_modules
 COPY BackEnd/ ./
 
-RUN npm run build --if-present
+RUN npm run build
 RUN npm prune --omit=dev
 
 # ====== STAGE 3: Runner ======
@@ -26,10 +26,10 @@ RUN apk add --no-cache tini \
 
 WORKDIR /app
 
-COPY --from=builder --chown=appuser:nodejs /app/node_modules ./node_modules
-COPY --from=builder --chown=appuser:nodejs /app/package.json ./
-COPY --from=builder --chown=appuser:nodejs /app/dist ./dist
-COPY --from=builder --chown=appuser:nodejs /app/healthcheck.js ./healthcheck.js
+COPY --from=builder --chown=appuser:nodejs /app/BackEnd/node_modules ./node_modules
+COPY --from=builder --chown=appuser:nodejs /app/BackEnd/package.json ./
+COPY --from=builder --chown=appuser:nodejs /app/BackEnd/dist ./dist
+COPY --from=builder --chown=appuser:nodejs /app/BackEnd/healthcheck.js ./healthcheck.js
 
 USER appuser
 
