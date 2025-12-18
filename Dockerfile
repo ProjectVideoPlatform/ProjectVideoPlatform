@@ -4,7 +4,7 @@ FROM node:18-alpine AS deps
 WORKDIR /app
 
 # Copy package files only
-COPY package.json package-lock.json ./
+COPY /BackEnd/package.json /BackEnd/package-lock.json ./
 
 # Install ALL dependencies (รวม devDependencies สำหรับ build)
 RUN npm ci --no-audit --prefer-offline
