@@ -1,27 +1,27 @@
-name: Build and Analyze
+# name: Build and Analyze
 
-on:
-  push:
-    branches: [ main ]
-  pull_request:
-    branches: [ main ]
+# on:
+#   push:
+#     branches: [ main ]
+#   pull_request:
+#     branches: [ main ]
 
-jobs:
-  sonarcloud:
-    name: SonarCloud Scan
-    runs-on: ubuntu-latest
+# jobs:
+#   sonarcloud:
+#     name: SonarCloud Scan
+#     runs-on: ubuntu-latest
 
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
+#     steps:
+#       - uses: actions/checkout@v4
+#         with:
+#           fetch-depth: 0
 
-      - name: SonarCloud Scan
-        uses: SonarSource/sonarcloud-github-action@v2
-        env:
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-        with:
-          args: >
-            -Dsonar.projectKey=MANAPHAT56_ProjectVideoPlatform
-            -Dsonar.organization=manaphat56
-            -Dsonar.sources=BackEnd
+#       - name: SonarCloud Scan
+#         uses: SonarSource/sonarcloud-github-action@v2
+#         env:
+#           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+#         with:
+#           args: >
+#             -Dsonar.projectKey=MANAPHAT56_ProjectVideoPlatform
+#             -Dsonar.organization=manaphat56
+#             -Dsonar.sources=BackEnd
