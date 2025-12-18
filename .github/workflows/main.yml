@@ -2,7 +2,9 @@ name: Security Scan (Fixed)
 
 on:
   push:
-    branches: [main, Feather]
+    branches: 
+      - main 
+      - Feather
   pull_request:
     branches: [main]
 
