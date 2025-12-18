@@ -28,7 +28,7 @@ jobs:
         with:
           # การใส่ args ตรงนี้จะช่วยลดปัญหาหาโปรเจกต์ไม่เจอ
           args: >
-            -Dsonar.projectKey=MANAPHAT56_ProjectVideoPlatform_f7e1270c-a3a8-4b85-8850-c5d270bb48d1
+            -Dsonar.projectKey=MANAPHAT56_ProjectVideoPlatform
             -Dsonar.organization=manaphat56
             -Dsonar.sources=BackEnd
             -Dsonar.javascript.lcov.reportPaths=BackEnd/coverage/lcov.info
