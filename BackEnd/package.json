@@ -62,6 +62,13 @@
     "uuid": "^9.0.0",
     "ws": "^8.18.3"
   },
+  "overrides": {
+    "glob": "^11.1.0",
+    "cross-spawn": "^7.0.5",
+    "test-exclude": {
+       "glob": "^11.1.0"
+    }
+  },
   "devDependencies": {
     "jest": "^30.2.0",
     "nodemon": "^3.0.1",
