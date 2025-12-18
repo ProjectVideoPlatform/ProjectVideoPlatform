@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "description": "Secure video streaming platform with AWS integration",
   "main": "server.js",
- {
+
   "scripts": {
     "test": "jest",
     "test:coverage": "jest --coverage --coverageReporters=lcov text",
@@ -27,7 +27,6 @@
       "text",
       "html"
     ]
-  }
 },
   "keywords": [
     "video",
