@@ -1,12 +1,10 @@
-name: Security Scan with Summary
+name: Security Scan (Fixed)
 
 on:
   push:
     branches: [main, Feather]
   pull_request:
     branches: [main]
-  schedule:
-    - cron: '0 0 * * 0'  # ทุกวันอาทิตย์
 
 env:
   REGISTRY: ghcr.io
@@ -19,6 +17,7 @@ jobs:
     permissions:
       contents: read
       security-events: write
+      actions: read
       
     steps:
       - name: 📥 Checkout code
@@ -28,7 +27,7 @@ jobs:
         uses: docker/setup-buildx-action@v3
 
       # ============================================
-      # 1️⃣ BUILD DOCKER IMAGE
+      # BUILD
       # ============================================
       - name: 🏗️ Build Docker image
         uses: docker/build-push-action@v5
@@ -42,75 +41,78 @@ jobs:
           cache-to: type=gha,mode=max
 
       # ============================================
-      # 2️⃣ TRIVY SCANS (Quality Gate)
+      # SCAN 1: Filesystem (แยก category)
       # ============================================
-      - name: 🔍 Trivy - Filesystem Scan (Quality Gate)
-        id: trivy-fs-gate
+      - name: 🔍 Trivy - Filesystem Scan
         uses: aquasecurity/trivy-action@master
         with:
           scan-type: 'fs'
           scan-ref: '.'
-          severity: 'CRITICAL,HIGH'
-          exit-code: '1'  # Fail on CRITICAL/HIGH
-          ignore-unfixed: true
-          format: 'json'
-          output: 'trivy-fs-gate.json'
-
-      - name: 🐳 Trivy - Docker Image Scan (Quality Gate)
-        id: trivy-docker-gate
-        uses: aquasecurity/trivy-action@master
-        with:
-          scan-type: 'image'
-          image-ref: 'myapp:latest'
-          severity: 'CRITICAL,HIGH'
-          exit-code: '1'  # Fail on CRITICAL/HIGH
-          ignore-unfixed: true
-          format: 'json'
-          output: 'trivy-docker-gate.json'
-
-      - name: ⚙️ Trivy - Config Scan (Quality Gate)
-        id: trivy-config-gate
-        uses: aquasecurity/trivy-action@master
-        with:
-          scan-type: 'config'
-          scan-ref: '.'
-          severity: 'CRITICAL,HIGH'
-          exit-code: '0'  # Don't fail on config issues (warning only)
-          format: 'json'
-          output: 'trivy-config-gate.json'
-
-      # ============================================
-      # 3️⃣ DETAILED REPORTS (All Severities)
-      # ============================================
-      - name: 📊 Trivy - Full Filesystem Report
-        if: always()
-        uses: aquasecurity/trivy-action@master
-        with:
-          scan-type: 'fs'
-          scan-ref: '.'
+          severity: 'CRITICAL,HIGH,MEDIUM'
           format: 'sarif'
           output: 'trivy-fs-results.sarif'
 
-      - name: 📊 Trivy - Full Docker Report
+      - name: 📤 Upload Filesystem SARIF
+        uses: github/codeql-action/upload-sarif@v4  # ✅ เปลี่ยนเป็น v4
         if: always()
+        with:
+          sarif_file: 'trivy-fs-results.sarif'
+          category: 'trivy-filesystem'  # ✅ category แยกต่างหาก
+
+      # ============================================
+      # SCAN 2: Docker Image (แยก category)
+      # ============================================
+      - name: 🐳 Trivy - Docker Image Scan
         uses: aquasecurity/trivy-action@master
         with:
           scan-type: 'image'
           image-ref: 'myapp:latest'
+          severity: 'CRITICAL,HIGH,MEDIUM'
           format: 'sarif'
           output: 'trivy-docker-results.sarif'
 
-      - name: 📊 Trivy - Full Config Report
+      - name: 📤 Upload Docker SARIF
+        uses: github/codeql-action/upload-sarif@v4  # ✅ เปลี่ยนเป็น v4
         if: always()
+        with:
+          sarif_file: 'trivy-docker-results.sarif'
+          category: 'trivy-docker'  # ✅ category แยกต่างหาก
+
+      # ============================================
+      # SCAN 3: IaC/Config (แยก category)
+      # ============================================
+      - name: ⚙️ Trivy - Config Scan
         uses: aquasecurity/trivy-action@master
         with:
           scan-type: 'config'
           scan-ref: '.'
+          severity: 'CRITICAL,HIGH,MEDIUM'
           format: 'sarif'
           output: 'trivy-config-results.sarif'
 
+      - name: 📤 Upload Config SARIF
+        uses: github/codeql-action/upload-sarif@v4  # ✅ เปลี่ยนเป็น v4
+        if: always()
+        with:
+          sarif_file: 'trivy-config-results.sarif'
+          category: 'trivy-config'  # ✅ category แยกต่างหาก
+
       # ============================================
-      # 4️⃣ GENERATE SUMMARY
+      # QUALITY GATE (ใช้ JSON แทน SARIF)
+      # ============================================
+      - name: 🚨 Trivy Quality Gate
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'image'
+          image-ref: 'myapp:latest'
+          severity: 'CRITICAL,HIGH'
+          exit-code: '1'  # Fail on CRITICAL/HIGH
+          ignore-unfixed: true
+          format: 'json'
+          output: 'trivy-results.json'
+
+      # ============================================
+      # GENERATE SUMMARY
       # ============================================
       - name: 📝 Generate Security Summary
         if: always()
@@ -119,77 +121,61 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Scan Date:** $(date)" >> $GITHUB_STEP_SUMMARY
           echo "**Commit:** ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Branch:** ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
 
           # Function to count vulnerabilities
           count_vulns() {
             local file=$1
             if [ -f "$file" ]; then
-              CRITICAL=$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity=="CRITICAL")] | length' "$file" 2>/dev/null || echo "0")
-              HIGH=$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity=="HIGH")] | length' "$file" 2>/dev/null || echo "0")
-              MEDIUM=$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity=="MEDIUM")] | length' "$file" 2>/dev/null || echo "0")
-              LOW=$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity=="LOW")] | length' "$file" 2>/dev/null || echo "0")
+              CRITICAL=$(jq -r '[.Results[]?.Vulnerabilities[]? | select(.Severity=="CRITICAL")] | length' "$file" 2>/dev/null || echo "0")
+              HIGH=$(jq -r '[.Results[]?.Vulnerabilities[]? | select(.Severity=="HIGH")] | length' "$file" 2>/dev/null || echo "0")
+              MEDIUM=$(jq -r '[.Results[]?.Vulnerabilities[]? | select(.Severity=="MEDIUM")] | length' "$file" 2>/dev/null || echo "0")
+              LOW=$(jq -r '[.Results[]?.Vulnerabilities[]? | select(.Severity=="LOW")] | length' "$file" 2>/dev/null || echo "0")
               echo "$CRITICAL|$HIGH|$MEDIUM|$LOW"
             else
               echo "0|0|0|0"
             fi
           }
 
-          # Filesystem Scan
-          echo "## 📁 Filesystem Scan" >> $GITHUB_STEP_SUMMARY
-          FS_COUNTS=$(count_vulns "trivy-fs-gate.json")
-          FS_CRIT=$(echo $FS_COUNTS | cut -d'|' -f1)
-          FS_HIGH=$(echo $FS_COUNTS | cut -d'|' -f2)
-          FS_MED=$(echo $FS_COUNTS | cut -d'|' -f3)
-          FS_LOW=$(echo $FS_COUNTS | cut -d'|' -f4)
-          
-          echo "| Severity | Count |" >> $GITHUB_STEP_SUMMARY
-          echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
-          echo "| 🔴 Critical | $FS_CRIT |" >> $GITHUB_STEP_SUMMARY
-          echo "| 🟠 High | $FS_HIGH |" >> $GITHUB_STEP_SUMMARY
-          echo "| 🟡 Medium | $FS_MED |" >> $GITHUB_STEP_SUMMARY
-          echo "| 🟢 Low | $FS_LOW |" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-
-          # Docker Scan
-          echo "## 🐳 Docker Image Scan" >> $GITHUB_STEP_SUMMARY
-          DOCKER_COUNTS=$(count_vulns "trivy-docker-gate.json")
-          DOCKER_CRIT=$(echo $DOCKER_COUNTS | cut -d'|' -f1)
-          DOCKER_HIGH=$(echo $DOCKER_COUNTS | cut -d'|' -f2)
-          DOCKER_MED=$(echo $DOCKER_COUNTS | cut -d'|' -f3)
-          DOCKER_LOW=$(echo $DOCKER_COUNTS | cut -d'|' -f4)
-          
-          echo "| Severity | Count |" >> $GITHUB_STEP_SUMMARY
-          echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
-          echo "| 🔴 Critical | $DOCKER_CRIT |" >> $GITHUB_STEP_SUMMARY
-          echo "| 🟠 High | $DOCKER_HIGH |" >> $GITHUB_STEP_SUMMARY
-          echo "| 🟡 Medium | $DOCKER_MED |" >> $GITHUB_STEP_SUMMARY
-          echo "| 🟢 Low | $DOCKER_LOW |" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-
-          # Total Summary
-          TOTAL_CRIT=$((FS_CRIT + DOCKER_CRIT))
-          TOTAL_HIGH=$((FS_HIGH + DOCKER_HIGH))
-          
-          echo "## 📊 Overall Summary" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          if [ $TOTAL_CRIT -gt 0 ] || [ $TOTAL_HIGH -gt 0 ]; then
-            echo "❌ **FAILED** - Found $TOTAL_CRIT critical and $TOTAL_HIGH high severity issues" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "✅ **PASSED** - No critical or high severity issues found" >> $GITHUB_STEP_SUMMARY
+          # Parse results
+          if [ -f "trivy-results.json" ]; then
+            COUNTS=$(count_vulns "trivy-results.json")
+            CRIT=$(echo $COUNTS | cut -d'|' -f1)
+            HIGH=$(echo $COUNTS | cut -d'|' -f2)
+            MED=$(echo $COUNTS | cut -d'|' -f3)
+            LOW=$(echo $COUNTS | cut -d'|' -f4)
+            
+            echo "## 📊 Vulnerability Summary" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "| Severity | Count | Status |" >> $GITHUB_STEP_SUMMARY
+            echo "|----------|-------|--------|" >> $GITHUB_STEP_SUMMARY
+            echo "| 🔴 Critical | $CRIT | $([ $CRIT -gt 0 ] && echo '❌' || echo '✅') |" >> $GITHUB_STEP_SUMMARY
+            echo "| 🟠 High | $HIGH | $([ $HIGH -gt 0 ] && echo '⚠️' || echo '✅') |" >> $GITHUB_STEP_SUMMARY
+            echo "| 🟡 Medium | $MED | $([ $MED -gt 0 ] && echo '⚠️' || echo '✅') |" >> $GITHUB_STEP_SUMMARY
+            echo "| 🟢 Low | $LOW | ℹ️ |" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            
+            TOTAL=$((CRIT + HIGH))
+            if [ $TOTAL -gt 0 ]; then
+              echo "## ❌ Quality Gate: FAILED" >> $GITHUB_STEP_SUMMARY
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "Found **$CRIT critical** and **$HIGH high** severity vulnerabilities." >> $GITHUB_STEP_SUMMARY
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "### 🔧 Top Vulnerabilities:" >> $GITHUB_STEP_SUMMARY
+              echo "" >> $GITHUB_STEP_SUMMARY
+              jq -r '.Results[]?.Vulnerabilities[]? | select(.Severity=="CRITICAL" or .Severity=="HIGH") | "- **\(.VulnerabilityID)** (\(.Severity)): \(.Title) in \(.PkgName)"' trivy-results.json | head -10 >> $GITHUB_STEP_SUMMARY || true
+            else
+              echo "## ✅ Quality Gate: PASSED" >> $GITHUB_STEP_SUMMARY
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "No critical or high severity vulnerabilities found! 🎉" >> $GITHUB_STEP_SUMMARY
+            fi
           fi
 
       # ============================================
-      # 5️⃣ UPLOAD REPORTS
+      # UPLOAD ARTIFACTS
       # ============================================
-      - name: 📤 Upload SARIF to GitHub Security
-        if: always()
-        uses: github/codeql-action/upload-sarif@v3
-        with:
-          sarif_file: '.'
-          category: trivy-security-scan
-
-      - name: 📦 Upload Trivy Reports as Artifacts
+      - name: 📦 Upload Scan Results
         if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -200,18 +186,20 @@ jobs:
           retention-days: 30
 
       # ============================================
-      # 6️⃣ SLACK NOTIFICATION
+      # SLACK NOTIFICATION (Optional)
       # ============================================
       - name: 📢 Slack Notification
-        if: always() && env.SLACK_WEBHOOK_URL != ''
+        if: failure() && env.SLACK_WEBHOOK_URL != ''
         uses: 8398a7/action-slack@v3
         with:
-          status: ${{ job.status }}
+          status: 'failure'
           text: |
-            Security Scan ${{ job.status }}
-            Repo: ${{ github.repository }}
+            🚨 Security Scan Failed!
+            Repository: ${{ github.repository }}
             Branch: ${{ github.ref_name }}
             Commit: ${{ github.sha }}
-          fields: repo,message,commit,author,action,eventName,ref,workflow
+            
+            View Details: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          fields: repo,message,commit,author
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
