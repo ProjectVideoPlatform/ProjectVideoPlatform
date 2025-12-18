@@ -84,7 +84,7 @@ services:
   #     interval: 10s
   #     retries: 5
 
-  # Node.js Application้ะกด้กพะ้
+  # Node.js Application้ะกด้กพะ้ืเะ่ัะ่
   app:
     build:
       context: .
