@@ -159,7 +159,7 @@ services:
       timeout: 10s
       retries: 3
 
-  # Mongo Express (dev only)
+  # Mongo Express (dev only)ัรัรัะึรรั
   mongo-express:
     image: mongo-express:1.0
     container_name: secure-video-mongo-express
