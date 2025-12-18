@@ -203,3 +203,88 @@ jobs:
           fields: repo,message,commit,author
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+# ============================================
+      # GENERATE SUMMARY
+      # ============================================
+      - name: 📝 Generate Security Summary
+        if: always()
+        run: |
+          echo "# 🔒 Security Scan Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Scan Date:** $(date)" >> $GITHUB_STEP_SUMMARY
+          echo "**Commit:** ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Branch:** ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Function to count vulnerabilities
+          count_vulns() {
+            local file=$1
+            if [ -f "$file" ]; then
+              CRITICAL=$(jq -r '[.Results[]?.Vulnerabilities[]? | select(.Severity=="CRITICAL")] | length' "$file" 2>/dev/null || echo "0")
+              HIGH=$(jq -r '[.Results[]?.Vulnerabilities[]? | select(.Severity=="HIGH")] | length' "$file" 2>/dev/null || echo "0")
+              MEDIUM=$(jq -r '[.Results[]?.Vulnerabilities[]? | select(.Severity=="MEDIUM")] | length' "$file" 2>/dev/null || echo "0")
+              LOW=$(jq -r '[.Results[]?.Vulnerabilities[]? | select(.Severity=="LOW")] | length' "$file" 2>/dev/null || echo "0")
+              echo "$CRITICAL|$HIGH|$MEDIUM|$LOW"
+            else
+              echo "0|0|0|0"
+            fi
+          }
+
+          # Parse results
+          if [ -f "trivy-results.json" ]; then
+            COUNTS=$(count_vulns "trivy-results.json")
+            CRIT=$(echo $COUNTS | cut -d'|' -f1)
+            HIGH=$(echo $COUNTS | cut -d'|' -f2)
+            MED=$(echo $COUNTS | cut -d'|' -f3)
+            LOW=$(echo $COUNTS | cut -d'|' -f4)
+            
+            echo "## 📊 Vulnerability Summary" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "| Severity | Count | Status |" >> $GITHUB_STEP_SUMMARY
+            echo "|----------|-------|--------|" >> $GITHUB_STEP_SUMMARY
+            echo "| 🔴 Critical | $CRIT | $([ $CRIT -gt 0 ] && echo '❌' || echo '✅') |" >> $GITHUB_STEP_SUMMARY
+            echo "| 🟠 High | $HIGH | $([ $HIGH -gt 0 ] && echo '⚠️' || echo '✅') |" >> $GITHUB_STEP_SUMMARY
+            echo "| 🟡 Medium | $MED | $([ $MED -gt 0 ] && echo '⚠️' || echo '✅') |" >> $GITHUB_STEP_SUMMARY
+            echo "| 🟢 Low | $LOW | ℹ️ |" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            
+            TOTAL=$((CRIT + HIGH))
+            if [ $TOTAL -gt 0 ]; then
+              echo "## ❌ Quality Gate: FAILED" >> $GITHUB_STEP_SUMMARY
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "Found **$CRIT critical** and **$HIGH high** severity vulnerabilities." >> $GITHUB_STEP_SUMMARY
+              echo "" >> $GITHUB_STEP_SUMMARY
+              
+              # แสดงรายละเอียดช่องโหว่ที่พบ
+              echo "### 🔍 Vulnerability Details" >> $GITHUB_STEP_SUMMARY
+              echo "" >> $GITHUB_STEP_SUMMARY
+              
+              # Critical vulnerabilities
+              if [ $CRIT -gt 0 ]; then
+                echo "#### 🔴 Critical Vulnerabilities" >> $GITHUB_STEP_SUMMARY
+                echo "" >> $GITHUB_STEP_SUMMARY
+                jq -r '.Results[]?.Vulnerabilities[]? | select(.Severity=="CRITICAL") | "**\(.VulnerabilityID)** - \(.Title)\n- **Package:** \(.PkgName) \(.InstalledVersion)\n- **Fixed Version:** \(.FixedVersion // "N/A")\n- **CVSS Score:** \(.CVSS.nvd.V3Score // .CVSS.redhat.V3Score // "N/A")\n- **Description:** \(.Description)\n- **References:** \(.PrimaryURL)\n"' trivy-results.json >> $GITHUB_STEP_SUMMARY 2>/dev/null || true
+                echo "" >> $GITHUB_STEP_SUMMARY
+              fi
+              
+              # High vulnerabilities
+              if [ $HIGH -gt 0 ]; then
+                echo "#### 🟠 High Vulnerabilities" >> $GITHUB_STEP_SUMMARY
+                echo "" >> $GITHUB_STEP_SUMMARY
+                jq -r '.Results[]?.Vulnerabilities[]? | select(.Severity=="HIGH") | "**\(.VulnerabilityID)** - \(.Title)\n- **Package:** \(.PkgName) \(.InstalledVersion)\n- **Fixed Version:** \(.FixedVersion // "N/A")\n- **CVSS Score:** \(.CVSS.nvd.V3Score // .CVSS.redhat.V3Score // "N/A")\n- **Description:** \(.Description)\n- **References:** \(.PrimaryURL)\n"' trivy-results.json >> $GITHUB_STEP_SUMMARY 2>/dev/null || true
+                echo "" >> $GITHUB_STEP_SUMMARY
+              fi
+              
+              echo "---" >> $GITHUB_STEP_SUMMARY
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "💡 **Remediation Steps:**" >> $GITHUB_STEP_SUMMARY
+              echo "1. Review the vulnerabilities listed above" >> $GITHUB_STEP_SUMMARY
+              echo "2. Update affected packages to fixed versions" >> $GITHUB_STEP_SUMMARY
+              echo "3. Run security scan again to verify fixes" >> $GITHUB_STEP_SUMMARY
+              echo "4. Check the full report in artifacts for more details" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "## ✅ Quality Gate: PASSED" >> $GITHUB_STEP_SUMMARY
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "No critical or high severity vulnerabilities found! 🎉" >> $GITHUB_STEP_SUMMARY
+            fi
+          fi
