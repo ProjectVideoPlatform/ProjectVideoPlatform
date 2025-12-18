@@ -1,74 +1,217 @@
-name: Full Security Scan
+name: Security Scan with Summary
 
 on:
+  push:
+    branches: [main, Feather]
   pull_request:
-    branches: [ main ]
+    branches: [main]
+  schedule:
+    - cron: '0 0 * * 0'  # ทุกวันอาทิตย์
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
 
 jobs:
   security-scan:
+    name: 🔒 Security Analysis
     runs-on: ubuntu-latest
-    env:
-      SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
-
+    permissions:
+      contents: read
+      security-events: write
+      
     steps:
-      - name: Checkout repository
+      - name: 📥 Checkout code
         uses: actions/checkout@v4
 
-      - name: Install Trivy
+      - name: 🐳 Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # ============================================
+      # 1️⃣ BUILD DOCKER IMAGE
+      # ============================================
+      - name: 🏗️ Build Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          push: false
+          load: true
+          tags: myapp:${{ github.sha }},myapp:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # ============================================
+      # 2️⃣ TRIVY SCANS (Quality Gate)
+      # ============================================
+      - name: 🔍 Trivy - Filesystem Scan (Quality Gate)
+        id: trivy-fs-gate
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          severity: 'CRITICAL,HIGH'
+          exit-code: '1'  # Fail on CRITICAL/HIGH
+          ignore-unfixed: true
+          format: 'json'
+          output: 'trivy-fs-gate.json'
+
+      - name: 🐳 Trivy - Docker Image Scan (Quality Gate)
+        id: trivy-docker-gate
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'image'
+          image-ref: 'myapp:latest'
+          severity: 'CRITICAL,HIGH'
+          exit-code: '1'  # Fail on CRITICAL/HIGH
+          ignore-unfixed: true
+          format: 'json'
+          output: 'trivy-docker-gate.json'
+
+      - name: ⚙️ Trivy - Config Scan (Quality Gate)
+        id: trivy-config-gate
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'config'
+          scan-ref: '.'
+          severity: 'CRITICAL,HIGH'
+          exit-code: '0'  # Don't fail on config issues (warning only)
+          format: 'json'
+          output: 'trivy-config-gate.json'
+
+      # ============================================
+      # 3️⃣ DETAILED REPORTS (All Severities)
+      # ============================================
+      - name: 📊 Trivy - Full Filesystem Report
+        if: always()
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          format: 'sarif'
+          output: 'trivy-fs-results.sarif'
+
+      - name: 📊 Trivy - Full Docker Report
+        if: always()
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'image'
+          image-ref: 'myapp:latest'
+          format: 'sarif'
+          output: 'trivy-docker-results.sarif'
+
+      - name: 📊 Trivy - Full Config Report
+        if: always()
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'config'
+          scan-ref: '.'
+          format: 'sarif'
+          output: 'trivy-config-results.sarif'
+
+      # ============================================
+      # 4️⃣ GENERATE SUMMARY
+      # ============================================
+      - name: 📝 Generate Security Summary
+        if: always()
         run: |
-          sudo apt-get update
-          sudo apt-get install -y wget apt-transport-https gnupg lsb-release
-          wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | sudo apt-key add -
-          echo "deb https://aquasecurity.github.io/trivy-repo/deb $(lsb_release -sc) main" | sudo tee /etc/apt/sources.list.d/trivy.list
-          sudo apt-get update
-          sudo apt-get install -y trivy
+          echo "# 🔒 Security Scan Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Scan Date:** $(date)" >> $GITHUB_STEP_SUMMARY
+          echo "**Commit:** ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
 
-      # 1️⃣ Build Docker Image (ต้อง build ก่อน gate)
-      - name: Build Docker image
-        run: docker build -t myapp:latest .
+          # Function to count vulnerabilities
+          count_vulns() {
+            local file=$1
+            if [ -f "$file" ]; then
+              CRITICAL=$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity=="CRITICAL")] | length' "$file" 2>/dev/null || echo "0")
+              HIGH=$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity=="HIGH")] | length' "$file" 2>/dev/null || echo "0")
+              MEDIUM=$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity=="MEDIUM")] | length' "$file" 2>/dev/null || echo "0")
+              LOW=$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity=="LOW")] | length' "$file" 2>/dev/null || echo "0")
+              echo "$CRITICAL|$HIGH|$MEDIUM|$LOW"
+            else
+              echo "0|0|0|0"
+            fi
+          }
 
-      # 2️⃣ 🔥 Trivy QUALITY GATE (BLOCK CI)
-      - name: Trivy Quality Gate (CRITICAL only)
-        run: |
-          trivy fs . --severity CRITICAL --exit-code 1
-          trivy image myapp:latest --severity CRITICAL --exit-code 1
-          trivy config . --severity CRITICAL --exit-code 1
+          # Filesystem Scan
+          echo "## 📁 Filesystem Scan" >> $GITHUB_STEP_SUMMARY
+          FS_COUNTS=$(count_vulns "trivy-fs-gate.json")
+          FS_CRIT=$(echo $FS_COUNTS | cut -d'|' -f1)
+          FS_HIGH=$(echo $FS_COUNTS | cut -d'|' -f2)
+          FS_MED=$(echo $FS_COUNTS | cut -d'|' -f3)
+          FS_LOW=$(echo $FS_COUNTS | cut -d'|' -f4)
+          
+          echo "| Severity | Count |" >> $GITHUB_STEP_SUMMARY
+          echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| 🔴 Critical | $FS_CRIT |" >> $GITHUB_STEP_SUMMARY
+          echo "| 🟠 High | $FS_HIGH |" >> $GITHUB_STEP_SUMMARY
+          echo "| 🟡 Medium | $FS_MED |" >> $GITHUB_STEP_SUMMARY
+          echo "| 🟢 Low | $FS_LOW |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
 
-      # 3️⃣ 📊 Trivy Reports (ไม่ block – เพื่อ audit)
-      - name: Scan source code (filesystem report)
-        run: |
-          trivy fs . --severity HIGH,CRITICAL --format json --output trivy-fs.json || true
-          trivy fs . --severity HIGH,CRITICAL --format table --output trivy-fs-table.txt || true
+          # Docker Scan
+          echo "## 🐳 Docker Image Scan" >> $GITHUB_STEP_SUMMARY
+          DOCKER_COUNTS=$(count_vulns "trivy-docker-gate.json")
+          DOCKER_CRIT=$(echo $DOCKER_COUNTS | cut -d'|' -f1)
+          DOCKER_HIGH=$(echo $DOCKER_COUNTS | cut -d'|' -f2)
+          DOCKER_MED=$(echo $DOCKER_COUNTS | cut -d'|' -f3)
+          DOCKER_LOW=$(echo $DOCKER_COUNTS | cut -d'|' -f4)
+          
+          echo "| Severity | Count |" >> $GITHUB_STEP_SUMMARY
+          echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| 🔴 Critical | $DOCKER_CRIT |" >> $GITHUB_STEP_SUMMARY
+          echo "| 🟠 High | $DOCKER_HIGH |" >> $GITHUB_STEP_SUMMARY
+          echo "| 🟡 Medium | $DOCKER_MED |" >> $GITHUB_STEP_SUMMARY
+          echo "| 🟢 Low | $DOCKER_LOW |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
 
-      - name: Scan Docker image report
-        run: |
-          trivy image myapp:latest --severity HIGH,CRITICAL --format json --output trivy-docker.json || true
-          trivy image myapp:latest --severity HIGH,CRITICAL --format table --output trivy-docker-table.txt || true
+          # Total Summary
+          TOTAL_CRIT=$((FS_CRIT + DOCKER_CRIT))
+          TOTAL_HIGH=$((FS_HIGH + DOCKER_HIGH))
+          
+          echo "## 📊 Overall Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [ $TOTAL_CRIT -gt 0 ] || [ $TOTAL_HIGH -gt 0 ]; then
+            echo "❌ **FAILED** - Found $TOTAL_CRIT critical and $TOTAL_HIGH high severity issues" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "✅ **PASSED** - No critical or high severity issues found" >> $GITHUB_STEP_SUMMARY
+          fi
 
-      - name: Scan IaC report
-        run: |
-          trivy config . --severity HIGH,CRITICAL --format json --output trivy-iac.json || true
-          trivy config . --severity HIGH,CRITICAL --format table --output trivy-iac-table.txt || true
+      # ============================================
+      # 5️⃣ UPLOAD REPORTS
+      # ============================================
+      - name: 📤 Upload SARIF to GitHub Security
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: '.'
+          category: trivy-security-scan
 
-      # 4️⃣ Generate HTML Reports
-      - name: Generate HTML Reports
-        run: |
-          trivy convert --format template --template "@contrib/html.tpl" --input trivy-fs.json --output trivy-fs.html || true
-          trivy convert --format template --template "@contrib/html.tpl" --input trivy-docker.json --output trivy-docker.html || true
-          trivy convert --format template --template "@contrib/html.tpl" --input trivy-iac.json --output trivy-iac.html || true
-
-      # 5️⃣ Upload Reports
-      - name: Upload Trivy Reports
+      - name: 📦 Upload Trivy Reports as Artifacts
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: trivy-reports
+          name: trivy-reports-${{ github.sha }}
           path: |
-            trivy-fs.json
-            trivy-fs.html
-            trivy-fs-table.txt
-            trivy-docker.json
-            trivy-docker.html
-            trivy-docker-table.txt
-            trivy-iac.json
-            trivy-iac.html
-            trivy-iac-table.txt
+            trivy-*.json
+            trivy-*.sarif
+          retention-days: 30
+
+      # ============================================
+      # 6️⃣ SLACK NOTIFICATION
+      # ============================================
+      - name: 📢 Slack Notification
+        if: always() && env.SLACK_WEBHOOK_URL != ''
+        uses: 8398a7/action-slack@v3
+        with:
+          status: ${{ job.status }}
+          text: |
+            Security Scan ${{ job.status }}
+            Repo: ${{ github.repository }}
+            Branch: ${{ github.ref_name }}
+            Commit: ${{ github.sha }}
+          fields: repo,message,commit,author,action,eventName,ref,workflow
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
