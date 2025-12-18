@@ -1,0 +1,54 @@
+version: "3.8"
+
+services:
+  app:
+    image: your-registry/app:latest
+    container_name: secure-video-app
+    restart: unless-stopped
+
+    ports:
+      - "3000:3000"
+
+    env_file:
+      - .env
+
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+
+    volumes:
+      - ./BackEnd/keys:/app/keys:ro
+      - app_logs:/app/logs
+      - ./BackEnd/vault/certs:/app/vault-certs:ro
+
+    depends_on:
+      - mongodb
+      - redis
+      - vault
+
+    # 🔐 HARDENING
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+    tmpfs:
+      - /tmp
+      - /app/tmp
+
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+    networks:
+      - secure-video-network
+
+networks:
+  secure-video-network:
+    driver: bridge
+
+volumes:
+  app_logs:

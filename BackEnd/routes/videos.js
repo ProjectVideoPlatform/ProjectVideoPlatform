@@ -7,7 +7,10 @@ const { generateSignedCookies, setCookiesInResponse } = require('../services/clo
 const { config } = require('../config/aws');
 const Video = require('../models/Video');
 const Purchase = require('../models/Purchase');
-const escapeStringRegexp = require('escape-string-regexp');
+async function getEscapeStringRegexp() {
+  const module = await import('escape-string-regexp');
+  return module.default;
+}
   const https = require('https');
 const router = express.Router();
 router.get('/video-progress', authenticateToken, async (req, res) => {
@@ -51,6 +54,7 @@ router.post('/video-progress', authenticateToken, async (req, res) => {
 // Get video list (public videos or user's purchased videos)
 router.get('/', authenticateToken, async (req, res) => {
   try {
+      const escapeStringRegexp = await import('escape-string-regexp').then(m => m.default);
     let { page = 1, limit = 10, search, category } = req.query;
 
     // ---- Validation (สำคัญ) ----
