@@ -31,3 +31,4 @@ jobs:
             -Dsonar.projectKey=MANAPHAT56_ProjectVideoPlatform
             -Dsonar.sources=BackEnd
             -Dsonar.javascript.lcov.reportPaths=BackEnd/coverage/lcov.info
+            -Dsonar.organization=MANAPHAT56_ProjectVideoPlatform
