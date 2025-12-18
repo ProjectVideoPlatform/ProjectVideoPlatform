@@ -60,7 +60,7 @@ COPY --from=builder --chown=appuser:nodejs /app/models ./models
 COPY --from=builder --chown=appuser:nodejs /app/middleware ./middleware
 COPY --from=builder --chown=appuser:nodejs /app/services ./services
 COPY --from=builder --chown=appuser:nodejs /app/healthcheck.js ./
-COPY --from=builder --chown=appuser:nodejs /app/keys ./keys
+# COPY --from=builder --chown=appuser:nodejs /app/keys ./keys
 COPY --from=builder --chown=appuser:nodejs /app/utils ./utils
 COPY --from=builder --chown=appuser:nodejs /app/websocket.js ./websocket.js
 
