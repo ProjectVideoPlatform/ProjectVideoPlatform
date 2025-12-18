@@ -2,33 +2,26 @@ name: Build and Analyze
 
 on:
   push:
-    branches:
-      - main
-      - Feather  # เพิ่มกลับเข้ามาถ้ายังต้องการสแกนสาขานี้ตอน push
+    branches: [ main ]
   pull_request:
-    types: [opened, synchronize, reopened] # แนะนำให้ระบุ type เพื่อความแม่นยำ
-    branches:
-      - main
+    branches: [ main ]
 
 jobs:
-  sonarqube:
-    name: SonarQube Scan
+  sonarcloud:
+    name: SonarCloud Scan
     runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0  # สำคัญมากสำหรับการวิเคราะห์ประวัติโค้ด
 
-      - name: SonarQube Scan
-        uses: SonarSource/sonarqube-scan-action@v4 # หรือ v6 ตามที่คุณเลือก
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: SonarCloud Scan
+        uses: SonarSource/sonarcloud-github-action@v2
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-          # SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }} # เปิดใช้ถ้าไม่ใช่ SonarCloud
         with:
-          # การใส่ args ตรงนี้จะช่วยลดปัญหาหาโปรเจกต์ไม่เจอ
           args: >
             -Dsonar.projectKey=MANAPHAT56_ProjectVideoPlatform
             -Dsonar.organization=manaphat56
             -Dsonar.sources=BackEnd
-            -Dsonar.javascript.lcov.reportPaths=BackEnd/coverage/lcov.info
