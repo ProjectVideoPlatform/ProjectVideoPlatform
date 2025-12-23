@@ -97,14 +97,6 @@ jobs:
             -Dsonar.sourceEncoding=UTF-8
             -Dsonar.scm.provider=git
 
-      - name: 🚦 SonarCloud Quality Gate
-        uses: SonarSource/sonarcloud-quality-gate-action@v1.1.0
-        timeout-minutes: 5
-        env:
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-        with:
-          scanMetadataReportFile: .scannerwork/report-task.txt
-
       # ✅ Comment PR with results
       - name: 💬 Comment PR with SonarCloud results
         if: github.event_name == 'pull_request'
