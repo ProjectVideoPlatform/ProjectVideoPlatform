@@ -96,6 +96,8 @@ jobs:
             -Dsonar.coverage.exclusions=**/*.test.js,**/__tests__/**,**/node_modules/**
             -Dsonar.sourceEncoding=UTF-8
             -Dsonar.scm.provider=git
+            -Dsonar.qualitygate.wait=true
+            -Dsonar.qualitygate.timeout=300
 
       # ✅ Comment PR with results
       - name: 💬 Comment PR with SonarCloud results
