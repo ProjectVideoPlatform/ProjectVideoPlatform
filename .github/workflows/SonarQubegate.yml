@@ -88,7 +88,7 @@ jobs:
           args: >
             -Dsonar.projectKey=MANAPHAT56_ProjectVideoPlatform
             -Dsonar.organization=manaphat56
-            -Dsonar.sources=BackEnd/routes,BackEnd/models,BackEnd/controllers,BackEnd/services,BackEnd/middleware,BackEnd/utils
+            -Dsonar.sources=BackEnd/routes,BackEnd/models,BackEnd/services,BackEnd/middleware
             -Dsonar.tests=BackEnd/test
             -Dsonar.javascript.lcov.reportPaths=BackEnd/coverage/lcov.info
             -Dsonar.exclusions=**/*.test.js,**/__tests__/**,**/node_modules/**,**/coverage/**
