@@ -1,0 +1,144 @@
+name: Build and Analyze
+
+on:
+  push:
+    branches: 
+      - main
+      - develop
+  pull_request:
+    branches: 
+      - main
+    types: [opened, synchronize, reopened]
+
+  # ✅ Allow manual trigger
+  workflow_dispatch:
+
+env:
+  NODE_VERSION: '18'
+
+jobs:
+  # ===== Job 1: Build & Test (ก่อน Scan) =====
+  build-and-test:
+    name: 🏗️ Build and Test
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full history for SonarCloud
+
+      - name: 🟢 Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: BackEnd/package-lock.json
+
+      - name: 📦 Install dependencies
+        working-directory: ./BackEnd
+        run: npm ci --prefer-offline --no-audit
+
+      - name: 🧪 Run tests with coverage
+        working-directory: ./BackEnd
+        run: npm run test:coverage || npm test
+        continue-on-error: false
+
+      # ✅ Upload coverage for SonarCloud
+      - name: 📊 Upload coverage artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: BackEnd/coverage/
+          retention-days: 5
+
+  # ===== Job 2: SonarCloud Analysis =====
+  sonarcloud:
+    name: 🔍 SonarCloud Analysis
+    runs-on: ubuntu-latest
+    needs: build-and-test  # ✅ รอให้ test ผ่านก่อน
+    
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Shallow clones should be disabled
+
+      # ✅ Download coverage report
+      - name: 📊 Download coverage artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: coverage-report
+          path: BackEnd/coverage/
+
+      # ✅ Cache SonarCloud packages
+      - name: 💾 Cache SonarCloud packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.sonar/cache
+          key: ${{ runner.os }}-sonar
+          restore-keys: ${{ runner.os }}-sonar
+
+      - name: 🔍 SonarCloud Scan
+        uses: SonarSource/sonarcloud-github-action@v3.1.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # ✅ สำหรับ PR decoration
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        with:
+          args: >
+            -Dsonar.projectKey=MANAPHAT56_ProjectVideoPlatform
+            -Dsonar.organization=manaphat56
+            -Dsonar.sources=BackEnd/routes,BackEnd/models,BackEnd/controllers,BackEnd/services,BackEnd/middleware,BackEnd/utils
+            -Dsonar.tests=BackEnd/__tests__
+            -Dsonar.javascript.lcov.reportPaths=BackEnd/coverage/lcov.info
+            -Dsonar.exclusions=**/*.test.js,**/__tests__/**,**/node_modules/**,**/coverage/**
+            -Dsonar.test.exclusions=**/*.test.js,**/__tests__/**
+            -Dsonar.coverage.exclusions=**/*.test.js,**/__tests__/**,**/node_modules/**
+            -Dsonar.sourceEncoding=UTF-8
+            -Dsonar.scm.provider=git
+
+      - name: 🚦 SonarCloud Quality Gate
+        uses: SonarSource/sonarcloud-quality-gate-action@v1.1.0
+        timeout-minutes: 5
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        with:
+          scanMetadataReportFile: .scannerwork/report-task.txt
+
+      # ✅ Comment PR with results
+      - name: 💬 Comment PR with SonarCloud results
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const projectKey = 'MANAPHAT56_ProjectVideoPlatform';
+            const sonarUrl = `https://sonarcloud.io/dashboard?id=${projectKey}`;
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `## 🔍 SonarCloud Analysis Results\n\n✅ Quality Gate: Check [SonarCloud Dashboard](${sonarUrl})\n\n📊 View detailed metrics and issues in the link above.`
+            });
+
+  # ===== Job 3: Generate Summary =====
+  summary:
+    name: 📝 Generate Summary
+    runs-on: ubuntu-latest
+    needs: [build-and-test, sonarcloud]
+    if: always()
+    
+    steps:
+      - name: 📝 Create Summary
+        run: |
+          echo "# 🎯 Build and Analysis Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Stage | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Build & Test | ${{ needs.build-and-test.result == 'success' && '✅ Passed' || '❌ Failed' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| SonarCloud | ${{ needs.sonarcloud.result == 'success' && '✅ Passed' || '❌ Failed' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "📊 **SonarCloud Dashboard:** [View Report](https://sonarcloud.io/dashboard?id=MANAPHAT56_ProjectVideoPlatform)" >> $GITHUB_STEP_SUMMARY
