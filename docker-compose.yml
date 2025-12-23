@@ -82,59 +82,61 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+
+    image: secure-video-app:latest
     container_name: secure-video-app
     restart: unless-stopped
+
+  # ❗ prod แนะนำให้ expose ผ่าน reverse proxy (nginx / traefik)
     ports:
-      - "3000:3000"
+    - "127.0.0.1:3000:3000"
+
+    env_file:
+    - ./BackEnd/.env
+
     environment:
-      NODE_ENV: production
-      PORT: 3000
+     NODE_ENV: production
+     PORT: 3000
 
-      # Database
-      MONGO_URI: mongodb://admin:securepassword123@mongodb:27017/secure-video?authSource=admin
-      REDIS_URL: redis://:redispassword123@redis:6379
-
-      # JWT
-      JWT_SECRET: ${JWT_SECRET}
-
-      # Vault
-      VAULT_ADDR: https://vault:8200
-      VAULT_TOKEN: ${VAULT_TOKEN} # ต้อง set เป็น token ของ Vault
-
-      # AWS Configuration
-      AWS_REGION: ${AWS_REGION}
-      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
-      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
-
-      # S3 Buckets
-      UPLOADS_BUCKET: ${UPLOADS_BUCKET}
-      HLS_OUTPUT_BUCKET: ${HLS_OUTPUT_BUCKET}
-
-      # MediaConvert
-      MEDIACONVERT_ENDPOINT: ${MEDIACONVERT_ENDPOINT}
-      MEDIACONVERT_ROLE: ${MEDIACONVERT_ROLE}
-
-      # CloudFront
-      CLOUDFRONT_DOMAIN: ${CLOUDFRONT_DOMAIN}
-      CLOUDFRONT_KEY_PAIR_ID: ${CLOUDFRONT_KEY_PAIR_ID}
-      CLOUDFRONT_PRIVATE_KEY_PATH: /app/keys/cloudfront-private-key.pem
     volumes:
-      - ./BackEnd/keys:/app/keys:ro
-      - app_logs:/app/logs
-      - ./BackEnd/vault/certs:/app/vault-certs:ro
+    # read-only secrets
+    - ./BackEnd/keys:/app/keys:ro
+    - ./BackEnd/vault/certs:/app/vault-certs:ro
+
+    # writable runtime dirs
+    - app_logs:/app/logs
+    - app_tmp:/app/tmp
+
     networks:
-      - secure-video-network
+    - secure-video-network
+
     depends_on:
-      - mongodb
-      - redis
-      - vault
+     mongodb:
+       condition: service_healthy
+     redis:
+       condition: service_healthy
+
+  # ===== Container hardening =====
+    user: "1001:1001"
+
+    read_only: true
+
+    tmpfs:
+    - /tmp
+    - /app/tmp
+
+    security_opt:
+    - no-new-privileges:true
+
+    cap_drop:
+    - ALL
+  # ===== Healthcheck =====
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
       interval: 30s
-      timeout: 10s
+      timeout: 5s
       retries: 3
-    env_file:
-      - .env
+      start_period: 30s
 
   # Nginx Reverse Proxy
   nginx:
@@ -181,25 +183,25 @@ services:
       - dev
 
   # Prometheus & Grafana (monitoring)
-  prometheus:
-    image: prom/prometheus:v2.47.0
-    container_name: secure-video-prometheus
-    restart: unless-stopped
-    ports:
-      - "9090:9090"
-    volumes:
-      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
-      - prometheus_data:/prometheus
-    command:
-      - '--config.file=/etc/prometheus/prometheus.yml'
-      - '--storage.tsdb.path=/prometheus'
-      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
-      - '--web.console.templates=/usr/share/prometheus/consoles'
-      - '--web.enable-lifecycle'
-    networks:
-      - secure-video-network
-    profiles:
-      - monitoring
+  # prometheus:
+  #   image: prom/prometheus:v2.47.0
+  #   container_name: secure-video-prometheus
+  #   restart: unless-stopped
+  #   ports:
+  #     - "9090:9090"
+  #   volumes:
+  #     - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+  #     - prometheus_data:/prometheus
+  #   command:
+  #     - '--config.file=/etc/prometheus/prometheus.yml'
+  #     - '--storage.tsdb.path=/prometheus'
+  #     - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+  #     - '--web.console.templates=/usr/share/prometheus/consoles'
+  #     - '--web.enable-lifecycle'
+  #   networks:
+  #     - secure-video-network
+  #   profiles:
+  #     - monitoring
 
   # grafana:
   #   image: grafana/grafana:10.1.0
