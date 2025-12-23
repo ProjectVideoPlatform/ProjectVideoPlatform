@@ -1,4 +1,4 @@
-name: Security Scan (Fixed)
+name: Security Scan (Fixed) Trivy
 
 on:
   push:
