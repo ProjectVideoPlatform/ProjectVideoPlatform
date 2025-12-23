@@ -89,7 +89,7 @@ jobs:
             -Dsonar.projectKey=MANAPHAT56_ProjectVideoPlatform
             -Dsonar.organization=manaphat56
             -Dsonar.sources=BackEnd/routes,BackEnd/models,BackEnd/controllers,BackEnd/services,BackEnd/middleware,BackEnd/utils
-            -Dsonar.tests=BackEnd/__tests__
+            -Dsonar.tests=BackEnd/test
             -Dsonar.javascript.lcov.reportPaths=BackEnd/coverage/lcov.info
             -Dsonar.exclusions=**/*.test.js,**/__tests__/**,**/node_modules/**,**/coverage/**
             -Dsonar.test.exclusions=**/*.test.js,**/__tests__/**
