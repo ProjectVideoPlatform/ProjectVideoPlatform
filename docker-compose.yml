@@ -183,44 +183,44 @@ services:
       - dev
 
   # Prometheus & Grafana (monitoring)
-  # prometheus:
-  #   image: prom/prometheus:v2.47.0
-  #   container_name: secure-video-prometheus
-  #   restart: unless-stopped
-  #   ports:
-  #     - "9090:9090"
-  #   volumes:
-  #     - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
-  #     - prometheus_data:/prometheus
-  #   command:
-  #     - '--config.file=/etc/prometheus/prometheus.yml'
-  #     - '--storage.tsdb.path=/prometheus'
-  #     - '--web.console.libraries=/usr/share/prometheus/console_libraries'
-  #     - '--web.console.templates=/usr/share/prometheus/consoles'
-  #     - '--web.enable-lifecycle'
-  #   networks:
-  #     - secure-video-network
-  #   profiles:
-  #     - monitoring
+  prometheus:
+    image: prom/prometheus:v2.47.0
+    container_name: secure-video-prometheus
+    restart: unless-stopped
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+      - '--web.console.templates=/usr/share/prometheus/consoles'
+      - '--web.enable-lifecycle'
+    networks:
+      - secure-video-network
+    profiles:
+      - monitoring
 
-  # grafana:
-  #   image: grafana/grafana:10.1.0
-  #   container_name: secure-video-grafana
-  #   restart: unless-stopped
-  #   ports:
-  #     - "3001:3000"
-  #   environment:
-  #     GF_SECURITY_ADMIN_PASSWORD: grafana123
-  #   volumes:
-  #     - grafana_data:/var/lib/grafana
-  #     - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
-  #     - ./monitoring/grafana/datasources:/etc/grafana/provisioning/datasources:ro
-  #   networks:
-  #     - secure-video-network
-  #   depends_on:
-  #     - prometheus
-  #   profiles:
-  #     - monitoring
+  grafana:
+    image: grafana/grafana:10.1.0
+    container_name: secure-video-grafana
+    restart: unless-stopped
+    ports:
+      - "3001:3000"
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: grafana123
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./monitoring/grafana/datasources:/etc/grafana/provisioning/datasources:ro
+    networks:
+      - secure-video-network
+    depends_on:
+      - prometheus
+    profiles:
+      - monitoring
 
 networks:
   secure-video-network:

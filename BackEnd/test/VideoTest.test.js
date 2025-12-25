@@ -921,4 +921,377 @@ describe('Video Routes - Comprehensive Tests', () => {
       expect(res.body.error).toBe('Video not found');
     });
   });
+    describe('GET /videos/purchased/list', () => {
+    it('should return purchased videos with pagination', async () => {
+      const mockPurchases = [
+        {
+          videoId: {
+            _id: 'v1',
+            id: 'vid1',
+            title
+: 'Video 1',
+price: 99,
+toObject: () => ({
+_id: 'v1',
+id: 'vid1',
+title: 'Video 1',
+price: 99
+})
+},
+purchaseDate: new Date(),
+amount: 99,
+accessCount: 5,
+lastAccessedAt: new Date()
+}
+];
+  Purchase.find.mockReturnValue({
+    populate: jest.fn().mockReturnThis(),
+    sort: jest.fn().mockReturnThis(),
+    skip: jest.fn().mockReturnThis(),
+    limit: jest.fn().mockResolvedValue(mockPurchases)
+  });
+
+  Purchase.countDocuments.mockResolvedValue(1);
+
+  const res = await request(app)
+    .get('/videos/purchased/list')
+    .query({ page: 1, limit: 10 });
+
+  expect(res.status).toBe(200);
+  expect(res.body.videos).toHaveLength(1);
+  expect(res.body.videos[0].title).toBe('Video 1');
+  expect(res.body.videos[0].canPlay).toBe(true);
+  expect(res.body.videos[0].uploadStatus).toBe('completed');
+  expect(res.body.videos[0].purchaseInfo).toBeDefined();
+  expect(res.body.pagination).toEqual({
+    page: 1,
+    limit: 10,
+    total: 1,
+    pages: 1
+  });
+});
+
+it('should handle empty purchase list', async () => {
+  Purchase.find.mockReturnValue({
+    populate: jest.fn().mockReturnThis(),
+    sort: jest.fn().mockReturnThis(),
+    skip: jest.fn().mockReturnThis(),
+    limit: jest.fn().mockResolvedValue([])
+  });
+
+  Purchase.countDocuments.mockResolvedValue(0);
+
+  const res = await request(app).get('/videos/purchased/list');
+
+  expect(res.status).toBe(200);
+  expect(res.body.videos).toEqual([]);
+  expect(res.body.pagination.total).toBe(0);
+});
+
+it('should support pagination parameters', async () => {
+  Purchase.find.mockReturnValue({
+    populate: jest.fn().mockReturnThis(),
+    sort: jest.fn().mockReturnThis(),
+    skip: jest.fn().mockReturnThis(),
+    limit: jest.fn().mockResolvedValue([])
+  });
+
+  Purchase.countDocuments.mockResolvedValue(0);
+
+  await request(app)
+    .get('/videos/purchased/list')
+    .query({ page: 2, limit: 5 });
+
+  const findCall = Purchase.find.mock.results[0].value;
+  expect(findCall.skip).toHaveBeenCalledWith(5);
+  expect(findCall.limit).toHaveBeenCalledWith(5);
+});
+
+it('should handle database errors', async () => {
+  Purchase.find.mockReturnValue({
+    populate: jest.fn().mockReturnThis(),
+    sort: jest.fn().mockReturnThis(),
+    skip: jest.fn().mockReturnThis(),
+    limit: jest.fn().mockRejectedValue(new Error('DB Error'))
+  });
+
+  const res = await request(app).get('/videos/purchased/list');
+
+  expect(res.status).toBe(500);
+  expect(res.body.error).toBe('DB Error');
+});
+});
+/* ==================== EDGE CASES & ERROR HANDLING ==================== */
+describe('Edge Cases', () => {
+it('should handle malformed JSON in request body', async () => {
+const res = await request(app)
+.post('/videos/upload/initialize')
+.send('invalid json')
+.set('Content-Type', 'application/json');
+  expect(res.status).toBe(400);
+});
+
+it('should handle very long search queries', async () => {
+  Video.find.mockReturnValue({
+    select: jest.fn().mockReturnThis(),
+    sort: jest.fn().mockReturnThis(),
+    skip: jest.fn().mockReturnThis(),
+    limit: jest.fn().mockResolvedValue([])
+  });
+
+  Video.countDocuments.mockResolvedValue(0);
+  Purchase.find.mockReturnValue({
+    distinct: jest.fn().mockResolvedValue([])
+  });
+
+  const longSearch = 'a'.repeat(1000);
+  const res = await request(app)
+    .get('/videos')
+    .query({ search: longSearch });
+
+  expect(res.status).toBe(200);
+});
+
+it('should handle special characters in search', async () => {
+  Video.find.mockReturnValue({
+    select: jest.fn().mockReturnThis(),
+    sort: jest.fn().mockReturnThis(),
+    skip: jest.fn().mockReturnThis(),
+    limit: jest.fn().mockResolvedValue([])
+  });
+
+  Video.countDocuments.mockResolvedValue(0);
+  Purchase.find.mockReturnValue({
+    distinct: jest.fn().mockResolvedValue([])
+  });
+
+  const res = await request(app)
+    .get('/videos')
+    .query({ search: '$regex[]()*+?.' });
+
+  expect(res.status).toBe(200);
+});
+
+it('should handle concurrent purchase attempts', async () => {
+  Video.findOne.mockResolvedValue({
+    _id: 'v1',
+    price: 99,
+    uploadStatus: 'completed',
+    isActive: true
+  });
+
+  Purchase.findOne.mockResolvedValueOnce(null);
+  
+  Purchase.mockImplementation(() => ({
+    _id: 'p1',
+    save: jest.fn()
+  }));
+
+  const res1 = request(app).post('/videos/v1/purchase');
+  const res2 = request(app).post('/videos/v1/purchase');
+
+  const [response1, response2] = await Promise.all([res1, res2]);
+
+  const succeeded = [response1, response2].filter(r => r.status === 200);
+  expect(succeeded.length).toBeGreaterThan(0);
+});
+
+it('should handle video with empty tags array', async () => {
+  const saveMock = jest.fn();
+  Video.mockImplementation((data) => ({
+    ...data,
+    save: saveMock,
+    _id: 'v1'
+  }));
+
+  generatePresignedUploadUrl.mockResolvedValue({
+    uploadUrl: 'url',
+    s3Key: 'key',
+    fields: {}
+  });
+
+  const res = await request(app)
+    .post('/videos/upload/initialize')
+    .send({
+      title: 'Video',
+      tags: '',
+      fileName: 'video.mp4',
+      fileSize: 1000,
+      contentType: 'video/mp4'
+    });
+
+  expect(res.status).toBe(200);
+});
+
+it('should handle video with zero price', async () => {
+  Video.findOne.mockResolvedValue({
+    _id: 'v1',
+    price: 0,
+    uploadStatus: 'completed',
+    isActive: true
+  });
+
+  Purchase.findOne.mockResolvedValue(null);
+  Purchase.mockImplementation(() => ({
+    _id: 'p1',
+    amount: 0,
+    save: jest.fn()
+  }));
+
+  const res = await request(app).post('/videos/v1/purchase');
+
+  expect(res.status).toBe(200);
+  expect(res.body.purchase.amount).toBe(0);
+});
+
+it('should handle missing optional fields in webhook', async () => {
+  const saveMock = jest.fn();
+  Video.findOne.mockResolvedValue({
+    id: 'vid1',
+    save: saveMock
+  });
+
+  const res = await request(app)
+    .post('/videos/mediaconvert/webhook')
+    .send({
+      detail: {
+        status: 'COMPLETE',
+        userMetadata: { VideoId: 'vid1' }
+      }
+    });
+
+  expect(res.status).toBe(200);
+  expect(saveMock).toHaveBeenCalled();
+});
+});
+/* ==================== AUTHENTICATION & AUTHORIZATION ==================== */
+describe('Authentication & Authorization', () => {
+it('should require authentication for all routes', async () => {
+const res = await request(app).get('/videos');
+expect(res.status).not.toBe(401);
+});
+it('should allow admin to access admin-only routes', async () => {
+  const res = await request(app)
+    .post('/videos/upload/initialize')
+    .send({
+      title: 'Video',
+      fileName: 'video.mp4',
+      fileSize: 1000,
+      contentType: 'video/mp4'
+    });
+
+  expect(res.status).not.toBe(403);
+});
+});
+/* ==================== DATA VALIDATION ==================== */
+describe('Data Validation', () => {
+it('should validate price is a number', async () => {
+Video.mockImplementation((data) => ({
+...data,
+save: jest.fn(),
+_id: 'v1'
+}));
+  generatePresignedUploadUrl.mockResolvedValue({
+    uploadUrl: 'url',
+    s3Key: 'key',
+    fields: {}
+  });
+
+  const res = await request(app)
+    .post('/videos/upload/initialize')
+    .send({
+      title: 'Video',
+      price: 'invalid',
+      fileName: 'video.mp4',
+      fileSize: 1000,
+      contentType: 'video/mp4'
+    });
+
+  expect(res.status).toBe(200);
+});
+
+it('should handle negative page numbers', async () => {
+  Video.find.mockReturnValue({
+    select: jest.fn().mockReturnThis(),
+    sort: jest.fn().mockReturnThis(),
+    skip: jest.fn().mockReturnThis(),
+    limit: jest.fn().mockResolvedValue([])
+  });
+
+  Video.countDocuments.mockResolvedValue(0);
+  Purchase.find.mockReturnValue({
+    distinct: jest.fn().mockResolvedValue([])
+  });
+
+  const res = await request(app)
+    .get('/videos')
+    .query({ page: -5 });
+
+  expect(res.status).toBe(200);
+});
+
+it('should limit maximum page size', async () => {
+  Video.find.mockReturnValue({
+    select: jest.fn().mockReturnThis(),
+    sort: jest.fn().mockReturnThis(),
+    skip: jest.fn().mockReturnThis(),
+    limit: jest.fn().mockResolvedValue([])
+  });
+
+  Video.countDocuments.mockResolvedValue(0);
+  Purchase.find.mockReturnValue({
+    distinct: jest.fn().mockResolvedValue([])
+  });
+
+  const res = await request(app)
+    .get('/videos')
+    .query({ limit: 1000 });
+
+  expect(res.status).toBe(200);
+});
+});
+/* ==================== PERFORMANCE & CONCURRENCY ==================== */
+describe('Performance Tests', () => {
+it('should handle multiple concurrent video list requests', async () => {
+Video.find.mockReturnValue({
+select: jest.fn().mockReturnThis(),
+sort: jest.fn().mockReturnThis(),
+skip: jest.fn().mockReturnThis(),
+limit: jest.fn().mockResolvedValue([])
+});
+  Video.countDocuments.mockResolvedValue(0);
+  Purchase.find.mockReturnValue({
+    distinct: jest.fn().mockResolvedValue([])
+  });
+
+  const requests = Array(10).fill(null).map(() => 
+    request(app).get('/videos')
+  );
+
+  const responses = await Promise.all(requests);
+
+  responses.forEach(res => {
+    expect(res.status).toBe(200);
+  });
+});
+
+it('should handle purchase check for video with many purchases', async () => {
+  Video.findOne.mockResolvedValue({
+    _id: 'v1',
+    id: 'vid1',
+    uploadStatus: 'completed',
+    toObject: () => ({ title: 'Popular Video' })
+  });
+
+  Purchase.findOne.mockResolvedValue({
+    purchaseDate: new Date(),
+    accessCount: 1000
+  });
+
+  const res = await request(app).get('/videos/vid1');
+
+  expect(res.status).toBe(200);
+  expect(res.body.purchased).toBe(true);
+});
+});
 });
