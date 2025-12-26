@@ -8,8 +8,17 @@ const videoRoutes = require('./routes/videos');
 const adminRoutes = require('./routes/admin');
 const UserRoute = require('./routes/user');
 const paymentRoutes = require('./routes/payment'); // Payment Route
-
+const client = require('prom-client');
 const app = express();
+
+
+client.collectDefaultMetrics();
+
+app.get("/metrics", async (req, res) => {
+  res.set("Content-Type", client.register.contentType);
+  res.end(await client.register.metrics());
+});
+
 
 // ====== MIDDLEWARE ======
 // CORS

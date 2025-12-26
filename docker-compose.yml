@@ -233,11 +233,13 @@ volumes:
     driver: local
   app_logs:
     driver: local
+  app_tmp:
+    driver: local
   nginx_logs:
     driver: local
   # vault_data:
   #   driver: local
   prometheus_data:
     driver: local
-  # grafana_data:
-  #   driver: local
+  grafana_data:
+    driver: local
