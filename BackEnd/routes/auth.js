@@ -19,7 +19,6 @@ router.post('/register', async (req, res) => {
     if (password.length < 6) {
       return res.status(400).json({ error: 'Password must be at least 6 characters long' });
     }
-    
     // Check if user already exists
     const existingUser = await User.findOne({ email });
     if (existingUser) {
