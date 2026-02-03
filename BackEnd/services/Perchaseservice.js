@@ -1,11 +1,11 @@
 const mongoose = require('mongoose');
-const Purchase = require('../../models/Purchase');
-const Video = require('../../models/Video');
-const User = require('../../models/User');
+const Purchase = require('../models/Purchase');
+const Video = require('../models/Video');
+const User = require('../models/User');
 const PaymentService = require('../payment/PaymentService');
-const { withTransaction } = require('../../utils/transaction');
-const logger = require('../../utils/logger');
-const { generateIdempotencyKey } = require('../../utils/idempotency');
+const { withTransaction } = require('../utils/transaction');
+const logger = require('../utils/logger');
+const { generateIdempotencyKey } = require('../utils/idempotency');
 
 class PurchaseService {
   async purchaseVideo(userId, videoId, paymentData) {

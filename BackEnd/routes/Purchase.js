@@ -1,19 +1,27 @@
 const express = require('express');
 const router = express.Router();
-const PurchaseService = require('../../../services/purchase/PurchaseService');
-const authenticateToken = require('../../../middleware/auth');
-const preventDuplicate = require('../../../middleware/preventDuplicate');
-const { releaseLockMiddleware } = require('../../../middleware/releaseLock');
-const validateRequest = require('../../../middleware/validateRequest');
-const rateLimiter = require('../../../middleware/rateLimiter');
-
+const PurchaseService = require('../services/purchase/PurchaseService');
+const authenticateToken = require('../middleware/auth');
+const preventDuplicate = require('../middleware/preventduplicate');
+const { releaseLockMiddleware } = require('../middleware/releaseLock');
+const validateRequest = require('../middleware/validateRequest');
+const rateLimiter = require('../middleware/rateLimiter');
+const customValidators = require('../utils/customValidators');
 // Purchase single video
 router.post('/:id/purchase',
   authenticateToken,
   rateLimiter({ windowMs: 60000, max: 10 }), // 10 requests per minute
   preventDuplicate('purchase', { ttl: 30 }),
   validateRequest({
-    body: ['paymentMethod', 'transactionId']
+    params: {
+      id: ['required', 'mongoId']
+    },
+    body: {
+      paymentMethod: ['required', { custom: customValidators.validPaymentMethod }],
+      transactionId: ['required', { custom: customValidators.validTransactionId }],
+      amount: ['optional', 'number'],
+      currency: ['optional', { in: ['THB', 'USD', 'EUR'] }]
+    }
   }),
   releaseLockMiddleware,
   async (req, res) => {
@@ -29,6 +37,41 @@ router.post('/:id/purchase',
       res.status(error.status || 400).json({
         error: error.message,
         code: error.code || 'PURCHASE_ERROR'
+      });
+    }
+  }
+);
+router.post('/bulk',
+  authenticateToken,
+  rateLimiter({ windowMs: 60000, max: 5 }),
+  preventDuplicate('bulk', { ttl: 60 }),
+  validateRequest({
+    body: {
+      videoIds: [
+        'required', 
+        'array', 
+        { custom: customValidators.isMongoIdArray },
+        { custom: customValidators.uniqueVideoIds },
+        { custom: customValidators.maxVideoIds(100) }
+      ],
+      paymentMethod: ['required', { custom: customValidators.validPaymentMethod }],
+      transactionId: ['required', { custom: customValidators.validTransactionId }]
+    }
+  }),
+  releaseLockMiddleware,
+  async (req, res) => {
+    try {
+      const result = await PurchaseService.bulkPurchaseVideos(
+        req.user._id,
+        req.body.videoIds,
+        req.body
+      );
+      
+      res.json(result);
+    } catch (error) {
+      res.status(error.status || 400).json({
+        error: error.message,
+        code: error.code || 'BULK_PURCHASE_ERROR'
       });
     }
   }

@@ -30,6 +30,7 @@
     "dotenv": "^16.3.1",
     "escape-string-regexp": "^4.0.0",
     "express": "^4.18.2",
+    "express-validator": "^7.3.1",
     "glob": "^11.1.0",
     "hls.js": "^1.6.13",
     "jsonwebtoken": "^9.0.2",
@@ -41,6 +42,7 @@
     "prom-client": "^15.1.3",
     "qs": "^6.14.0",
     "uuid": "^9.0.0",
+    "winston": "^3.19.0",
     "ws": "^8.18.3"
   },
   "devDependencies": {

@@ -1,3 +1,5 @@
+const mongoose = require('mongoose');
+
 const idempotencyRecordSchema = new mongoose.Schema({
   key: { type: String, required: true, unique: true },
   userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
