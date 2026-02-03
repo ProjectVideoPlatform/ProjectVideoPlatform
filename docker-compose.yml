@@ -82,8 +82,6 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-
-    image: secure-video-app:latest
     container_name: secure-video-app
     restart: unless-stopped
 
@@ -105,8 +103,7 @@ services:
 
     # writable runtime dirs
     - app_logs:/app/logs
-    - app_tmp:/app/tmp
-
+ 
     networks:
     - secure-video-network
 

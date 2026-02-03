@@ -42,12 +42,37 @@ purchaseSchema.index(
   { transactionId: 1 },
   { unique: true, sparse: true }
 );
+// ผู้ใช้ซื้ออะไรบ่อยที่สุด
+purchaseSchema.index({ userId: 1, purchaseDate: -1 });
 
-// query access เร็ว
-purchaseSchema.index(
-  { userId: 1, videoId: 1, status: 1, expiresAt: 1 }
-);
+// วิดีโอไหนขายดีที่สุด
+purchaseSchema.index({ videoId: 1, status: 1, purchaseDate: -1 });
 
+// รายได้รายวัน
+purchaseSchema.index({ 
+  purchaseDate: 1, 
+  status: 1, 
+  currency: 1 
+});
+  // query access เร็ว
+  purchaseSchema.index(
+    { userId: 1, videoId: 1, status: 1, expiresAt: 1 }
+  );
+purchaseSchema.index({ userId: 1, purchaseDate: -1 });
+
+// สำหรับ admin: หาซื้อที่กำลังจะหมดอายุ
+purchaseSchema.index({ expiresAt: 1, status: 1 });
+
+// สำหรับ cleanup job: ซื้อที่หมดอายุแล้ว
+purchaseSchema.index({ 
+  expiresAt: 1, 
+  status: 1 
+}, { 
+  partialFilterExpression: { 
+    expiresAt: { $lt: new Date() },
+    status: 'completed'
+  }
+});
 /* ---------------- STATIC ---------------- */
 
 purchaseSchema.statics.hasAccess = async function (userId, videoId) {
@@ -78,5 +103,21 @@ purchaseSchema.methods.recordAccess = async function (currentTime = 0) {
     }
   );
 };
+// ใน purchaseSchema เพิ่ม validation
+purchaseSchema.pre('save', function(next) {
+  // ตรวจสอบว่า expiresAt ต้องมากกว่า purchaseDate
+  if (this.expiresAt && this.expiresAt <= this.purchaseDate) {
+    return next(new Error('expiresAt must be after purchaseDate'));
+  }
+  
+  // ตรวจสอบ amount
+  if (this.amount <= 0) {
+    return next(new Error('amount must be greater than 0'));
+  }
+  
+  // Auto-update updatedAt
+  this.updatedAt = new Date();
+  next();
+});
 
 module.exports = mongoose.model('Purchase', purchaseSchema);
