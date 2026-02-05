@@ -1,0 +1,104 @@
+---
+# React App Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: react-app-service
+  namespace: secure-video
+  labels:
+    app: react-app
+spec:
+  type: ClusterIP
+  ports:
+  - port: 5173
+    targetPort: 5173
+    protocol: TCP
+    name: http
+  selector:
+    app: react-app
+
+---
+# MongoDB Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: mongodb-service
+  namespace: secure-video
+  labels:
+    app: mongodb
+spec:
+  type: ClusterIP
+  clusterIP: None  # Headless service for StatefulSet
+  ports:
+  - port: 27017
+    targetPort: 27017
+    protocol: TCP
+    name: mongodb
+  selector:
+    app: mongodb
+
+---
+# Redis Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis-service
+  namespace: secure-video
+  labels:
+    app: redis
+spec:
+  type: ClusterIP
+  clusterIP: None  # Headless service for StatefulSet
+  ports:
+  - port: 6379
+    targetPort: 6379
+    protocol: TCP
+    name: redis
+  selector:
+    app: redis
+
+---
+# Backend App Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: app-service
+  namespace: secure-video
+  labels:
+    app: backend-app
+spec:
+  type: ClusterIP
+  ports:
+  - port: 3000
+    targetPort: 3000
+    protocol: TCP
+    name: http
+  selector:
+    app: backend-app
+  sessionAffinity: ClientIP
+  sessionAffinityConfig:
+    clientIP:
+      timeoutSeconds: 10800
+
+---
+# Nginx Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: nginx-service
+  namespace: secure-video
+  labels:
+    app: nginx
+spec:
+  type: LoadBalancer  # Use NodePort for local, LoadBalancer for cloud
+  ports:
+  - port: 80
+    targetPort: 80
+    protocol: TCP
+    name: http
+  - port: 443
+    targetPort: 443
+    protocol: TCP
+    name: https
+  selector:
+    app: nginx

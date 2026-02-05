@@ -6,7 +6,8 @@ const s3 = new S3Client({ region: "ap-southeast-1" });
 
 // Generate presigned URL for direct upload to S3
 async function generatePresignedUploadUrl(videoId, fileName, fileSize, contentType) {
-    console.log(s3.config.region+" maatataatat"); // ต้องได้ ap-southeast-1
+  const region = await s3.config.region();
+console.log(region + " maatataatat");
   const ext = fileName.split(".").pop();
   const key = `uploads/${videoId}/original.${ext}`;
   

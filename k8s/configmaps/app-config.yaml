@@ -1,0 +1,22 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config
+  namespace: secure-video
+data:
+  NODE_ENV: "production"
+  PORT: "3000"
+  LOG_LEVEL: "info"
+  
+  # MongoDB Config
+  MONGODB_HOST: "mongodb-service"
+  MONGODB_PORT: "27017"
+  MONGODB_DATABASE: "secure-video"
+  
+  # Redis Config
+  REDIS_HOST: "redis-service"
+  REDIS_PORT: "6379"
+  
+  # Application Config
+  MAX_FILE_SIZE: "100MB"
+  ALLOWED_ORIGINS: "http://localhost:5173,https://yourdomain.com"

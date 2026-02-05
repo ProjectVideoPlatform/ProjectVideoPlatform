@@ -32,7 +32,7 @@
   const s3 = new AWS.S3();
   const mediaConvert = new AWS.MediaConvert({
     endpoint: config.mediaConvertEndpoint,
-      region:  'ap-southeast-1'
+      region:  'us-east-1'
   });
 
   module.exports = {

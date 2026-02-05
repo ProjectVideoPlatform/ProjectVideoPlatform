@@ -197,7 +197,7 @@ const createMediaConvertJob = async (inputS3Path, outputS3Path, videoId) => {
   };
 
   const params = {
-    Queue: 'Default',
+    Queue: config.mediaConvertQueueArn,
     UserMetadata: {
       VideoId: videoId
     },

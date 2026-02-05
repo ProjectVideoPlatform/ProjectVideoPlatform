@@ -445,72 +445,62 @@ router.post('/:id/play', authenticateToken, async (req, res) => {
 });
 
 
-// SNS subscription handler
-// Middleware สำหรับ SNS / MediaConvert webhook
-const parseSnsBody = (req, res, next) => {
-  try {
-    // ถ้า req.body เป็น string → parse เป็น JSON
-    if (typeof req.body === 'string') {
-      req.body = JSON.parse(req.body);
-    }
 
-    // SNS บางอันจะมี Message เป็น string JSON อีกที
-    if (req.body.Type === 'Notification' && req.body.Message) {
-      try {
-        req.body.Message = JSON.parse(req.body.Message);
-      } catch (e) {
-        // ถ้า parse ไม่ได้ ก็ปล่อยเป็น string ไว้
-      }
-    }
-    next();
-  } catch (err) {
-    console.error('Failed to parse SNS body', err);
-    res.status(400).send('Invalid SNS body');
-  }
-};
 
 router.post(
   "/mediaconvert/subscribe",
   express.json({ type: "*/*" }),
   async (req, res) => {
     console.log("SNS endpoint hit");
+    console.log("Raw SNS body:", req.body);
 
     const body = req.body;
-    console.log("SNS Body:", body);
 
-    // MediaConvert ส่งมาแบบ EventBridge Format
-    const detailType = body["detail-type"];
-    const detail = body.detail;
+    // 1️⃣ Subscription confirmation (สำคัญมาก)
+    if (body.Type === "SubscriptionConfirmation") {
+      console.log("Confirming SNS subscription...");
+      await fetch(body.SubscribeURL);
+      return res.json({ confirmed: true });
+    }
 
-    console.log("detail-type:", detailType);
-    console.log("detail:", detail);
+    // 2️⃣ Notification (event จริง)
+    if (body.Type === "Notification") {
+      const message = JSON.parse(body.Message);
 
-    if (detailType === "MediaConvert Job State Change") {
-      const status = detail.status;
-      const videoId =
-        detail.userMetadata?.VideoId ||
-        detail.userMetadata?.videoId ||
-        null;
+      const detailType = message["detail-type"];
+      const detail = message.detail;
 
-      console.log(`Job ${detail.jobId} status: ${status}, videoId=${videoId}`);
+      console.log("detail-type:", detailType);
+      console.log("detail:", detail);
 
-      if (!videoId) {
-        console.log("❌ VideoId missing. userMetadata:", detail.userMetadata);
-        return res.json({ error: "VideoId missing" });
-      }
+      if (detailType === "MediaConvert Job State Change") {
+        const status = detail.status;
+        const videoId = detail.userMetadata?.VideoId;
 
-      // อัปเดตฐานข้อมูล
-      const video = await Video.findOne({ id: videoId });
-      if (video) {
+        console.log(
+          `Job ${detail.jobId} status=${status}, videoId=${videoId}`
+        );
+
+        if (!videoId) {
+          console.log("❌ VideoId missing", detail.userMetadata);
+          return res.json({ error: "VideoId missing" });
+        }
+
+        const video = await Video.findOne({ id: videoId });
+        if (!video) {
+          console.log("❌ Video not found:", videoId);
+          return res.json({ error: "Video not found" });
+        }
+
         if (status === "COMPLETE") {
           video.uploadStatus = "completed";
           video.thumbnailPath = `videos/${videoId}/thumbnails/`;
         } else if (status === "ERROR") {
           video.uploadStatus = "failed";
         }
-        await video.save();
 
-        console.log(`Video ${videoId} updated to ${video.uploadStatus}`);
+        await video.save();
+        console.log(`✅ Video ${videoId} updated → ${video.uploadStatus}`);
       }
     }
 
@@ -518,17 +508,19 @@ router.post(
   }
 );
 
+
 // MediaConvert webhook handler
 router.post('/mediaconvert/webhook', async (req, res) => {
   try {
     const body = req.body;
     const { detail } = body;
 
-    if (!detail || !detail.userMetadata || !detail.userMetadata.VideoId) {
+    if (!detail || !detail.userMetadata || !detail.userMetadata.videoId) {
+      console.log('Invalid webhook payload');
       return res.status(400).json({ error: 'Invalid webhook payload' });
     }
 
-    const videoId = detail.userMetadata.VideoId;
+    const videoId = detail.userMetadata.videoId;
     const video = await Video.findOne({ id: videoId });
 
     if (!video) {

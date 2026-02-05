@@ -22,14 +22,36 @@ router.put('/profile', authenticateToken, async (req, res) => {
 
 // Change password
 router.post('/change-password', authenticateToken, async (req, res) => {
-  const { oldPassword, newPassword } = req.body;
-  const user = await User.findById(req.user.id);
-  const isMatch = await user.comparePassword(oldPassword);
-  if (!isMatch) return res.status(400).json({ error: 'Old password is incorrect' });
+  try {
+    const { oldPassword, newPassword } = req.body;
 
-  user.password = newPassword;
-  await user.save();
-  res.json({ message: 'Password changed successfully' });
+    // 1. ตรวจสอบข้อมูลเบื้องต้น
+    if (!oldPassword || !newPassword) {
+      return res.status(400).json({ error: 'กรุณากรอกรหัสผ่านเดิมและรหัสผ่านใหม่' });
+    }
+    if (newPassword.length < 6) {
+      return res.status(400).json({ error: 'รหัสผ่านใหม่ต้องมีความยาวอย่างน้อย 6 ตัวอักษร' });
+    }
+
+    // 2. ดึงข้อมูล User
+    const user = await User.findById(req.user.id);
+    if (!user) return res.status(404).json({ error: 'ไม่พบผู้ใช้งานในระบบ' });
+
+    // 3. ตรวจสอบรหัสผ่านเดิม
+    const isMatch = await user.comparePassword(oldPassword);
+    if (!isMatch) {
+      return res.status(400).json({ error: 'รหัสผ่านเดิมไม่ถูกต้อง' });
+    }
+
+    // 4. อัปเดตรหัสผ่าน (Mongoose Middleware จะ Hash ให้เองถ้าคุณตั้งค่าไว้ใน Schema)
+    user.password = newPassword;
+    await user.save();
+
+    res.json({ message: 'เปลี่ยนรหัสผ่านสำเร็จแล้ว' });
+  } catch (error) {
+    console.error('Change Password Error:', error);
+    res.status(500).json({ error: 'เกิดข้อผิดพลาดภายในเซิร์ฟเวอร์' });
+  }
 });
 
 // Get purchase history

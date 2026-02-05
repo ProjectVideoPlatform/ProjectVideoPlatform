@@ -1,0 +1,64 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: react-app
+  namespace: secure-video
+  labels:
+    app: react-app
+    tier: frontend
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: react-app
+  template:
+    metadata:
+      labels:
+        app: react-app
+        tier: frontend
+    spec:
+      containers:
+      - name: react-app
+        image: node:20-alpine
+        workingDir: /app
+        command: 
+          - sh
+          - -c
+          - "npm install && npm run dev -- --host"
+        ports:
+        - containerPort: 5173
+          name: http
+        env:
+        - name: CHOKIDAR_USEPOLLING
+          value: "true"
+        - name: HOST
+          value: "0.0.0.0"
+        volumeMounts:
+        - name: app-code
+          mountPath: /app
+        - name: node-modules
+          mountPath: /app/node_modules
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "250m"
+          limits:
+            memory: "1Gi"
+            cpu: "500m"
+        livenessProbe:
+          httpGet:
+            path: /
+            port: 5173
+          initialDelaySeconds: 60
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /
+            port: 5173
+          initialDelaySeconds: 30
+          periodSeconds: 5
+      volumes:
+      - name: app-code
+        emptyDir: {}  # Replace with PVC or ConfigMap in production
+      - name: node-modules
+        emptyDir: {}
