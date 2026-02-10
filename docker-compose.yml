@@ -19,9 +19,9 @@ services:
     image: mongo:7.0
     container_name: secure-video-mongodb
     restart: unless-stopped
+    # เพิ่มบรรทัดนี้เพื่อสั่งให้รันแบบ Replica Set
+    command: ["--replSet", "rs0", "--bind_ip_all"] 
     environment:
-      MONGO_INITDB_ROOT_USERNAME: admin
-      MONGO_INITDB_ROOT_PASSWORD: securepassword123
       MONGO_INITDB_DATABASE: secure-video
     ports:
       - "27017:27017"
@@ -31,11 +31,11 @@ services:
     networks:
       - secure-video-network
     healthcheck:
-      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      # ปรับ healthcheck ให้รองรับการเช็กผ่าน mongosh
+      test: ["CMD", "mongosh", "--username", "admin", "--password", "securepassword123", "--eval", "db.adminCommand('ping')"]
       interval: 30s
       timeout: 10s
       retries: 3
-
   # Redis
   redis:
     image: redis:7.2-alpine

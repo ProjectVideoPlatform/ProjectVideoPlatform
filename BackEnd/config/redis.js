@@ -1,6 +1,7 @@
 const Redis = require('ioredis');
 const logger = require('../utils/logger');
-
+  const path = require('path');
+   require('dotenv').config({ path: path.resolve(__dirname, '../.env') });
 class RedisClient {
   constructor() {
     this.client = null;
@@ -27,11 +28,13 @@ class RedisClient {
     this.client.on('connect', () => {
       this.isConnected = true;
       logger.info('Redis connected successfully');
+      console.log('Redis connected successfully');
     });
     
     this.client.on('error', (error) => {
       logger.error('Redis error:', error);
       this.isConnected = false;
+      console.error('Redis error:', error);
     });
     
     this.client.on('close', () => {
@@ -85,6 +88,15 @@ class RedisClient {
       this.isConnected = false;
     }
   }
+  // เพิ่มเข้าไปใน class RedisClient ในไฟล์ config
+pipeline() {
+  if (!this.client) {
+    // กรณีที่ยังไม่ได้ connect แต่อยากใช้ pipeline
+    // อาจจะ throw error หรือสั่ง connect ก่อนตามความเหมาะสม
+    throw new Error('Redis client not initialized. Call connect() first.');
+  }
+  return this.client.pipeline();
+}
 }
 
 module.exports = new RedisClient();

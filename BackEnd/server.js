@@ -2,7 +2,7 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const connectDB = require('./config/database');
-
+const redisClient = require('./config/redis'); // ปรับ path ให้ตรงกับที่เก็บไฟล์ RedisClient
 const authRoutes = require('./routes/auth');
 const videoRoutes = require('./routes/videos');
 const adminRoutes = require('./routes/admin');
@@ -10,7 +10,7 @@ const UserRoute = require('./routes/user');
 const paymentRoutes = require('./routes/payment'); // Payment Route
 const client = require('prom-client');
 const app = express();
-
+const purchaseRoutes = require('./routes/Purchase');
 
 client.collectDefaultMetrics();
 
@@ -39,6 +39,7 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 // See routes/payment.js example below.
 
 // ====== ROUTES ======
+app.use('/api/purchases', purchaseRoutes);
 app.use('/api/auth', authRoutes);
 app.use('/api/videos', videoRoutes);
 app.use('/api/admin', adminRoutes);
@@ -62,7 +63,8 @@ const startServer = async () => {
     await connectDB();
 
     const PORT = process.env.PORT || 3000;
-
+console.log('Connecting to Redis...');
+    await redisClient.connect();
     // Start server
     const server = app.listen(PORT, () => {
       console.log(`Server running on port ${PORT}`);

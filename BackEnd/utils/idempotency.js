@@ -1,6 +1,6 @@
 const crypto = require('crypto');
 const mongoose = require('mongoose');
-const IdempotencyRecord = require('../models/IdempotencyRecord');
+const IdempotencyRecord = require('../models/idempotencyRecord');
 
 const generateIdempotencyKey = (userId, transactionId, payload) => {
   const stringifiedPayload = typeof payload === 'string' 
