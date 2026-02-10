@@ -56,7 +56,10 @@ class RedisClient {
     
     return this.client;
   }
-  
+  async expire(key, seconds) {
+    if (!this.isConnected) await this.connect();
+    return this.client.expire(key, seconds);
+  }
   async get(key) {
     if (!this.isConnected) await this.connect();
     return this.client.get(key);

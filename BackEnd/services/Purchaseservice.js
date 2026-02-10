@@ -2,7 +2,7 @@ const mongoose = require('mongoose');
 const Purchase = require('../models/Purchase');
 const Video = require('../models/Video');
 const User = require('../models/User');
-const PaymentService = require('./PaymentService');
+const PaymentService = require('./paymentController');
 const logger = require('../utils/logger');
 const { generateIdempotencyKey } = require('../utils/idempotency');
 
@@ -84,7 +84,10 @@ class PurchaseService {
       });
       
       await purchase.save({ session });
-      
+         if (!paymentResult.success) {
+            await session.abortTransaction();
+        throw new Error(`Payment failed: ${paymentResult.reason}`);
+      }
       // 5. Update user
       await User.updateOne(
         { _id: userId },

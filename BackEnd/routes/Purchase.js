@@ -69,8 +69,8 @@ router.post('/video/:videoId/purchase',
 // Bulk video purchase
 router.post('/videos/bulk-purchase',
   authenticateToken,
-  createRateLimiter({ windowMs: 60000, max: 5 }), // 5 requests per minute
-  createDuplicatePrevention('bulk_purchase', { ttl: 60 }),
+  rateLimiter({ windowMs: 60000, max: 5 }), // 5 requests per minute
+  preventDuplicate('bulk_purchase', { ttl: 60 }),
   validateRequest({
     body: {
       videoIds: [
@@ -122,7 +122,7 @@ router.post('/videos/bulk-purchase',
 // Get purchase history
 router.get('/history',
   authenticateToken,
-  createRateLimiter({ windowMs: 60000, max: 30 }),
+  rateLimiter({ windowMs: 60000, max: 30 }),
   validateRequest({
     query: {
       page: ['optional', 'integer', { min: 1 }],
@@ -167,7 +167,7 @@ router.get('/history',
 // Check video access
 router.get('/video/:videoId/access',
   authenticateToken,
-  createRateLimiter({ windowMs: 60000, max: 30 }),
+  rateLimiter({ windowMs: 60000, max: 30 }),
   validateRequest({
     params: {
       videoId: ['required', 'mongoId']
@@ -194,8 +194,8 @@ router.get('/video/:videoId/access',
 // Request refund
 router.post('/:purchaseId/refund',
   authenticateToken,
-  createRateLimiter({ windowMs: 60000, max: 5 }),
-  createDuplicatePrevention('refund', { ttl: 30 }),
+  rateLimiter({ windowMs: 60000, max: 5 }),
+  preventDuplicate('refund', { ttl: 30 }),
   validateRequest({
     params: {
       purchaseId: ['required', 'mongoId']
