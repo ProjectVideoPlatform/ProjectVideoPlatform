@@ -166,11 +166,11 @@ services:
     ports:
       - "8081:8081"
     environment:
-      ME_CONFIG_MONGODB_ADMINUSERNAME: admin
-      ME_CONFIG_MONGODB_ADMINPASSWORD: securepassword123
-      ME_CONFIG_MONGODB_URL: mongodb://admin:securepassword123@mongodb:27017/
-      ME_CONFIG_BASICAUTH_USERNAME: admin
-      ME_CONFIG_BASICAUTH_PASSWORD: admin123
+      # เชื่อมต่อแบบไม่มี User/Pass โดยระบุ Replica Set และ Direct Connection
+      - ME_CONFIG_MONGODB_URL=mongodb://mongodb:27017/secure-video?replicaSet=rs0&directConnection=true
+      # ส่วนด้านล่างนี้คือ Login เข้าหน้าเว็บ Mongo Express (ยังควรมีไว้เพื่อความปลอดภัยหน้าบ้าน)
+      - ME_CONFIG_BASICAUTH_USERNAME=admin
+      - ME_CONFIG_BASICAUTH_PASSWORD=admin123
     networks:
       - secure-video-network
     depends_on:

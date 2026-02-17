@@ -13,17 +13,17 @@ const path = require('path');
 // ⚠️ แก้ไข: เพิ่ม URL ที่ต้องการเซ็นชื่อเป็นพารามิเตอร์ตัวแรก
 const generateSignedCookies = (videoId, expirationMinutes = 15) => {
     try {
-        const privateKeyPath = path.resolve(config.cloudFrontPrivateKeyPath);
-        console.log('Private key path:', privateKeyPath);
+        // const privateKeyPath = path.resolve(config.cloudFrontPrivateKeyPath);
+        // console.log('Private key path:', privateKeyPath);
 
-        if (!fs.existsSync(privateKeyPath)) {
-            throw new Error('Private key file not found!');
-        }
-
-        const privateKey = fs.readFileSync(privateKeyPath, 'utf8');
-        console.log('Private key loaded:', privateKey.startsWith('-----BEGIN'));
-        console.log('Private key length:', privateKey.length);
-
+        // if (!fs.existsSync(privateKeyPath)) {
+        //     throw new Error('Private key file not found!');
+        // }
+ 
+        // const privateKey = fs.readFileSync(privateKeyPath, 'utf8');
+        // console.log('Private key loaded:', privateKey.startsWith('-----BEGIN'));
+        // console.log('Private key length:', privateKey.length);
+        const privateKey = process.env.CLOUDFRONT_PRIVATE_KEY.replace(/\\n/g, '\n');
         const expires = Math.floor(Date.now() / 1000) + (expirationMinutes * 60);
 
         // กำหนด Resource ให้ตรงกับ URL ที่จะใช้เป็นพารามิเตอร์ตัวแรกของ getSignedCookies

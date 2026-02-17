@@ -389,7 +389,7 @@ router.post('/:id/purchase', authenticateToken, async (req, res) => {
 router.post('/:id/play', authenticateToken, async (req, res) => {
   try {
     const video = await Video.findOne({ 
-      _id: req.params.id,
+      id: req.params.id,
       isActive: true 
     });
     
@@ -449,62 +449,77 @@ router.post('/:id/play', authenticateToken, async (req, res) => {
 
 router.post(
   "/mediaconvert/subscribe",
-  express.json({ type: "*/*" }),
+  express.json({ type: "*/*" }), // รองรับทุก Content-Type จาก AWS
   async (req, res) => {
-    console.log("SNS endpoint hit");
-    console.log("Raw SNS body:", req.body);
+    try {
+      console.log("--- New Webhook Received ---");
+      const body = req.body;
+      console.log("Raw Body:", JSON.stringify(body));
+      // 1️⃣ จัดการเรื่อง Subscription Confirmation (กรณีใช้ SNS)
+      if (body.Type === "SubscriptionConfirmation") {
+        console.log("Confirming SNS subscription...");
+        await fetch(body.SubscribeURL);
+        return res.json({ confirmed: true });
+      }
 
-    const body = req.body;
-
-    // 1️⃣ Subscription confirmation (สำคัญมาก)
-    if (body.Type === "SubscriptionConfirmation") {
-      console.log("Confirming SNS subscription...");
-      await fetch(body.SubscribeURL);
-      return res.json({ confirmed: true });
-    }
-
-    // 2️⃣ Notification (event จริง)
-    if (body.Type === "Notification") {
-      const message = JSON.parse(body.Message);
+      // 2️⃣ แกะข้อมูล (รองรับทั้ง EventBridge Direct และ SNS Wrapper)
+      let message;
+      if (body["detail-type"]) {
+        // กรณีส่งตรงจาก EventBridge (ตรงกับ Log ล่าสุดของคุณ)
+        message = body;
+      } else if (body.Type === "Notification" && body.Message) {
+        // กรณีส่งผ่าน SNS
+        message = JSON.parse(body.Message);
+      } else {
+        console.log("⚠️ Unknown format:", body);
+        return res.json({ received: false, error: "Unknown format" });
+      }
 
       const detailType = message["detail-type"];
       const detail = message.detail;
 
-      console.log("detail-type:", detailType);
-      console.log("detail:", detail);
-
+      // 3️⃣ ประมวลผลสถานะ MediaConvert
       if (detailType === "MediaConvert Job State Change") {
         const status = detail.status;
         const videoId = detail.userMetadata?.VideoId;
 
-        console.log(
-          `Job ${detail.jobId} status=${status}, videoId=${videoId}`
-        );
+        console.log(`Job ID: ${detail.jobId} | Status: ${status} | VideoId: ${videoId}`);
 
         if (!videoId) {
-          console.log("❌ VideoId missing", detail.userMetadata);
-          return res.json({ error: "VideoId missing" });
+          console.log("❌ VideoId missing in userMetadata");
+          return res.status(400).json({ error: "VideoId missing" });
         }
 
+        // ค้นหาโดยใช้ _id (เพราะ videoId ที่ได้มาคือ UUID string)
+        // สำคัญ: Schema ของคุณต้องตั้ง _id: String
         const video = await Video.findOne({ id: videoId });
+
         if (!video) {
-          console.log("❌ Video not found:", videoId);
-          return res.json({ error: "Video not found" });
+          console.log("❌ Video not found in DB:", videoId);
+          return res.status(404).json({ error: "Video not found" });
         }
 
+        // 4️⃣ อัปเดตข้อมูลตามสถานะ
         if (status === "COMPLETE") {
           video.uploadStatus = "completed";
-          video.thumbnailPath = `videos/${videoId}/thumbnails/`;
+          // แนะนำให้ใส่ URL เต็มที่ดึงจาก CloudFront
+          video.thumbnailPath = `videos/${videoId}/thumbnails/original_thumb.0000000.jpg`;
+          console.log(`✅ Update COMPLETE for: ${videoId}`);
         } else if (status === "ERROR") {
           video.uploadStatus = "failed";
+          console.log(`❌ Update FAILED for: ${videoId}`);
         }
 
         await video.save();
-        console.log(`✅ Video ${videoId} updated → ${video.uploadStatus}`);
+        return res.json({ updated: true, videoId });
       }
-    }
 
-    res.json({ received: true });
+      res.json({ received: true });
+    } catch (error) {
+      console.error("🔥 Error in Webhook:", error.message);
+      // ส่ง 200 กลับไปให้ AWS เพื่อไม่ให้มัน Retry จนถล่ม Server เรา แต่ Log error ไว้ดูเอง
+      res.status(200).json({ error: "Processing failed", details: error.message });
+    }
   }
 );
 

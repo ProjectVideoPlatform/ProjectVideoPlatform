@@ -18,7 +18,8 @@
     // CloudFront
     cloudFrontDomain: process.env.CLOUDFRONT_DOMAIN,
     cloudFrontKeyPairId: process.env.CLOUDFRONT_KEY_PAIR_ID,
-    cloudFrontPrivateKeyPath: process.env.CLOUDFRONT_PRIVATE_KEY_PATH || '../keys/cloudfront-private-key.pem'
+    cloudFrontPrivateKeyPath: process.env.CLOUDFRONT_PRIVATE_KEY_PATH || '../keys/cloudfront-private-key.pem',
+    cloudFrontPrivateKey: process.env.CLOUDFRONT_PRIVATE_KEY
   };
 
   // Configure AWS SDK
