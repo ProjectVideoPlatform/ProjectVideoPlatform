@@ -1,47 +1,24 @@
-# Multi-stage build for production
-FROM node:20-alpine AS builder
-
+# Stage 1: Install dependencies
+FROM node:20-alpine AS deps
 WORKDIR /app
-
-# Copy package files
 COPY package*.json ./
+# ติดตั้งแค่ prod deps
+RUN npm ci --only=production
 
-# Install dependencies
-RUN npm ci --only=production && \
-    npm cache clean --force
-
-# Copy application code
-COPY . .
-
-# Build application (if using TypeScript)
-# RUN npm run build
-
-# Production stage
+# Stage 2: Final Image
 FROM node:20-alpine
-
-# Create non-root user
-RUN addgroup -g 1001 -S nodejs && \
-    adduser -S nodejs -u 1001
-
 WORKDIR /app
 
-# Copy dependencies and built files from builder
-COPY --from=builder --chown=nodejs:nodejs /app/node_modules ./node_modules
+# สร้าง User เพื่อความปลอดภัย
+RUN addgroup -g 1001 -S nodejs && adduser -S nodejs -u 1001
+
+# ✅ ก๊อปปี้เฉพาะ node_modules จาก stage แรก
+COPY --from=deps --chown=nodejs:nodejs /app/node_modules ./node_modules
+
+# ✅ ก๊อปปี้เฉพาะไฟล์ที่จำเป็นต้องใช้รัน (server.js และอื่นๆ ที่จำเป็น)
+# ไม่ควรใช้ COPY . . ถ้ามีไฟล์ขยะเยอะ
 COPY --chown=nodejs:nodejs . .
 
-# Create necessary directories
-RUN mkdir -p /app/logs /app/tmp && \
-    chown -R nodejs:nodejs /app/logs /app/tmp
-
-# Switch to non-root user
 USER nodejs
-
-# Expose port
 EXPOSE 3000
-
-# Health check
-HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
-    CMD node -e "require('http').get('http://localhost:3000/api/health', (r) => {if(r.statusCode !== 200) throw new Error(r.statusCode)})"
-
-# Start application
 CMD ["node", "server.js"]

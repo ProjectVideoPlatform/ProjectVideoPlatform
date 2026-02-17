@@ -1,25 +1,140 @@
+version: '3.8'
 
 services:
+  # RabbitMQ Message Broker
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: secure-video-rabbitmq
+    restart: unless-stopped
+    ports:
+      - "5672:5672"   # AMQP protocol
+      - "15672:15672" # Management UI (User/Pass: guest/guest)
+    environment:
+      - RABBITMQ_DEFAULT_USER=guest
+      - RABBITMQ_DEFAULT_PASS=guest
+    networks:
+      - secure-video-network
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Email Worker (Consumer)
+  email-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: secure-video-email-worker
+    restart: unless-stopped
+    command: ["node", "src/workers/emailWorker.js"]
+    user: "1001:1001"
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /app/tmp
+    env_file:
+      - ./BackEnd/.env
+    environment:
+      - NODE_ENV=production
+      - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672
+    networks:
+      - secure-video-network
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    volumes:
+      - ./BackEnd/keys:/app/keys:ro
+  transcode-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: secure-video-transcode-worker
+    restart: unless-stopped
+    command: ["node", "workers/transcodeWorker.js"]
+    env_file:
+      - ./BackEnd/.env  # <--- ชี้ไปที่ไฟล์ .env เพื่อให้ process.env มีค่า
+    environment:
+      - NODE_ENV=production
+    networks:
+      - secure-video-network
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      mongodb:
+        condition: service_healthy
+    user: "1001:1001"
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /app/tmp
+  # React Frontend
   react-app:
-    image:  node:20-alpine
+    image: node:20-alpine
     working_dir: /app
     volumes:
-      - ./Frontvideo1:/app      # สมมุติโค้ด React อยู่โฟลเดอร์ frontend
-      - /app/node_modules    # ป้องกันการแมปโฟลเดอร์ node_modules จาก host
-    command:  sh -c "npm install && npm run dev -- --host"
+      - ./Frontvideo1:/app
+      - /app/node_modules
+    command: sh -c "npm install && npm run dev -- --host"
     ports:
-      - "5173:5173"          # เปิดพอร์ต 3000 (host) ไป 5173 (container, vite default)
+      - "5173:5173"
     environment:
-      - CHOKIDAR_USEPOLLING=true  # ช่วยเรื่อง hot reload บน Windows/Linux บางกรณี
+      - CHOKIDAR_USEPOLLING=true
       - HOST=0.0.0.0
     networks:
       - secure-video-network
+
+  # Main Node.js API (Producer)
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: secure-video-app
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:3000:3000"
+    env_file:
+      - ./BackEnd/.env
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672
+    volumes:
+      - ./BackEnd/keys:/app/keys:ro
+      - ./BackEnd/vault/certs:/app/vault-certs:ro
+      - app_logs:/app/logs
+    networks:
+      - secure-video-network
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy # เพิ่มเพื่อให้แน่ใจว่าส่งคิวได้ทันทีที่เริ่ม
+    user: "1001:1001"
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /app/tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
   # MongoDB Database
   mongodb:
     image: mongo:7.0
     container_name: secure-video-mongodb
     restart: unless-stopped
-    # เพิ่มบรรทัดนี้เพื่อสั่งให้รันแบบ Replica Set
     command: ["--replSet", "rs0", "--bind_ip_all"] 
     environment:
       MONGO_INITDB_DATABASE: secure-video
@@ -31,11 +146,11 @@ services:
     networks:
       - secure-video-network
     healthcheck:
-      # ปรับ healthcheck ให้รองรับการเช็กผ่าน mongosh
-      test: ["CMD", "mongosh", "--username", "admin", "--password", "securepassword123", "--eval", "db.adminCommand('ping')"]
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"] # ปรับให้ simple ขึ้นถ้าไม่มี auth ในตัว
       interval: 30s
       timeout: 10s
       retries: 3
+
   # Redis
   redis:
     image: redis:7.2-alpine
@@ -49,11 +164,36 @@ services:
       - secure-video-network
     command: redis-server --appendonly yes --requirepass redispassword123
     healthcheck:
-      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
+      test: ["CMD", "redis-cli", "ping"]
       interval: 30s
       timeout: 10s
       retries: 3
 
+  # Nginx
+  nginx:
+    image: nginx:1.25-alpine
+    container_name: secure-video-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./BackEnd/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./BackEnd/nginx/conf.d:/etc/nginx/conf.d:ro
+      - ./BackEnd/ssl:/etc/nginx/ssl:ro
+      - nginx_logs:/var/log/nginx
+    networks:
+      - secure-video-network
+    depends_on:
+      - app
+
+  # Monitoring Profiles
+  prometheus:
+    image: prom/prometheus:v2.47.0
+    profiles: ["monitoring"]
+    # ... (คงเดิมตามไฟล์เก่า)
+    networks:
+      - secure-video-network
   # Vault - production-ready
   # vault:
   #   image: vault:1.13.3
@@ -76,167 +216,15 @@ services:
   #     test: ["CMD", "vault", "status", "-address=https://0.0.0.0:8200"]
   #     interval: 10s
   #     retries: 5
-
-  # Node.js Application
-  app:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: secure-video-app
-    restart: unless-stopped
-
-  # ❗ prod แนะนำให้ expose ผ่าน reverse proxy (nginx / traefik)
-    ports:
-    - "127.0.0.1:3000:3000"
-
-    env_file:
-    - ./BackEnd/.env
-
-    environment:
-     NODE_ENV: production
-     PORT: 3000
-
-    volumes:
-    # read-only secrets
-    - ./BackEnd/keys:/app/keys:ro
-    - ./BackEnd/vault/certs:/app/vault-certs:ro
-
-    # writable runtime dirs
-    - app_logs:/app/logs
- 
-    networks:
-    - secure-video-network
-
-    depends_on:
-     mongodb:
-       condition: service_healthy
-     redis:
-       condition: service_healthy
-
-  # ===== Container hardening =====
-    user: "1001:1001"
-
-    read_only: true
-
-    tmpfs:
-    - /tmp
-    - /app/tmp
-
-    security_opt:
-    - no-new-privileges:true
-
-    cap_drop:
-    - ALL
-  # ===== Healthcheck =====
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 30s
-
-  # Nginx Reverse Proxy
-  nginx:
-    image: nginx:1.25-alpine
-    container_name: secure-video-nginx
-    restart: unless-stopped
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ./BackEnd/nginx.conf:/etc/nginx/nginx.conf:ro
-      - ./BackEnd/nginx/conf.d:/etc/nginx/conf.d:ro
-      - ./BackEnd/ssl:/etc/nginx/ssl:ro
-      - nginx_logs:/var/log/nginx
-    networks:
-      - secure-video-network
-    depends_on:
-      - app
-    healthcheck:
-      test: ["CMD", "nginx", "-t"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-
-  # Mongo Express (dev only)ัรัรัะึรรั
-  mongo-express:
-    image: mongo-express:1.0
-    container_name: secure-video-mongo-express
-    restart: unless-stopped
-    ports:
-      - "8081:8081"
-    environment:
-      # เชื่อมต่อแบบไม่มี User/Pass โดยระบุ Replica Set และ Direct Connection
-      - ME_CONFIG_MONGODB_URL=mongodb://mongodb:27017/secure-video?replicaSet=rs0&directConnection=true
-      # ส่วนด้านล่างนี้คือ Login เข้าหน้าเว็บ Mongo Express (ยังควรมีไว้เพื่อความปลอดภัยหน้าบ้าน)
-      - ME_CONFIG_BASICAUTH_USERNAME=admin
-      - ME_CONFIG_BASICAUTH_PASSWORD=admin123
-    networks:
-      - secure-video-network
-    depends_on:
-      mongodb:
-        condition: service_healthy
-    profiles:
-      - dev
-
-  # Prometheus & Grafana (monitoring)
-  prometheus:
-    image: prom/prometheus:v2.47.0
-    container_name: secure-video-prometheus
-    restart: unless-stopped
-    ports:
-      - "9090:9090"
-    volumes:
-      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
-      - prometheus_data:/prometheus
-    command:
-      - '--config.file=/etc/prometheus/prometheus.yml'
-      - '--storage.tsdb.path=/prometheus'
-      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
-      - '--web.console.templates=/usr/share/prometheus/consoles'
-      - '--web.enable-lifecycle'
-    networks:
-      - secure-video-network
-    profiles:
-      - monitoring
-
-  grafana:
-    image: grafana/grafana:10.1.0
-    container_name: secure-video-grafana
-    restart: unless-stopped
-    ports:
-      - "3001:3000"
-    environment:
-      GF_SECURITY_ADMIN_PASSWORD: grafana123
-    volumes:
-      - grafana_data:/var/lib/grafana
-      - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
-      - ./monitoring/grafana/datasources:/etc/grafana/provisioning/datasources:ro
-    networks:
-      - secure-video-network
-    depends_on:
-      - prometheus
-    profiles:
-      - monitoring
-
 networks:
   secure-video-network:
     driver: bridge
 
 volumes:
   mongodb_data:
-    driver: local
   redis_data:
-    driver: local
+  rabbitmq_data: # เพิ่ม volume สำหรับ rabbitmq
   app_logs:
-    driver: local
-  app_tmp:
-    driver: local
   nginx_logs:
-    driver: local
-  # vault_data:
-  #   driver: local
   prometheus_data:
-    driver: local
   grafana_data:
-    driver: local

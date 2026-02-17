@@ -2,7 +2,7 @@ const express = require('express');
 const { v4: uuidv4 } = require('uuid');
 const { authenticateToken, requireAdmin } = require('../middleware/auth');
 const { generatePresignedUploadUrl, validateVideoFile, validateFileSize } = require('../services/s3Upload');
-const { createMediaConvertJob } = require('../services/mediaConvert');
+const queueService = require('../services/queueService');
 const { generateSignedCookies, setCookiesInResponse } = require('../services/cloudfront');
 const { config } = require('../config/aws');
 const Video = require('../models/Video');
@@ -238,65 +238,64 @@ router.post('/upload/initialize', authenticateToken, requireAdmin, async (req, r
 router.post('/upload/:videoId/complete', authenticateToken, requireAdmin, async (req, res) => {
   try {
     const { videoId } = req.params;
-    
+
     const video = await Video.findOne({ id: videoId });
-    
+
     if (!video) {
       return res.status(404).json({ error: 'Video not found' });
     }
-    
+
     if (video.uploadStatus !== 'uploading') {
-      return res.status(400).json({ 
+      return res.status(400).json({
         error: 'Invalid upload status',
-        currentStatus: video.uploadStatus 
+        currentStatus: video.uploadStatus
       });
     }
 
-    console.log(`Completing upload for video: ${videoId}`);
-    
-    // Update video status
-    video.uploadStatus = 'uploaded';
+    // ⭐ เปลี่ยนเป็น queued เลย (สำคัญ)
+    video.uploadStatus = 'queued';
+
     video.s3Key = `uploads/${videoId}/original.${video.originalFileName.split('.').pop()}`;
+
     await video.save();
 
-    // Start MediaConvert job
-    const inputS3Path = `s3://${config.uploadsBucket}/${video.s3Key}`;
-    const outputS3Path = `s3://${config.hlsOutputBucket}/videos/${videoId}/`;
-    
-    try {
-      video.uploadStatus = 'processing';
-      const job = await createMediaConvertJob(inputS3Path, outputS3Path, videoId);
-      video.mediaConvertJobId = job.Id;
-      await video.save();
+    // ⭐ Job Payload
+    const jobData = {
+      videoId: video.id,
+      title: video.title,
+      email: req.user.email,
 
-      console.log(`MediaConvert job started: ${job.Id} for video: ${videoId}`);
+      inputS3Path: `s3://${config.uploadsBucket}/${video.s3Key}`,
+      outputS3Path: `s3://${config.hlsOutputBucket}/videos/${videoId}/`,
 
-      res.json({
-        success: true,
-        videoId,
-        jobId: job.Id,
-        message: 'Upload completed, processing started',
-        video: {
-          id: videoId,
-          title: video.title,
-          uploadStatus: video.uploadStatus
-        }
-      });
+      createdAt: new Date().toISOString()
+    };
 
-    } catch (mcError) {
-      console.error('MediaConvert error:', mcError);
-      video.uploadStatus = 'failed';
-      video.errorMessage = mcError.message;
-      await video.save();
-      res.status(500).json({ 
-        error: 'Failed to start video processing',
-        details: mcError.message 
-      });
-    }
+    // ⭐ ส่งเข้า Transcode Queue
+    await queueService.sendToQueue(
+      QUEUES.VIDEO_TRANSCODE,
+      jobData
+    );
+
+    console.log(`[Queue] Transcode task queued: ${videoId}`);
+
+    res.json({
+      success: true,
+      videoId,
+      message: 'Upload confirmed. Processing task queued.',
+      video: {
+        id: videoId,
+        title: video.title,
+        uploadStatus: 'queued'
+      }
+    });
 
   } catch (error) {
     console.error('Complete upload error:', error);
-    res.status(500).json({ error: error.message });
+
+    res.status(500).json({
+      error: 'Queue failed or server error'
+    });
   }
 });
 
@@ -500,16 +499,35 @@ router.post(
         }
 
         // 4️⃣ อัปเดตข้อมูลตามสถานะ
-        if (status === "COMPLETE") {
-          video.uploadStatus = "completed";
-          // แนะนำให้ใส่ URL เต็มที่ดึงจาก CloudFront
-          video.thumbnailPath = `videos/${videoId}/thumbnails/original_thumb.0000000.jpg`;
-          console.log(`✅ Update COMPLETE for: ${videoId}`);
-        } else if (status === "ERROR") {
-          video.uploadStatus = "failed";
-          console.log(`❌ Update FAILED for: ${videoId}`);
-        }
+       if (status === "COMPLETE") {
+  video.uploadStatus = "completed";
+  video.thumbnailPath = `videos/${videoId}/thumbnails/original_thumb.0000000.jpg`;
 
+  await video.save();
+
+  // 🚀 ส่ง Email Queue
+  await queueService.sendToQueue(QUEUES.EMAIL_NOTIFY, {
+    type: "VIDEO_COMPLETE",
+    videoId: videoId,
+email: video.email || "61760300@go.buu.ac.th",
+    title: video.title
+  });
+
+  console.log(`📧 Email queued COMPLETE for: ${videoId}`);
+}
+else if (status === "ERROR") {
+  video.uploadStatus = "failed";
+  await video.save();
+
+  await queueService.sendToQueue(QUEUES.EMAIL_NOTIFY, {
+    type: "VIDEO_FAILED",
+    videoId: videoId,
+    email: video.email,
+    title: video.title
+  });
+
+  console.log(`📧 Email queued FAILED for: ${videoId}`);
+}
         await video.save();
         return res.json({ updated: true, videoId });
       }

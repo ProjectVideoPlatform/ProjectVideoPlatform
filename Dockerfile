@@ -63,6 +63,7 @@ COPY --from=builder --chown=appuser:nodejs /app/healthcheck.js ./
 # COPY --from=builder --chown=appuser:nodejs /app/keys ./keys
 COPY --from=builder --chown=appuser:nodejs /app/utils ./utils
 COPY --from=builder --chown=appuser:nodejs /app/websocket.js ./websocket.js
+COPY --from=builder --chown=appuser:nodejs /app/workers ./workers
 
 # หรือถ้ามี dist/ จาก build
 # COPY --from=builder --chown=appuser:nodejs /app/dist ./dist
