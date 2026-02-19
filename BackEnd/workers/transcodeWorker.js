@@ -1,5 +1,5 @@
 const BaseWorker = require('./baseWorker');
-const QUEUES = require('../rabbitmq/queues');
+const QUEUES = require('../services/rabbitmq/queues');
 
 const { createMediaConvertJob } = require('../services/mediaConvert');
 const Video = require('../models/Video');

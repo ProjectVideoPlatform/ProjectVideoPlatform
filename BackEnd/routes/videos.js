@@ -9,6 +9,7 @@ const Video = require('../models/Video');
 const Purchase = require('../models/Purchase');
 const escapeStringRegexp = require('escape-string-regexp');
   const https = require('https');
+  const QUEUES = require('../services/rabbitmq/queues');
 const router = express.Router();
 router.get('/video-progress', authenticateToken, async (req, res) => {
   try {
@@ -253,7 +254,7 @@ router.post('/upload/:videoId/complete', authenticateToken, requireAdmin, async 
     }
 
     // ⭐ เปลี่ยนเป็น queued เลย (สำคัญ)
-    video.uploadStatus = 'queued';
+    video.uploadStatus = 'uploaded';
 
     video.s3Key = `uploads/${videoId}/original.${video.originalFileName.split('.').pop()}`;
 
@@ -286,7 +287,7 @@ router.post('/upload/:videoId/complete', authenticateToken, requireAdmin, async 
       video: {
         id: videoId,
         title: video.title,
-        uploadStatus: 'queued'
+        uploadStatus: 'uploaded'
       }
     });
 
@@ -509,7 +510,7 @@ router.post(
   await queueService.sendToQueue(QUEUES.EMAIL_NOTIFY, {
     type: "VIDEO_COMPLETE",
     videoId: videoId,
-email: video.email || "61760300@go.buu.ac.th",
+email: video.email || "manaphatg@gmail.com",
     title: video.title
   });
 

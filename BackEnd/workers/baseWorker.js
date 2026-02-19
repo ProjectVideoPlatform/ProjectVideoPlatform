@@ -9,15 +9,6 @@ class BaseWorker {
 
   async start() {
     const ch = await getChannel();
-
-    await ch.assertQueue(this.queueName, {
-      durable: true,
-      arguments: {
-        'x-dead-letter-exchange': QUEUES.DLX_EXCHANGE,
-        'x-dead-letter-routing-key': QUEUES.DLX_ROUTING_KEY
-      }
-    });
-
     ch.prefetch(5);
 
     console.log(`Worker started for ${this.queueName}`);

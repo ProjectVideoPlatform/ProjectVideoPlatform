@@ -1,5 +1,5 @@
 const BaseWorker = require('./baseWorker');
-const QUEUES = require('../rabbitmq/queues');
+const QUEUES = require('../services/rabbitmq/queues');
 const nodemailer = require('nodemailer');
 
 // ⭐ ควรย้ายไป ENV จริง
@@ -33,7 +33,7 @@ async function emailHandler(data) {
 }
 
 const worker = new BaseWorker(
-  QUEUES.VIDEO_NOTIFY,
+  QUEUES.EMAIL_NOTIFY,
   emailHandler
 );
 

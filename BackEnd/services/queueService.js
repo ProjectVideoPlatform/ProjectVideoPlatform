@@ -3,7 +3,6 @@ const { getChannel } = require('./rabbitmq/connection');
 async function sendToQueue(queueName, data) {
   const ch = await getChannel();
 
-  await ch.assertQueue(queueName, { durable: true });
 
   return ch.sendToQueue(
     queueName,

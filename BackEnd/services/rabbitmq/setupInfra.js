@@ -17,8 +17,8 @@ async function setupInfra() {
   await ch.assertQueue(QUEUES.RETRY_QUEUE, {
     durable: true,
     arguments: {
-      'x-dead-letter-exchange': '',
-      'x-dead-letter-routing-key': QUEUES.VIDEO_TRANSCODE,
+    'x-dead-letter-exchange': QUEUES.DLX_EXCHANGE,
+    'x-dead-letter-routing-key': QUEUES.DLX_ROUTING_KEY,
       'x-message-ttl': 60000
     }
   });
@@ -27,10 +27,27 @@ async function setupInfra() {
   await ch.assertQueue(QUEUES.DELAY_QUEUE, {
     durable: true,
     arguments: {
-      'x-dead-letter-exchange': '',
-      'x-dead-letter-routing-key': QUEUES.VIDEO_TRANSCODE
+        'x-dead-letter-exchange': QUEUES.DLX_EXCHANGE,
+    'x-dead-letter-routing-key': QUEUES.DLX_ROUTING_KEY
     }
   });
+  await ch.assertQueue(QUEUES.VIDEO_TRANSCODE, {
+  durable: true,
+  arguments: {
+    'x-dead-letter-exchange': QUEUES.DLX_EXCHANGE,
+    'x-dead-letter-routing-key': QUEUES.DLX_ROUTING_KEY
+  }
+});
+
+await ch.assertQueue(QUEUES.EMAIL_NOTIFY, {
+  durable: true,
+  arguments: {
+    'x-dead-letter-exchange': QUEUES.DLX_EXCHANGE,
+    'x-dead-letter-routing-key': QUEUES.DLX_ROUTING_KEY
+  }
+});
 }
+
+
 
 module.exports = { setupInfra };
