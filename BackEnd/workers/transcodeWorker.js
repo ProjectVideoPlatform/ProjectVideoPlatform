@@ -1,3 +1,7 @@
+require('dotenv').config();
+
+const mongoose = require('mongoose');
+const { setupInfra } = require('../services/rabbitmq/setupInfra');
 const BaseWorker = require('./baseWorker');
 const QUEUES = require('../services/rabbitmq/queues');
 
@@ -26,13 +30,31 @@ async function transcodeHandler(data) {
 
   } catch (error) {
     console.error(`[Worker] Transcode Error:`, error);
-    throw error; // ⭐ สำคัญ ให้ BaseWorker จัดการ nack / retry
+    throw error;
   }
 }
 
-const worker = new BaseWorker(
-  QUEUES.VIDEO_TRANSCODE,
-  transcodeHandler
-);
+async function start() {
+  try {
+    // 1️⃣ Connect MongoDB
+    await mongoose.connect(process.env.MONGO_URI);
+    console.log('MongoDB connected (worker)');
 
-worker.start();
+    // 2️⃣ Setup RabbitMQ infra
+    await setupInfra();
+
+    // 3️⃣ Start Worker
+    const worker = new BaseWorker(
+      QUEUES.VIDEO_TRANSCODE,
+      transcodeHandler
+    );
+
+    await worker.start();
+
+  } catch (err) {
+    console.error('Worker startup error:', err);
+    process.exit(1);
+  }
+}
+
+start();

@@ -3,9 +3,10 @@ const jwt = require('jsonwebtoken');
 const User = require('../models/User');
 const jwtConfig = require('../config/auth');
 const { authenticateToken } = require('../middleware/auth');
-
+const {recordFailedAttempt,clearFailedAttempts}  = require('../middleware/loginRateLimiter');
 const router = express.Router();
-
+const redisClient = require('../config/redis');
+const logger = require('../utils/logger');
 // Register
 router.post('/register', async (req, res) => {
   try {
@@ -56,29 +57,55 @@ router.post('/register', async (req, res) => {
   }
 });
 
-// Login
+
 router.post('/login', async (req, res) => {
   try {
     const { email, password } = req.body;
+    const ip = req.ip;
     
-    // Validation
-    if (!email || !password) {
-      return res.status(400).json({ error: 'Email and password are required' });
+    console.log(`Login attempt for ${email} from IP ${ip}`);
+    
+    // ✅ เช็ค Rate Limit ก่อนตรวจสอบ Password
+    const userKey = `rate:user:${email}`;
+    const ipKey = `rate:ip:${ip}`;
+    
+    const [userAttempts, ipAttempts] = await Promise.all([
+      redisClient.get(userKey),
+      redisClient.get(ipKey)
+    ]);
+    
+    if (parseInt(userAttempts) >= 5 || parseInt(ipAttempts) >= 20) {
+      logger.warn(`Rate limit exceeded: ${email} from ${ip}`);
+      
+      // เช็ค Block Count ด้วย
+      const blockCount = await redisClient.incr(`blockcount:${ip}`);
+      if (blockCount === 1) await redisClient.expire(`blockcount:${ip}`, 86400);
+      if (blockCount >= 50) {
+        await redisClient.setex(`blocked:${ip}`, 86400, '1');
+        return res.status(429).json({ error: 'Access denied. Too many failed attempts.' });
+      }
+      
+      return res.status(429).json({ error: 'Too many attempts. Please try again later.' });
     }
     
-    // Find user
+    // Check blocked IP
+    const blocked = await redisClient.get(`blocked:${ip}`);
+    if (blocked) {
+      return res.status(429).json({ error: 'Access denied. Too many failed attempts.' });
+    }
+
+    // ตรวจสอบ User และ Password
     const user = await User.findOne({ email });
-    if (!user) {
+    const isValid = user ? await user.comparePassword(password) : false;
+
+    if (!isValid) {
+      await recordFailedAttempt(email, ip);
       return res.status(401).json({ error: 'Invalid credentials' });
     }
 
-    // Check password
-    const isValidPassword = await user.comparePassword(password);
-    if (!isValidPassword) {
-      return res.status(401).json({ error: 'Invalid credentials' });
-    }
-
-    // Generate JWT token
+    // Login Success
+    await clearFailedAttempts(email, ip);
+    
     const token = jwt.sign(
       { userId: user._id }, 
       jwtConfig.secret, 
@@ -87,19 +114,15 @@ router.post('/login', async (req, res) => {
 
     res.json({ 
       token, 
-      user: { 
-        id: user._id, 
-        email: user.email, 
-        role: user.role 
-      },
+      user: { id: user._id, email: user.email, role: user.role },
       message: 'Login successful'
     });
+
   } catch (error) {
-    console.error('Login error:', error);
+    logger.error('Login error:', error);
     res.status(500).json({ error: 'Login failed' });
   }
 });
-
 // Get current user profile
 router.get('/me', authenticateToken, async (req, res) => {
   try {
