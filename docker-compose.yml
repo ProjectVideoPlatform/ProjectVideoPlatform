@@ -85,7 +85,31 @@ services:
       - HOST=0.0.0.0
     networks:
       - secure-video-network
-
+  analytics-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: secure-video-analytics-worker
+    restart: unless-stopped
+    command: ["node", "workers/analystic.js"] # ชี้ไปที่ไฟล์ ClickHouseWorker ที่สร้างใหม่
+    user: "1001:1001"
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /app/tmp
+    env_file:
+      - ./BackEnd/.env
+    environment:
+      - NODE_ENV=production
+      - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672
+      - CLICKHOUSE_HOST=clickhouse_db
+    networks:
+      - secure-video-network
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      clickhouse:
+        condition: service_started # รอให้ ClickHouse รันก่อน
   # Main Node.js API (Producer)
   app:
     build:
@@ -249,6 +273,18 @@ services:
   #     test: ["CMD", "vault", "status", "-address=https://0.0.0.0:8200"]
   #     interval: 10s
   #     retries: 5
+  clickhouse:
+    image: clickhouse/clickhouse-server:latest
+    container_name: clickhouse_db
+    ports:
+      - "8123:8123" # HTTP interface
+      - "9000:9000" # Native client
+    volumes:
+      - clickhouse_data:/var/lib/clickhouse
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
 networks:
   secure-video-network:
     driver: bridge
@@ -261,3 +297,4 @@ volumes:
   nginx_logs:
   prometheus_data:
   grafana_data:
+  clickhouse_data:

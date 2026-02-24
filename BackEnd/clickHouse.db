@@ -1,0 +1,12 @@
+-- เชื่อมต่อผ่าน Dashboard หรือ Terminal
+CREATE TABLE IF NOT EXISTS video_watch_events (
+    video_id String,
+    user_id String,
+    watch_duration_seconds UInt32,
+    device_type Enum8('mobile' = 1, 'desktop' = 2, 'tablet' = 3),
+    event_time DateTime DEFAULT now(),
+    country_code LowCardinality(String)
+) 
+ENGINE = MergeTree()
+PARTITION BY toYYYYMM(event_time) -- แยกไฟล์เก็บตามเดือน ช่วยให้ลบข้อมูลเก่าหรืองานสถิติทำได้เร็ว
+ORDER BY (video_id, event_time); -- เรียงลำดับตาม video_id เพื่อให้หาผลรวมยอดวิวได้ไว

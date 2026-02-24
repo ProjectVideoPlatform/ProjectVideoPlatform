@@ -544,55 +544,55 @@ else if (status === "ERROR") {
 
 
 // MediaConvert webhook handler
-router.post('/mediaconvert/webhook', async (req, res) => {
-  try {
-    const body = req.body;
-    const { detail } = body;
+// router.post('/mediaconvert/webhook', async (req, res) => {
+//   try {
+//     const body = req.body;
+//     const { detail } = body;
 
-    if (!detail || !detail.userMetadata || !detail.userMetadata.videoId) {
-      console.log('Invalid webhook payload');
-      return res.status(400).json({ error: 'Invalid webhook payload' });
-    }
+//     if (!detail || !detail.userMetadata || !detail.userMetadata.videoId) {
+//       console.log('Invalid webhook payload');
+//       return res.status(400).json({ error: 'Invalid webhook payload' });
+//     }
 
-    const videoId = detail.userMetadata.videoId;
-    const video = await Video.findOne({ id: videoId });
+//     const videoId = detail.userMetadata.videoId;
+//     const video = await Video.findOne({ id: videoId });
 
-    if (!video) {
-      console.error(`Video not found for webhook: ${videoId}`);
-      return res.status(404).json({ error: 'Video not found' });
-    }
+//     if (!video) {
+//       console.error(`Video not found for webhook: ${videoId}`);
+//       return res.status(404).json({ error: 'Video not found' });
+//     }
 
-    if (detail.status === 'COMPLETE') {
-      video.uploadStatus = 'completed';
-      video.hlsManifestPath = `videos/${videoId}/original.m3u8`;
-      video.thumbnailPath = `videos/${videoId}/thumbnails/`;
+//     if (detail.status === 'COMPLETE') {
+//       video.uploadStatus = 'completed';
+//       video.hlsManifestPath = `videos/${videoId}/original.m3u8`;
+//       video.thumbnailPath = `videos/${videoId}/thumbnails/`;
 
-      if (detail.jobDetails && detail.jobDetails.inputDetails) {
-        const inputDetail = detail.jobDetails.inputDetails[0];
-        if (inputDetail && inputDetail.durationInMs) {
-          video.duration = Math.floor(inputDetail.durationInMs / 1000);
-        }
-      }
+//       if (detail.jobDetails && detail.jobDetails.inputDetails) {
+//         const inputDetail = detail.jobDetails.inputDetails[0];
+//         if (inputDetail && inputDetail.durationInMs) {
+//           video.duration = Math.floor(inputDetail.durationInMs / 1000);
+//         }
+//       }
 
-      await video.save();
-      console.log(`Video ${videoId} processing completed`);
+//       await video.save();
+//       console.log(`Video ${videoId} processing completed`);
 
-    } else if (detail.status === 'ERROR') {
-      video.uploadStatus = 'failed';
-      if (detail.errorMessage) {
-        video.errorMessage = detail.errorMessage;
-      }
-      await video.save();
-      console.log(`Video ${videoId} processing failed`);
-    }
+//     } else if (detail.status === 'ERROR') {
+//       video.uploadStatus = 'failed';
+//       if (detail.errorMessage) {
+//         video.errorMessage = detail.errorMessage;
+//       }
+//       await video.save();
+//       console.log(`Video ${videoId} processing failed`);
+//     }
 
-    res.json({ received: true });
+//     res.json({ received: true });
 
-  } catch (error) {
-    console.error('Webhook error:', error);
-    res.status(500).json({ error: error.message });
-  }
-});
+//   } catch (error) {
+//     console.error('Webhook error:', error);
+//     res.status(500).json({ error: error.message });
+//   }
+// });
 
 // Get user's purchased videos
 router.get('/purchased/list', authenticateToken, async (req, res) => {
