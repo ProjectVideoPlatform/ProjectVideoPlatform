@@ -8,6 +8,7 @@ VIDEO_LOGS: 'video_watch_logs',
 // Routing Keys (แยกป้ายกำกับ)
     DLX_EMAIL_ROUTING_KEY: 'failed_email',
     DLX_ANALYTICS_ROUTING_KEY: 'failed_analytics',
+     DLX_TRANS_ROUTING_KEY: 'failed_transcoding',
   RETRY_QUEUE: 'retry_queue',
   DELAY_QUEUE: 'delay_queue'
 };

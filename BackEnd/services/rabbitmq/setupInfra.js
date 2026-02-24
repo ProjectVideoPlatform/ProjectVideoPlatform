@@ -14,7 +14,9 @@ async function setupInfra() {
     // 3. สร้างถังขยะสำหรับ Analytics และผูก Key (เพิ่มใหม่!)
     await ch.assertQueue(QUEUES.DLX_ANALYTICS_QUEUE, { durable: true });
     await ch.bindQueue(QUEUES.DLX_ANALYTICS_QUEUE, QUEUES.DLX_EXCHANGE, QUEUES.DLX_ANALYTICS_ROUTING_KEY);
-
+     
+    await ch.assertQueue(QUEUES.DLX_TRANS_QUEUE, { durable: true });
+    await ch.bindQueue(QUEUES.DLX_TRANS_QUEUE, QUEUES.DLX_EXCHANGE, QUEUES.DLX_TRANS_ROUTING_KEY);
     // 4. คิวหลัก: EMAIL_NOTIFY (ส่งไปที่ถังขยะ Email)
     await ch.assertQueue(QUEUES.EMAIL_NOTIFY, {
         durable: true,
@@ -38,7 +40,7 @@ async function setupInfra() {
     durable: true,
     arguments: {
       'x-dead-letter-exchange': QUEUES.DLX_EXCHANGE,
-      'x-dead-letter-routing-key': QUEUES.DLX_ROUTING_KEY
+      'x-dead-letter-routing-key': QUEUES.DLX_TRANS_ROUTING_KEY
     }
   });
 }

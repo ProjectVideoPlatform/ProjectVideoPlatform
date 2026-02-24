@@ -274,17 +274,22 @@ services:
   #     interval: 10s
   #     retries: 5
   clickhouse:
-    image: clickhouse/clickhouse-server:latest
-    container_name: clickhouse_db
-    ports:
-      - "8123:8123" # HTTP interface
-      - "9000:9000" # Native client
-    volumes:
-      - clickhouse_data:/var/lib/clickhouse
-    ulimits:
-      nofile:
-        soft: 262144
-        hard: 262144
+   image: clickhouse/clickhouse-server:latest
+   container_name: clickhouse_db
+   ports:
+    - "8123:8123"   # HTTP
+    - "9000:9000"   # Native
+   environment:
+    CLICKHOUSE_USER: app_user
+    CLICKHOUSE_PASSWORD: strong_password
+    CLICKHOUSE_DB: app_db
+   volumes:
+    - clickhouse_data:/var/lib/clickhouse
+   ulimits:
+    nofile:
+      soft: 262144
+      hard: 262144
+   restart: always
 networks:
   secure-video-network:
     driver: bridge
