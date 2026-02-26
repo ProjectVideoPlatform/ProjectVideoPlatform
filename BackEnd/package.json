@@ -6,7 +6,8 @@
   "scripts": {
     "test": "jest",
     "test:coverage": "jest --coverage --coverageReporters=lcov text",
-    "sonar": "sonar-scanner"
+    "sonar": "sonar-scanner",
+    "rabbit:setup": "node services/rabbitmq/setupInfra.js"
   },
   "keywords": [
     "video",

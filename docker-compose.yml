@@ -91,7 +91,7 @@ services:
       dockerfile: Dockerfile
     container_name: secure-video-analytics-worker
     restart: unless-stopped
-    command: ["node", "workers/analystic.js"] # ชี้ไปที่ไฟล์ ClickHouseWorker ที่สร้างใหม่
+    command: ["node", "workers/analystic.js"]
     user: "1001:1001"
     read_only: true
     tmpfs:
@@ -102,14 +102,19 @@ services:
     environment:
       - NODE_ENV=production
       - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672
-      - CLICKHOUSE_HOST=clickhouse_db
+      - CLICKHOUSE_HOST=clickhouse
+      - CLICKHOUSE_PORT=8123
+      - CLICKHOUSE_USER=app_user
+      - CLICKHOUSE_PASSWORD=strong_password
+      - CLICKHOUSE_DB=app_db
     networks:
       - secure-video-network
     depends_on:
       rabbitmq:
         condition: service_healthy
       clickhouse:
-        condition: service_started # รอให้ ClickHouse รันก่อน
+        condition: service_healthy  # ✅ รอให้พร้อม
+
   # Main Node.js API (Producer)
   app:
     build:
@@ -233,24 +238,41 @@ services:
       - monitoring
 
   # Grafana Dashboard (Optional)
+  # grafana:
+  #   image: grafana/grafana:10.1.0
+  #   container_name: secure-video-grafana
+  #   restart: unless-stopped
+  #   ports:
+  #     - "3001:3000"
+  #   environment:
+  #     GF_SECURITY_ADMIN_PASSWORD: grafana123
+  #   volumes:
+  #     - grafana_data:/var/lib/grafana
+  #     - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+  #     - ./monitoring/grafana/datasources:/etc/grafana/provisioning/datasources:ro
+  #   networks:
+  #     - secure-video-network
+  #   depends_on:
+  #     - prometheus
+  #   profiles:
+  #     - monitoring
+      # docker-compose.yml เพิ่ม grafana และ clickhouse datasource
   grafana:
-    image: grafana/grafana:10.1.0
-    container_name: secure-video-grafana
-    restart: unless-stopped
+    image: grafana/grafana:latest
+    container_name: grafana
     ports:
       - "3001:3000"
     environment:
-      GF_SECURITY_ADMIN_PASSWORD: grafana123
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_INSTALL_PLUGINS=grafana-clickhouse-datasource  # ✅ เพิ่มตรงนี้
     volumes:
-      - grafana_data:/var/lib/grafana
-      - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
-      - ./monitoring/grafana/datasources:/etc/grafana/provisioning/datasources:ro
+      - grafana_dataja:/var/lib/grafana
+      - ./grafana/dashboards:/etc/grafana/provisioning/dashboards
+      - ./grafana/datasources:/etc/grafana/provisioning/datasources
     networks:
       - secure-video-network
     depends_on:
-      - prometheus
-    profiles:
-      - monitoring
+      - clickhouse
   # Vault - production-ready
   # vault:
   #   image: vault:1.13.3
@@ -274,26 +296,49 @@ services:
   #     interval: 10s
   #     retries: 5
   clickhouse:
-   image: clickhouse/clickhouse-server:latest
-   container_name: clickhouse_db
-   ports:
-    - "8123:8123"   # HTTP
-    - "9000:9000"   # Native
-   environment:
-    CLICKHOUSE_USER: app_user
-    CLICKHOUSE_PASSWORD: strong_password
-    CLICKHOUSE_DB: app_db
-   volumes:
-    - clickhouse_data:/var/lib/clickhouse
-   ulimits:
-    nofile:
-      soft: 262144
-      hard: 262144
-   restart: always
+    image: clickhouse/clickhouse-server:latest
+    container_name: clickhouse_db
+    restart: always
+    ports:
+      - "8123:8123"   # HTTP API
+      - "9000:9000"   # Native client
+    environment:
+      CLICKHOUSE_USER: app_user
+      CLICKHOUSE_PASSWORD: strong_password
+      CLICKHOUSE_DB: app_db
+    volumes:
+      - clickhouse_data:/var/lib/clickhouse
+      - ./init-clickhouse:/docker-entrypoint-initdb.d  # ✅ สำหรับ init scripts
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+    networks:
+      - secure-video-network  # ✅ เพิ่ม network
+    healthcheck:  # ✅ เพิ่ม healthcheck
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8123/ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+  mongoexpress:
+    image: mongo-express:latest
+    container_name: secure-video-mongo-express
+    restart: unless-stopped
+    ports:
+      - "8081:8081"
+    environment:
+      ME_CONFIG_MONGODB_SERVER: mongodb
+      ME_CONFIG_MONGODB_PORT: 27017
+      ME_CONFIG_MONGODB_ADMINUSERNAME: root
+      ME_CONFIG_MONGODB_ADMINPASSWORD: example
+    networks:
+      - secure-video-network
 networks:
   secure-video-network:
     driver: bridge
 
+  
 volumes:
   mongodb_data:
   redis_data:
@@ -301,5 +346,6 @@ volumes:
   app_logs:
   nginx_logs:
   prometheus_data:
-  grafana_data:
+  # prometheus_data:
+  grafana_dataja:
   clickhouse_data:

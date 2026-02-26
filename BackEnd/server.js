@@ -9,7 +9,6 @@ const adminRoutes = require('./routes/admin');
 const UserRoute = require('./routes/user');
 const paymentRoutes = require('./routes/payment'); // Payment Route
 const client = require('prom-client');
-const { setupInfra } = require('./services/rabbitmq/setupInfra');
 const app = express();
 const purchaseRoutes = require('./routes/Purchase');
 
@@ -46,7 +45,7 @@ app.use('/api/videos', videoRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/user', UserRoute);
 app.use('/api/payment', paymentRoutes); // << payment routes (callback route must be raw)
-
+app.use('/api/public', require('./routes/analyze')); // Public analytics route (no auth, for video tracking)
 // Health check
 app.get('/api/health', (req, res) => {
   res.json({ status: 'OK', timestamp: new Date().toISOString() });
@@ -66,7 +65,7 @@ const startServer = async () => {
     const PORT = process.env.PORT || 3000;
 console.log('Connecting to Redis...');
     await redisClient.connect();
-    await setupInfra();
+
     // Start server
     const server = app.listen(PORT, () => {
       console.log(`Server running on port ${PORT}`);

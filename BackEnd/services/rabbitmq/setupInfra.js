@@ -44,6 +44,9 @@ async function setupInfra() {
     }
   });
 }
- 
+setupInfra().catch(err => {
+    console.error("RabbitMQ setup error:", err);
+    process.exit(1);
+} );    
 
 module.exports = { setupInfra };
