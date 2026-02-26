@@ -1,7 +1,7 @@
 import React, { useState, useEffect, memo, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../AuthProvider';
-
+import videoTracker from './videoTracker'; // ตรวจสอบ path ให้ถูกต้องนะครับ
 const API_BASE_URL = 'http://localhost:3000/api';
 
 const VideoAuthSystem = () => {
@@ -90,13 +90,14 @@ const VideoAuthSystem = () => {
         setAuthUser(null);
         localStorage.removeItem('authToken');
         setCurrentView('login');
+        videoTracker.updateUserId(null);
         clearAlerts();
         setCurrentlyFocusedField('email');
     }, [setAuthUser, clearAlerts]); // Dependencies: setAuthUser และ clearAlerts ถูกห่อด้วย useCallback แล้ว
 
     const getCurrentUser = useCallback(async () => {
         try {
-            const response = await apiCall('/auth/me');
+            const response = await apiCall('/auth/verify');
             setCurrentUser(response.user);
             setAuthUser(response.user);
             setCurrentView('profile');

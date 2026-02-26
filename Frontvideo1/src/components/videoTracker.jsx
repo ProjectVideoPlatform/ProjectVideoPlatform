@@ -7,13 +7,23 @@ class VideoAnalytics {
         this.flushInterval = 5000;
         this.maxBufferSize = 20;
         this.pendingFlush = false;
-        
+        this.currentUserId = null; // เรียก getUserId ใน constructor เพื่อกำหนดค่าเริ่มต้น
         // ✅ เรียก generateSessionId หลังจากประกาศ method แล้ว
         this.sessionId = this.generateSessionId();  // ตอนนี้ generateSessionId ถูกประกาศแล้ว
         
         this.init();
     }
-
+// เพิ่มไว้ใน class VideoAnalytics
+updateUserId(newId) {
+    if (newId) {
+        console.log('🔄 Analytics UserID updated to:', newId);
+        this.currentUserId = newId;
+    } else {
+        console.log('🧹 Analytics UserID cleared (Logout)');
+        // กลับไปใช้ Guest ID หรือสุ่มใหม่
+        this.currentUserId = null;
+    }
+}
     // ✅ method declarations อยู่ข้างบนทั้งหมด
     generateSessionId() {
         let sessionId = sessionStorage.getItem('analytics_session_id');
@@ -24,14 +34,7 @@ class VideoAnalytics {
         return sessionId;
     }
 
-    getUserId() {
-        let userId = localStorage.getItem('analytics_user_id');
-        if (!userId) {
-            userId = 'user_' + Math.random().toString(36).substr(2, 9);
-            localStorage.setItem('analytics_user_id', userId);
-        }
-        return userId;
-    }
+ 
 
     getDeviceInfo() {
         const ua = navigator.userAgent;
@@ -72,8 +75,7 @@ class VideoAnalytics {
 
         const event = {
             videoId: data.videoId || '',
-            userId: data.userId || this.getUserId(),
-            duration: data.duration || 0,
+            userId: data.userId || this.currentUserId ,
             device: this.getDeviceInfo(),
             country: this.getCountry(),
             eventType: data.eventType || 'unknown',

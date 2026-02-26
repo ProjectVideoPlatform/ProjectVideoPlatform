@@ -19,7 +19,7 @@ import {
 } from 'lucide-react';
 import Hls from 'hls.js';
 import { useNavigate } from 'react-router-dom';
-import VideoPlayer from './videoPlayer';
+import VideoPlayer from './VideoPlayer';
 // API service matching the backend
 const API_BASE = 'http://localhost:3000/api';
 

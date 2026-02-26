@@ -42,7 +42,6 @@ const VideoPlayer = ({ manifestUrl, onClose, videoId, userId }) => {
       // Track play event
       videoAnalytics.trackVideoEvent({
         videoId,
-        userId,
         eventType: 'play',
         currentTime: video.currentTime,
         manifestUrl
@@ -63,7 +62,6 @@ const VideoPlayer = ({ manifestUrl, onClose, videoId, userId }) => {
           
           videoAnalytics.trackVideoEvent({
             videoId,
-            userId,
             eventType: 'watch',
             duration: 10,
             currentTime: video.currentTime,
@@ -83,7 +81,6 @@ const VideoPlayer = ({ manifestUrl, onClose, videoId, userId }) => {
       // Track pause event
       videoAnalytics.trackVideoEvent({
         videoId,
-        userId,
         eventType: 'pause',
         duration: watchDuration,
         totalDuration: totalWatchTime.current,
@@ -102,7 +99,6 @@ const VideoPlayer = ({ manifestUrl, onClose, videoId, userId }) => {
       
       videoAnalytics.trackVideoEvent({
         videoId,
-        userId,
         eventType: 'completed',
         totalDuration: totalWatchTime.current,
         duration: video.duration,
@@ -119,7 +115,6 @@ const VideoPlayer = ({ manifestUrl, onClose, videoId, userId }) => {
     const handleSeeked = () => {
       videoAnalytics.trackVideoEvent({
         videoId,
-        userId,
         eventType: 'seek',
         currentTime: video.currentTime,
         manifestUrl
