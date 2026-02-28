@@ -1,0 +1,1393 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Hotel System — Sequence & CRC Diagrams</title>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0d1117;
+    --panel: #161b22;
+    --border: #21262d;
+    --accent: #58a6ff;
+    --accent2: #3fb950;
+    --accent3: #f78166;
+    --accent4: #d2a8ff;
+    --accent5: #ffa657;
+    --accent6: #39d0d8;
+    --text: #e6edf3;
+    --muted: #7d8590;
+    --lifeline: #30363d;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'DM Sans', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+  }
+
+  nav {
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    background: rgba(13,17,23,0.97);
+    backdrop-filter: blur(12px);
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    padding: 0 28px;
+    height: 54px;
+    gap: 0;
+    overflow-x: auto;
+  }
+  .nav-logo {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--accent);
+    margin-right: 24px;
+    white-space: nowrap;
+  }
+  .nav-sep { width: 1px; height: 26px; background: var(--border); margin: 0 12px; flex-shrink: 0; }
+  .nav-label {
+    font-size: 10px;
+    color: var(--muted);
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    white-space: nowrap;
+    margin-right: 6px;
+  }
+  .nav-btn {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 16px;
+    border: none;
+    background: transparent;
+    color: var(--muted);
+    font-family: 'DM Sans', sans-serif;
+    font-size: 13px;
+    font-weight: 500;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.18s;
+    white-space: nowrap;
+    margin-right: 2px;
+  }
+  .nav-btn:hover { color: var(--text); background: rgba(255,255,255,0.06); }
+  .nav-btn.active.c1 { background: var(--accent); color: #0d1117; font-weight: 700; }
+  .nav-btn.active.c2 { background: var(--accent2); color: #0d1117; font-weight: 700; }
+  .nav-btn.active.c3 { background: var(--accent4); color: #0d1117; font-weight: 700; }
+
+  .page { display: none; padding: 44px 20px 80px; }
+  .page.active { display: block; }
+
+  .ph { text-align: center; margin-bottom: 44px; }
+  .ph .tag {
+    display: inline-block;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    padding: 4px 14px;
+    border-radius: 20px;
+    margin-bottom: 12px;
+  }
+  .ph h1 { font-size: 26px; font-weight: 600; letter-spacing: -0.4px; }
+  .ph p { color: var(--muted); font-size: 14px; margin-top: 6px; }
+
+  .dw {
+    max-width: 1400px;
+    margin: 0 auto;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    overflow: hidden;
+  }
+  .dtb {
+    padding: 12px 20px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .dot { width: 10px; height: 10px; border-radius: 50%; }
+  .dtb span { font-family: 'JetBrains Mono', monospace; font-size: 12px; color: var(--muted); margin-left: 8px; }
+  .svgw { overflow-x: auto; padding: 28px 18px 36px; }
+  svg { display: block; }
+
+  .actor-label { font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 600; }
+  .actor-sub { font-family: 'DM Sans', sans-serif; font-size: 10px; fill: #7d8590; }
+  .ll { stroke: #30363d; stroke-width: 1.5; stroke-dasharray: 6 4; }
+  .act   { fill: rgba(88,166,255,0.13);  stroke: #58a6ff; stroke-width: 1.5; }
+  .act-g { fill: rgba(63,185,80,0.10);   stroke: #3fb950; stroke-width: 1.5; }
+  .act-p { fill: rgba(210,168,255,0.10); stroke: #d2a8ff; stroke-width: 1.5; }
+  .act-o { fill: rgba(255,166,87,0.10);  stroke: #ffa657; stroke-width: 1.5; }
+  .act-r { fill: rgba(247,129,102,0.10); stroke: #f78166; stroke-width: 1.5; }
+  .act-c { fill: rgba(57,208,216,0.10);  stroke: #39d0d8; stroke-width: 1.5; }
+  .ml  { stroke: #58a6ff; stroke-width: 1.8; }
+  .mr  { stroke: #3fb950; stroke-width: 1.5; stroke-dasharray: 6 3; }
+  .mn  { font-family: 'JetBrains Mono', monospace; font-size: 10px; fill: #e6edf3; }
+  .mnum { font-family: 'JetBrains Mono', monospace; font-size: 10px; font-weight: 700; }
+  .rl  { font-family: 'JetBrains Mono', monospace; font-size: 9.5px; fill: #3fb950; font-style: italic; }
+
+  .boundary-badge {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 8px;
+    fill: #39d0d8;
+    letter-spacing: 1px;
+  }
+
+  .legend {
+    display: flex; justify-content: center; gap: 24px;
+    padding: 4px 20px 20px; flex-wrap: wrap;
+  }
+  .li { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); }
+  .ll2 { width: 26px; height: 2px; border-radius: 1px; }
+  .ld  { width: 26px; height: 0; border-top: 2px dashed; }
+
+  /* CRC grid */
+  .crc-grid {
+    max-width: 1300px;
+    margin: 0 auto;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(500px, 1fr));
+    gap: 20px;
+  }
+  .cc {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    overflow: hidden;
+    transition: border-color 0.2s, box-shadow 0.2s;
+  }
+  .cc:hover {
+    border-color: rgba(88,166,255,0.35);
+    box-shadow: 0 4px 24px rgba(0,0,0,0.35);
+  }
+  .cc.boundary {
+    border-color: rgba(57,208,216,0.3);
+    background: linear-gradient(135deg, #161b22 0%, #161e22 100%);
+  }
+  .cc.boundary:hover {
+    border-color: rgba(57,208,216,0.6);
+    box-shadow: 0 4px 24px rgba(57,208,216,0.12);
+  }
+  .ch {
+    padding: 14px 18px 12px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    border-bottom: 1px solid var(--border);
+  }
+  .ci {
+    width: 34px; height: 34px; border-radius: 8px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 15px; flex-shrink: 0;
+  }
+  .cn { font-family: 'JetBrains Mono', monospace; font-size: 13px; font-weight: 700; }
+  .cr { font-size: 12px; color: var(--muted); margin-top: 2px; }
+  .cbadge {
+    display: inline-block;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 8.5px;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    padding: 2px 8px;
+    border-radius: 20px;
+    margin-left: 8px;
+    vertical-align: middle;
+  }
+  .cbadge-boundary {
+    background: rgba(57,208,216,0.12);
+    color: #39d0d8;
+    border: 1px solid rgba(57,208,216,0.3);
+  }
+  .cbadge-controller {
+    background: rgba(255,166,87,0.12);
+    color: #ffa657;
+    border: 1px solid rgba(255,166,87,0.3);
+  }
+  .cbadge-entity {
+    background: rgba(63,185,80,0.1);
+    color: #3fb950;
+    border: 1px solid rgba(63,185,80,0.25);
+  }
+  .cb { display: grid; grid-template-columns: 1fr 1fr; min-height: 140px; }
+  .col { padding: 14px 16px; }
+  .col:first-child { border-right: 1px solid var(--border); }
+  .ct {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9.5px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 10px;
+    display: flex; align-items: center; gap: 6px;
+  }
+  .ct::before { content: ''; display: inline-block; width: 5px; height: 5px; border-radius: 50%; }
+  .rc .ct::before { background: var(--accent); }
+  .xc .ct::before { background: var(--accent2); }
+  .ci2 {
+    display: flex; align-items: flex-start; gap: 7px;
+    padding: 5px 0;
+    border-bottom: 1px solid rgba(255,255,255,0.04);
+    font-size: 12.5px;
+    line-height: 1.5;
+  }
+  .ci2:last-child { border-bottom: none; }
+  .cbullet { width: 5px; height: 5px; border-radius: 50%; margin-top: 6px; flex-shrink: 0; }
+  .rc .cbullet { background: rgba(88,166,255,0.55); }
+  .xc .cbullet { background: rgba(63,185,80,0.55); }
+  .boundary .rc .cbullet { background: rgba(57,208,216,0.6); }
+  .ctag {
+    display: inline-block;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    padding: 2px 8px;
+    border-radius: 4px;
+    background: rgba(63,185,80,0.1);
+    color: var(--accent2);
+    border: 1px solid rgba(63,185,80,0.22);
+    margin: 2px 0;
+  }
+  .ctag-c {
+    background: rgba(57,208,216,0.08);
+    color: #39d0d8;
+    border: 1px solid rgba(57,208,216,0.25);
+  }
+  .cnone { font-size: 11.5px; color: var(--muted); font-style: italic; }
+  
+  .section-label {
+    max-width: 1300px;
+    margin: 0 auto 16px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .section-label h3 {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  .section-line { flex: 1; height: 1px; background: var(--border); }
+  .section-dot { width: 8px; height: 8px; border-radius: 50%; }
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="nav-logo">🏨 Hotel UML</div>
+  <div class="nav-sep"></div>
+  <span class="nav-label">Sequence</span>
+  <button class="nav-btn c1 active" onclick="show('seq-ci',this)">🔑 Check-In</button>
+  <button class="nav-btn c1" onclick="show('seq-co',this)">🏁 Check-Out</button>
+  <div class="nav-sep"></div>
+  <span class="nav-label">CRC Cards</span>
+  <button class="nav-btn c2" onclick="show('crc-ci',this)">📋 CRC Check-In</button>
+  <button class="nav-btn c3" onclick="show('crc-co',this)">📋 CRC Check-Out</button>
+</nav>
+
+<!-- ════════════════════════ SEQ CHECK-IN ════════════════════════ -->
+<div id="seq-ci" class="page active">
+  <div class="ph">
+    <div class="tag" style="color:var(--accent);background:rgba(88,166,255,0.1);border:1px solid rgba(88,166,255,0.3)">Sequence Diagram · Check-In</div>
+    <h1>กิจกรรมการ Check-In เข้าห้องพัก</h1>
+    <p>ลำดับการทำงานระหว่าง Actor, <span style="color:#39d0d8">Boundary</span>, Controller และ Entity ในกระบวนการ Check-In</p>
+  </div>
+  <div class="dw">
+    <div class="dtb">
+      <div class="dot" style="background:#f78166"></div><div class="dot" style="background:#ffa657"></div><div class="dot" style="background:#3fb950"></div>
+      <span>check-in-sequence-v2.uml — with Boundary classes</span>
+    </div>
+    <div class="svgw">
+      <!--
+        Columns (center x):
+        Staff=65, CheckInForm=190, GuestLookupScreen=330, PayVerPanel=470, RoomStatusDisplay=610,
+        ReservationCtrl=760, UserEntity=900, ReservationEntity=1030, RoomEntity=1160, InvoiceEntity=1290, KeyCardPrinter=1420
+      -->
+      <svg viewBox="0 0 1520 820" xmlns="http://www.w3.org/2000/svg" style="width:100%;min-width:1100px;max-width:1520px">
+        <defs>
+          <marker id="ab"  markerWidth="7" markerHeight="7" refX="5" refY="3" orient="auto"><path d="M0,0 L0,6 L7,3 z" fill="#58a6ff"/></marker>
+          <marker id="ag"  markerWidth="7" markerHeight="7" refX="5" refY="3" orient="auto"><path d="M0,0 L0,6 L7,3 z" fill="#3fb950"/></marker>
+          <marker id="ap"  markerWidth="7" markerHeight="7" refX="5" refY="3" orient="auto"><path d="M0,0 L0,6 L7,3 z" fill="#d2a8ff"/></marker>
+          <marker id="ao"  markerWidth="7" markerHeight="7" refX="5" refY="3" orient="auto"><path d="M0,0 L0,6 L7,3 z" fill="#ffa657"/></marker>
+          <marker id="ar"  markerWidth="7" markerHeight="7" refX="5" refY="3" orient="auto"><path d="M0,0 L0,6 L7,3 z" fill="#f78166"/></marker>
+          <marker id="ac"  markerWidth="7" markerHeight="7" refX="5" refY="3" orient="auto"><path d="M0,0 L0,6 L7,3 z" fill="#39d0d8"/></marker>
+          <!-- boundary shape: circle on top of rect, UML notation -->
+        </defs>
+
+        <!-- ── ACTOR: Staff ── -->
+        <g>
+          <!-- Stick figure head -->
+          <circle cx="65" cy="20" r="9" fill="none" stroke="#58a6ff" stroke-width="1.5"/>
+          <line x1="65" y1="29" x2="65" y2="48" stroke="#58a6ff" stroke-width="1.5"/>
+          <line x1="51" y1="36" x2="79" y2="36" stroke="#58a6ff" stroke-width="1.5"/>
+          <line x1="65" y1="48" x2="53" y2="62" stroke="#58a6ff" stroke-width="1.5"/>
+          <line x1="65" y1="48" x2="77" y2="62" stroke="#58a6ff" stroke-width="1.5"/>
+          <text x="65" y="76" text-anchor="middle" class="actor-label" fill="#58a6ff">Staff</text>
+          <text x="65" y="89" text-anchor="middle" class="actor-sub">Receptionist</text>
+        </g>
+
+        <!-- ── BOUNDARY actors (circle + line + rect UML notation) ── -->
+        <!-- CheckInForm -->
+        <g>
+          <circle cx="190" cy="24" r="10" fill="rgba(57,208,216,0.08)" stroke="#39d0d8" stroke-width="1.5"/>
+          <line x1="190" y1="34" x2="190" y2="44" stroke="#39d0d8" stroke-width="1.5"/>
+          <line x1="176" y1="44" x2="204" y2="44" stroke="#39d0d8" stroke-width="1.5"/>
+          <line x1="176" y1="44" x2="176" y2="56" stroke="#39d0d8" stroke-width="1.5"/>
+          <line x1="204" y1="44" x2="204" y2="56" stroke="#39d0d8" stroke-width="1.5"/>
+          <line x1="176" y1="56" x2="204" y2="56" stroke="#39d0d8" stroke-width="1.5"/>
+          <text x="190" y="70" text-anchor="middle" class="actor-label" fill="#39d0d8">CheckInForm</text>
+          <text x="190" y="83" text-anchor="middle" class="actor-sub">«boundary»</text>
+        </g>
+
+        <!-- GuestLookupScreen -->
+        <g>
+          <circle cx="330" cy="24" r="10" fill="rgba(57,208,216,0.08)" stroke="#39d0d8" stroke-width="1.5"/>
+          <line x1="330" y1="34" x2="330" y2="44" stroke="#39d0d8" stroke-width="1.5"/>
+          <line x1="316" y1="44" x2="344" y2="44" stroke="#39d0d8" stroke-width="1.5"/>
+          <line x1="316" y1="44" x2="316" y2="56" stroke="#39d0d8" stroke-width="1.5"/>
+          <line x1="344" y1="44" x2="344" y2="56" stroke="#39d0d8" stroke-width="1.5"/>
+          <line x1="316" y1="56" x2="344" y2="56" stroke="#39d0d8" stroke-width="1.5"/>
+          <text x="330" y="70" text-anchor="middle" class="actor-label" fill="#39d0d8">GuestLookup</text>
+          <text x="330" y="83" text-anchor="middle" class="actor-sub">«boundary»</text>
+        </g>
+
+        <!-- PaymentVerificationPanel -->
+        <g>
+          <circle cx="470" cy="24" r="10" fill="rgba(57,208,216,0.08)" stroke="#39d0d8" stroke-width="1.5"/>
+          <line x1="470" y1="34" x2="470" y2="44" stroke="#39d0d8" stroke-width="1.5"/>
+          <line x1="456" y1="44" x2="484" y2="44" stroke="#39d0d8" stroke-width="1.5"/>
+          <line x1="456" y1="44" x2="456" y2="56" stroke="#39d0d8" stroke-width="1.5"/>
+          <line x1="484" y1="44" x2="484" y2="56" stroke="#39d0d8" stroke-width="1.5"/>
+          <line x1="456" y1="56" x2="484" y2="56" stroke="#39d0d8" stroke-width="1.5"/>
+          <text x="470" y="70" text-anchor="middle" class="actor-label" fill="#39d0d8">PayVerPanel</text>
+          <text x="470" y="83" text-anchor="middle" class="actor-sub">«boundary»</text>
+        </g>
+
+        <!-- RoomStatusDisplay -->
+        <g>
+          <circle cx="610" cy="24" r="10" fill="rgba(57,208,216,0.08)" stroke="#39d0d8" stroke-width="1.5"/>
+          <line x1="610" y1="34" x2="610" y2="44" stroke="#39d0d8" stroke-width="1.5"/>
+          <line x1="596" y1="44" x2="624" y2="44" stroke="#39d0d8" stroke-width="1.5"/>
+          <line x1="596" y1="44" x2="596" y2="56" stroke="#39d0d8" stroke-width="1.5"/>
+          <line x1="624" y1="44" x2="624" y2="56" stroke="#39d0d8" stroke-width="1.5"/>
+          <line x1="596" y1="56" x2="624" y2="56" stroke="#39d0d8" stroke-width="1.5"/>
+          <text x="610" y="70" text-anchor="middle" class="actor-label" fill="#39d0d8">RoomStatus</text>
+          <text x="610" y="83" text-anchor="middle" class="actor-sub">«boundary»</text>
+        </g>
+
+        <!-- KeyCardPrinter -->
+        <g>
+          <circle cx="1420" cy="24" r="10" fill="rgba(57,208,216,0.08)" stroke="#39d0d8" stroke-width="1.5"/>
+          <line x1="1420" y1="34" x2="1420" y2="44" stroke="#39d0d8" stroke-width="1.5"/>
+          <line x1="1406" y1="44" x2="1434" y2="44" stroke="#39d0d8" stroke-width="1.5"/>
+          <line x1="1406" y1="44" x2="1406" y2="56" stroke="#39d0d8" stroke-width="1.5"/>
+          <line x1="1434" y1="44" x2="1434" y2="56" stroke="#39d0d8" stroke-width="1.5"/>
+          <line x1="1406" y1="56" x2="1434" y2="56" stroke="#39d0d8" stroke-width="1.5"/>
+          <text x="1420" y="70" text-anchor="middle" class="actor-label" fill="#39d0d8">KeyCardPrinter</text>
+          <text x="1420" y="83" text-anchor="middle" class="actor-sub">«boundary»</text>
+        </g>
+
+        <!-- ── CONTROLLER / ENTITY actors ── -->
+        <!-- ReservationController -->
+        <g><rect x="700" y="10" width="120" height="48" fill="#161b22" stroke="#ffa657" stroke-width="1.5" rx="7"/>
+          <text x="760" y="30" text-anchor="middle" class="actor-label" fill="#ffa657">Reservation</text>
+          <text x="760" y="44" text-anchor="middle" class="actor-label" fill="#ffa657">Controller</text>
+          <text x="760" y="56" text-anchor="middle" class="actor-sub">«controller»</text>
+        </g>
+        <!-- User entity -->
+        <g><rect x="848" y="10" width="104" height="48" fill="#161b22" stroke="#d2a8ff" stroke-width="1.5" rx="7"/>
+          <text x="900" y="30" text-anchor="middle" class="actor-label" fill="#d2a8ff">User</text>
+          <text x="900" y="44" text-anchor="middle" class="actor-sub">Entity</text>
+        </g>
+        <!-- Reservation entity -->
+        <g><rect x="974" y="10" width="112" height="48" fill="#161b22" stroke="#3fb950" stroke-width="1.5" rx="7"/>
+          <text x="1030" y="30" text-anchor="middle" class="actor-label" fill="#3fb950">Reservation</text>
+          <text x="1030" y="44" text-anchor="middle" class="actor-sub">Entity</text>
+        </g>
+        <!-- Room entity -->
+        <g><rect x="1108" y="10" width="104" height="48" fill="#161b22" stroke="#58a6ff" stroke-width="1.5" rx="7"/>
+          <text x="1160" y="30" text-anchor="middle" class="actor-label" fill="#58a6ff">Room</text>
+          <text x="1160" y="44" text-anchor="middle" class="actor-sub">Entity</text>
+        </g>
+        <!-- Invoice entity -->
+        <g><rect x="1240" y="10" width="100" height="48" fill="#161b22" stroke="#f78166" stroke-width="1.5" rx="7"/>
+          <text x="1290" y="30" text-anchor="middle" class="actor-label" fill="#f78166">INVOICE</text>
+          <text x="1290" y="44" text-anchor="middle" class="actor-sub">Entity</text>
+        </g>
+
+        <!-- ── LIFELINES ── -->
+        <line x1="65"   y1="92" x2="65"   y2="800" class="ll"/>
+        <line x1="190"  y1="92" x2="190"  y2="800" class="ll" stroke="#39d0d8" stroke-opacity="0.5"/>
+        <line x1="330"  y1="92" x2="330"  y2="800" class="ll" stroke="#39d0d8" stroke-opacity="0.5"/>
+        <line x1="470"  y1="92" x2="470"  y2="800" class="ll" stroke="#39d0d8" stroke-opacity="0.5"/>
+        <line x1="610"  y1="92" x2="610"  y2="800" class="ll" stroke="#39d0d8" stroke-opacity="0.5"/>
+        <line x1="760"  y1="58" x2="760"  y2="800" class="ll"/>
+        <line x1="900"  y1="58" x2="900"  y2="800" class="ll"/>
+        <line x1="1030" y1="58" x2="1030" y2="800" class="ll"/>
+        <line x1="1160" y1="58" x2="1160" y2="800" class="ll"/>
+        <line x1="1290" y1="58" x2="1290" y2="800" class="ll"/>
+        <line x1="1420" y1="92" x2="1420" y2="800" class="ll" stroke="#39d0d8" stroke-opacity="0.5"/>
+
+        <!-- ── ACTIVATIONS ── -->
+        <rect x="59"   y="130" width="12" height="630" class="act"   rx="2"/>
+        <rect x="184"  y="142" width="12" height="618" class="act-c" rx="2"/>
+        <rect x="754"  y="196" width="12" height="550" class="act-o" rx="2"/>
+        <rect x="1024" y="248" width="12" height="280" class="act-g" rx="2"/>
+        <rect x="894"  y="300" width="12" height="90"  class="act-p" rx="2"/>
+        <rect x="1284" y="370" width="12" height="150" class="act-r" rx="2"/>
+        <rect x="1154" y="480" width="12" height="120" class="act"   rx="2"/>
+
+        <!-- ===== MESSAGES ===== -->
+
+        <!-- 1: Staff → CheckInForm: enterReservationId() -->
+        <line x1="77" y1="140" x2="182" y2="140" stroke="#58a6ff" stroke-width="1.8" marker-end="url(#ab)"/>
+        <text x="128" y="135" text-anchor="middle" class="mnum" fill="#58a6ff">1</text>
+        <text x="128" y="152" text-anchor="middle" class="mn">enterReservationId()</text>
+
+        <!-- 2: CheckInForm → ReservationController: searchReservation(reservationId) -->
+        <line x1="196" y1="168" x2="752" y2="168" stroke="#39d0d8" stroke-width="1.8" marker-end="url(#ac)"/>
+        <text x="474" y="163" text-anchor="middle" class="mnum" fill="#39d0d8">2</text>
+        <text x="474" y="179" text-anchor="middle" class="mn" fill="#39d0d8">searchReservation(reservationId)</text>
+
+        <!-- 2.1: Controller → ReservationEntity: getStatus() -->
+        <line x1="766" y1="206" x2="1022" y2="206" stroke="#ffa657" stroke-width="1.8" marker-end="url(#ao)"/>
+        <text x="894" y="201" text-anchor="middle" class="mnum" fill="#ffa657">2.1</text>
+        <text x="894" y="216" text-anchor="middle" class="mn" fill="#ffa657">getStatus()</text>
+        <line x1="1036" y1="228" x2="768" y2="228" class="mr" marker-end="url(#ag)"/>
+        <text x="902" y="224" text-anchor="middle" class="rl">CONFIRMED</text>
+
+        <!-- 2.2: Controller → Reservation: verifyGuestInfo(userId) -->
+        <line x1="766" y1="254" x2="1022" y2="254" stroke="#ffa657" stroke-width="1.8" marker-end="url(#ao)"/>
+        <text x="894" y="249" text-anchor="middle" class="mnum" fill="#ffa657">2.2</text>
+        <text x="894" y="264" text-anchor="middle" class="mn" fill="#ffa657">verifyGuestInfo(userId)</text>
+        <!-- 2.2.1 → User entity -->
+        <line x1="1036" y1="276" x2="892" y2="276" stroke="#d2a8ff" stroke-width="1.8" marker-end="url(#ap)"/>
+        <text x="964" y="271" text-anchor="middle" class="mnum" fill="#d2a8ff">2.2.1</text>
+        <text x="964" y="286" text-anchor="middle" class="mn" fill="#d2a8ff">getName()</text>
+        <line x1="906" y1="302" x2="1038" y2="302" class="mr" style="stroke:#d2a8ff" marker-end="url(#ap)"/>
+        <text x="972" y="298" text-anchor="middle" class="rl" fill="#d2a8ff">fullName</text>
+        <!-- Controller → GuestLookupScreen: displayGuest() -->
+        <line x1="754" y1="320" x2="342" y2="320" stroke="#ffa657" stroke-width="1.8" marker-end="url(#ao)"/>
+        <text x="548" y="315" text-anchor="middle" class="mnum" fill="#ffa657">2.3</text>
+        <text x="548" y="330" text-anchor="middle" class="mn" fill="#39d0d8">displayGuestInfo(userDetails)</text>
+
+        <!-- 3: Controller → INVOICE: checkPaymentStatus() -->
+        <line x1="766" y1="355" x2="1282" y2="355" stroke="#f78166" stroke-width="1.8" marker-end="url(#ar)"/>
+        <text x="1024" y="350" text-anchor="middle" class="mnum" fill="#f78166">3</text>
+        <text x="1024" y="365" text-anchor="middle" class="mn" fill="#f78166">checkPaymentStatus(invoiceId)</text>
+        <!-- Invoice internal -->
+        <rect x="1246" y="374" width="112" height="18" rx="3" fill="rgba(247,129,102,0.07)" stroke="#f78166" stroke-width="1" stroke-dasharray="3 2"/>
+        <text x="1302" y="386" text-anchor="middle" font-family="JetBrains Mono" font-size="8.5" fill="#f78166">validateTransaction()</text>
+        <!-- Controller → PayVerPanel -->
+        <line x1="754" y1="405" x2="482" y2="405" stroke="#ffa657" stroke-width="1.8" marker-end="url(#ao)"/>
+        <text x="618" y="400" text-anchor="middle" class="mnum" fill="#ffa657">3.1</text>
+        <text x="618" y="415" text-anchor="middle" class="mn" fill="#39d0d8">showPaymentStatus(PAID)</text>
+        <!-- return from Invoice check -->
+        <line x1="1296" y1="430" x2="768" y2="430" class="mr" style="stroke:#f78166" marker-end="url(#ar)"/>
+        <text x="1032" y="426" text-anchor="middle" class="rl" fill="#f78166">InvoiceStatus = PAID</text>
+
+        <!-- 4: Controller → Room: isAvailable -->
+        <line x1="766" y1="458" x2="1152" y2="458" stroke="#ffa657" stroke-width="1.8" marker-end="url(#ao)"/>
+        <text x="959" y="453" text-anchor="middle" class="mnum" fill="#ffa657">4</text>
+        <text x="959" y="468" text-anchor="middle" class="mn" fill="#ffa657">isAvailable(checkIn, checkOut)</text>
+        <line x1="1166" y1="480" x2="768" y2="480" class="mr" marker-end="url(#ag)"/>
+        <text x="967" y="476" text-anchor="middle" class="rl">true</text>
+        <!-- → RoomStatusDisplay -->
+        <line x1="754" y1="498" x2="622" y2="498" stroke="#ffa657" stroke-width="1.8" marker-end="url(#ao)"/>
+        <text x="688" y="493" text-anchor="middle" class="mnum" fill="#ffa657">4.1</text>
+        <text x="688" y="508" text-anchor="middle" class="mn" fill="#39d0d8">showRoomStatus(AVAILABLE)</text>
+
+        <!-- 5: Controller → Room: updateStatus(OCCUPIED) -->
+        <line x1="766" y1="534" x2="1152" y2="534" stroke="#ffa657" stroke-width="1.8" marker-end="url(#ao)"/>
+        <text x="959" y="529" text-anchor="middle" class="mnum" fill="#ffa657">5</text>
+        <text x="959" y="544" text-anchor="middle" class="mn" fill="#ffa657">updateStatus(OCCUPIED)</text>
+        <line x1="1166" y1="556" x2="768" y2="556" class="mr" marker-end="url(#ag)"/>
+        <text x="967" y="552" text-anchor="middle" class="rl">success</text>
+
+        <!-- 6: Controller → Reservation: updateStatus(CHECKED_IN) -->
+        <line x1="766" y1="578" x2="1022" y2="578" stroke="#ffa657" stroke-width="1.8" marker-end="url(#ao)"/>
+        <text x="894" y="573" text-anchor="middle" class="mnum" fill="#ffa657">6</text>
+        <text x="894" y="588" text-anchor="middle" class="mn" fill="#ffa657">updateStatus(CHECKED_IN)</text>
+        <line x1="1036" y1="600" x2="768" y2="600" class="mr" marker-end="url(#ag)"/>
+        <text x="902" y="596" text-anchor="middle" class="rl">success</text>
+
+        <!-- 7: Controller → KeyCardPrinter -->
+        <line x1="766" y1="626" x2="1408" y2="626" stroke="#ffa657" stroke-width="1.8" marker-end="url(#ao)"/>
+        <text x="1087" y="621" text-anchor="middle" class="mnum" fill="#ffa657">7</text>
+        <text x="1087" y="636" text-anchor="middle" class="mn" fill="#39d0d8">issueKeyCard(roomId)</text>
+        <line x1="1408" y1="648" x2="768" y2="648" class="mr" style="stroke:#39d0d8" marker-end="url(#ac)"/>
+        <text x="1088" y="644" text-anchor="middle" class="rl" fill="#39d0d8">keyCardIssued = true</text>
+
+        <!-- 8: CheckInForm → Staff: showSuccess -->
+        <line x1="754" y1="674" x2="196" y2="674" class="mr" style="stroke:#ffa657" marker-end="url(#ao)"/>
+        <text x="475" y="670" text-anchor="middle" class="rl" fill="#ffa657">checkInComplete()</text>
+        <line x1="184" y1="696" x2="77" y2="696" class="mr" style="stroke:#39d0d8" marker-end="url(#ac)"/>
+        <text x="130" y="692" text-anchor="middle" class="rl" fill="#39d0d8">Check-In Complete ✓</text>
+
+        <!-- ── BOTTOM ACTOR LABELS ── -->
+        <text x="65"   y="815" text-anchor="middle" class="actor-label" fill="#58a6ff" font-size="10">Staff</text>
+        <text x="190"  y="815" text-anchor="middle" class="actor-label" fill="#39d0d8" font-size="9">CheckInForm</text>
+        <text x="330"  y="815" text-anchor="middle" class="actor-label" fill="#39d0d8" font-size="9">GuestLookup</text>
+        <text x="470"  y="815" text-anchor="middle" class="actor-label" fill="#39d0d8" font-size="9">PayVerPanel</text>
+        <text x="610"  y="815" text-anchor="middle" class="actor-label" fill="#39d0d8" font-size="9">RoomStatus</text>
+        <text x="760"  y="815" text-anchor="middle" class="actor-label" fill="#ffa657" font-size="10">ReservationCtrl</text>
+        <text x="900"  y="815" text-anchor="middle" class="actor-label" fill="#d2a8ff" font-size="10">User</text>
+        <text x="1030" y="815" text-anchor="middle" class="actor-label" fill="#3fb950" font-size="10">Reservation</text>
+        <text x="1160" y="815" text-anchor="middle" class="actor-label" fill="#58a6ff" font-size="10">Room</text>
+        <text x="1290" y="815" text-anchor="middle" class="actor-label" fill="#f78166" font-size="10">INVOICE</text>
+        <text x="1420" y="815" text-anchor="middle" class="actor-label" fill="#39d0d8" font-size="9">KeyCardPrinter</text>
+      </svg>
+    </div>
+    <div class="legend">
+      <div class="li"><div class="ll2" style="background:#58a6ff"></div><span>Call message</span></div>
+      <div class="li"><div class="ld" style="border-color:#3fb950"></div><span>Return message</span></div>
+      <div class="li"><div style="width:12px;height:18px;background:rgba(57,208,216,0.1);border:1px solid #39d0d8;border-radius:2px"></div><span>Boundary activation</span></div>
+      <div class="li"><div style="width:12px;height:12px;border-radius:50%;background:rgba(57,208,216,0.08);border:1.5px solid #39d0d8"></div><span>«boundary» class</span></div>
+      <div class="li"><div style="width:12px;height:18px;background:rgba(255,166,87,0.1);border:1px solid #ffa657;border-radius:2px"></div><span>Controller activation</span></div>
+    </div>
+  </div>
+</div>
+
+<!-- ════════════════════════ SEQ CHECK-OUT ════════════════════════ -->
+<div id="seq-co" class="page">
+  <div class="ph">
+    <div class="tag" style="color:var(--accent5);background:rgba(255,166,87,0.1);border:1px solid rgba(255,166,87,0.3)">Sequence Diagram · Check-Out</div>
+    <h1>กิจกรรมการ Check-Out ออกจากโรงแรม</h1>
+    <p>ลำดับการทำงานระหว่าง Actor, <span style="color:#39d0d8">Boundary</span>, Controller และ Entity ในกระบวนการ Check-Out</p>
+  </div>
+  <div class="dw">
+    <div class="dtb">
+      <div class="dot" style="background:#f78166"></div><div class="dot" style="background:#ffa657"></div><div class="dot" style="background:#3fb950"></div>
+      <span>check-out-sequence-v2.uml — with Boundary classes</span>
+    </div>
+    <div class="svgw">
+      <!--
+        Columns:
+        Staff=65, CheckOutForm=200, GuestLookupScreen=345, BillSummaryDisplay=490,
+        PaymentInputPanel=635, CheckOutCtrl=790, ReservationEntity=940, InvoiceEntity=1085,
+        PaymentTxn=1220, PaymentMethod=1355, RoomEntity=1480
+      -->
+      <svg viewBox="0 0 1560 870" xmlns="http://www.w3.org/2000/svg" style="width:100%;min-width:1100px;max-width:1560px">
+        <defs>
+          <marker id="ab3"  markerWidth="7" markerHeight="7" refX="5" refY="3" orient="auto"><path d="M0,0 L0,6 L7,3 z" fill="#58a6ff"/></marker>
+          <marker id="ag3"  markerWidth="7" markerHeight="7" refX="5" refY="3" orient="auto"><path d="M0,0 L0,6 L7,3 z" fill="#3fb950"/></marker>
+          <marker id="ap3"  markerWidth="7" markerHeight="7" refX="5" refY="3" orient="auto"><path d="M0,0 L0,6 L7,3 z" fill="#d2a8ff"/></marker>
+          <marker id="ao3"  markerWidth="7" markerHeight="7" refX="5" refY="3" orient="auto"><path d="M0,0 L0,6 L7,3 z" fill="#ffa657"/></marker>
+          <marker id="ar3"  markerWidth="7" markerHeight="7" refX="5" refY="3" orient="auto"><path d="M0,0 L0,6 L7,3 z" fill="#f78166"/></marker>
+          <marker id="ac3"  markerWidth="7" markerHeight="7" refX="5" refY="3" orient="auto"><path d="M0,0 L0,6 L7,3 z" fill="#39d0d8"/></marker>
+        </defs>
+
+        <!-- ── ACTOR: Staff ── -->
+        <g>
+          <circle cx="65" cy="20" r="9" fill="none" stroke="#58a6ff" stroke-width="1.5"/>
+          <line x1="65" y1="29" x2="65" y2="48" stroke="#58a6ff" stroke-width="1.5"/>
+          <line x1="51" y1="36" x2="79" y2="36" stroke="#58a6ff" stroke-width="1.5"/>
+          <line x1="65" y1="48" x2="53" y2="62" stroke="#58a6ff" stroke-width="1.5"/>
+          <line x1="65" y1="48" x2="77" y2="62" stroke="#58a6ff" stroke-width="1.5"/>
+          <text x="65" y="76" text-anchor="middle" class="actor-label" fill="#58a6ff">Staff</text>
+          <text x="65" y="89" text-anchor="middle" class="actor-sub">Receptionist</text>
+        </g>
+
+        <!-- BOUNDARY: CheckOutForm -->
+        <g>
+          <circle cx="200" cy="24" r="10" fill="rgba(57,208,216,0.08)" stroke="#39d0d8" stroke-width="1.5"/>
+          <line x1="200" y1="34" x2="200" y2="44" stroke="#39d0d8" stroke-width="1.5"/>
+          <line x1="186" y1="44" x2="214" y2="44" stroke="#39d0d8" stroke-width="1.5"/>
+          <line x1="186" y1="44" x2="186" y2="56" stroke="#39d0d8" stroke-width="1.5"/>
+          <line x1="214" y1="44" x2="214" y2="56" stroke="#39d0d8" stroke-width="1.5"/>
+          <line x1="186" y1="56" x2="214" y2="56" stroke="#39d0d8" stroke-width="1.5"/>
+          <text x="200" y="70" text-anchor="middle" class="actor-label" fill="#39d0d8">CheckOutForm</text>
+          <text x="200" y="83" text-anchor="middle" class="actor-sub">«boundary»</text>
+        </g>
+
+        <!-- BOUNDARY: GuestLookupScreen -->
+        <g>
+          <circle cx="345" cy="24" r="10" fill="rgba(57,208,216,0.08)" stroke="#39d0d8" stroke-width="1.5"/>
+          <line x1="345" y1="34" x2="345" y2="44" stroke="#39d0d8" stroke-width="1.5"/>
+          <line x1="331" y1="44" x2="359" y2="44" stroke="#39d0d8" stroke-width="1.5"/>
+          <line x1="331" y1="44" x2="331" y2="56" stroke="#39d0d8" stroke-width="1.5"/>
+          <line x1="359" y1="44" x2="359" y2="56" stroke="#39d0d8" stroke-width="1.5"/>
+          <line x1="331" y1="56" x2="359" y2="56" stroke="#39d0d8" stroke-width="1.5"/>
+          <text x="345" y="70" text-anchor="middle" class="actor-label" fill="#39d0d8">GuestLookup</text>
+          <text x="345" y="83" text-anchor="middle" class="actor-sub">«boundary»</text>
+        </g>
+
+        <!-- BOUNDARY: BillSummaryDisplay -->
+        <g>
+          <circle cx="490" cy="24" r="10" fill="rgba(57,208,216,0.08)" stroke="#39d0d8" stroke-width="1.5"/>
+          <line x1="490" y1="34" x2="490" y2="44" stroke="#39d0d8" stroke-width="1.5"/>
+          <line x1="476" y1="44" x2="504" y2="44" stroke="#39d0d8" stroke-width="1.5"/>
+          <line x1="476" y1="44" x2="476" y2="56" stroke="#39d0d8" stroke-width="1.5"/>
+          <line x1="504" y1="44" x2="504" y2="56" stroke="#39d0d8" stroke-width="1.5"/>
+          <line x1="476" y1="56" x2="504" y2="56" stroke="#39d0d8" stroke-width="1.5"/>
+          <text x="490" y="70" text-anchor="middle" class="actor-label" fill="#39d0d8">BillSummary</text>
+          <text x="490" y="83" text-anchor="middle" class="actor-sub">«boundary»</text>
+        </g>
+
+        <!-- BOUNDARY: PaymentInputPanel -->
+        <g>
+          <circle cx="635" cy="24" r="10" fill="rgba(57,208,216,0.08)" stroke="#39d0d8" stroke-width="1.5"/>
+          <line x1="635" y1="34" x2="635" y2="44" stroke="#39d0d8" stroke-width="1.5"/>
+          <line x1="621" y1="44" x2="649" y2="44" stroke="#39d0d8" stroke-width="1.5"/>
+          <line x1="621" y1="44" x2="621" y2="56" stroke="#39d0d8" stroke-width="1.5"/>
+          <line x1="649" y1="44" x2="649" y2="56" stroke="#39d0d8" stroke-width="1.5"/>
+          <line x1="621" y1="56" x2="649" y2="56" stroke="#39d0d8" stroke-width="1.5"/>
+          <text x="635" y="70" text-anchor="middle" class="actor-label" fill="#39d0d8">PaymentInput</text>
+          <text x="635" y="83" text-anchor="middle" class="actor-sub">«boundary»</text>
+        </g>
+
+        <!-- ReceiptPrinter boundary (rightmost) -->
+        <!-- Note: ReceiptPrinter at x=1480 -->
+        <!-- We'll put it at far right, let's place it near RoomEntity or after -->
+        <!-- Actually let's put ReceiptPrinter at 1480 and Room at 1350 -->
+
+        <!-- BOUNDARY: ReceiptPrinter (at the right, after Room) -->
+        <!-- Adjust layout: CheckOutCtrl=790, Reservation=930, Invoice=1060, PayTxn=1190, PayMethod=1320, Room=1440 -->
+        <!-- ReceiptPrinter will share the last position... let's adjust to 1500 -->
+
+        <!-- CONTROLLER: CheckOutController -->
+        <g><rect x="730" y="10" width="120" height="48" fill="#161b22" stroke="#ffa657" stroke-width="1.5" rx="7"/>
+          <text x="790" y="30" text-anchor="middle" class="actor-label" fill="#ffa657">CheckOut</text>
+          <text x="790" y="44" text-anchor="middle" class="actor-label" fill="#ffa657">Controller</text>
+          <text x="790" y="56" text-anchor="middle" class="actor-sub">«controller»</text>
+        </g>
+        <!-- Reservation Entity -->
+        <g><rect x="878" y="10" width="104" height="48" fill="#161b22" stroke="#3fb950" stroke-width="1.5" rx="7"/>
+          <text x="930" y="30" text-anchor="middle" class="actor-label" fill="#3fb950">Reservation</text>
+          <text x="930" y="44" text-anchor="middle" class="actor-sub">Entity</text>
+        </g>
+        <!-- INVOICE Entity -->
+        <g><rect x="1008" y="10" width="94" height="48" fill="#161b22" stroke="#d2a8ff" stroke-width="1.5" rx="7"/>
+          <text x="1055" y="30" text-anchor="middle" class="actor-label" fill="#d2a8ff">INVOICE</text>
+          <text x="1055" y="44" text-anchor="middle" class="actor-sub">Entity</text>
+        </g>
+        <!-- PaymentTransaction Entity -->
+        <g><rect x="1130" y="10" width="100" height="48" fill="#161b22" stroke="#f78166" stroke-width="1.5" rx="7"/>
+          <text x="1180" y="30" text-anchor="middle" class="actor-label" fill="#f78166">PaymentTxn</text>
+          <text x="1180" y="44" text-anchor="middle" class="actor-sub">Entity</text>
+        </g>
+        <!-- PaymentMethod Entity -->
+        <g><rect x="1258" y="10" width="104" height="48" fill="#161b22" stroke="#ffa657" stroke-width="1.5" rx="7"/>
+          <text x="1310" y="30" text-anchor="middle" class="actor-label" fill="#ffa657">PaymentMethod</text>
+          <text x="1310" y="44" text-anchor="middle" class="actor-sub">Entity</text>
+        </g>
+        <!-- Room Entity -->
+        <g><rect x="1386" y="10" width="94" height="48" fill="#161b22" stroke="#58a6ff" stroke-width="1.5" rx="7"/>
+          <text x="1433" y="30" text-anchor="middle" class="actor-label" fill="#58a6ff">Room</text>
+          <text x="1433" y="44" text-anchor="middle" class="actor-sub">Entity</text>
+        </g>
+
+        <!-- ── LIFELINES ── -->
+        <line x1="65"   y1="92" x2="65"   y2="848" class="ll"/>
+        <line x1="200"  y1="92" x2="200"  y2="848" class="ll" stroke="#39d0d8" stroke-opacity="0.5"/>
+        <line x1="345"  y1="92" x2="345"  y2="848" class="ll" stroke="#39d0d8" stroke-opacity="0.5"/>
+        <line x1="490"  y1="92" x2="490"  y2="848" class="ll" stroke="#39d0d8" stroke-opacity="0.5"/>
+        <line x1="635"  y1="92" x2="635"  y2="848" class="ll" stroke="#39d0d8" stroke-opacity="0.5"/>
+        <line x1="790"  y1="58" x2="790"  y2="848" class="ll"/>
+        <line x1="930"  y1="58" x2="930"  y2="848" class="ll"/>
+        <line x1="1055" y1="58" x2="1055" y2="848" class="ll"/>
+        <line x1="1180" y1="58" x2="1180" y2="848" class="ll"/>
+        <line x1="1310" y1="58" x2="1310" y2="848" class="ll"/>
+        <line x1="1433" y1="58" x2="1433" y2="848" class="ll"/>
+
+        <!-- ── ACTIVATIONS ── -->
+        <rect x="59"   y="128" width="12" height="680" class="act"   rx="2"/>
+        <rect x="194"  y="140" width="12" height="668" class="act-c" rx="2"/>
+        <rect x="784"  y="196" width="12" height="598" class="act-o" rx="2"/>
+        <rect x="924"  y="230" width="12" height="260" class="act-g" rx="2"/>
+        <rect x="1049" y="390" width="12" height="220" class="act-p" rx="2"/>
+        <rect x="1174" y="512" width="12" height="148" class="act-r" rx="2"/>
+        <rect x="1304" y="560" width="12" height="62"  class="act-o" rx="2"/>
+        <rect x="1427" y="668" width="12" height="80"  class="act"   rx="2"/>
+
+        <!-- ===== MESSAGES ===== -->
+
+        <!-- 1: Staff → CheckOutForm -->
+        <line x1="77" y1="138" x2="192" y2="138" stroke="#58a6ff" stroke-width="1.8" marker-end="url(#ab3)"/>
+        <text x="133" y="133" text-anchor="middle" class="mnum" fill="#58a6ff">1</text>
+        <text x="133" y="150" text-anchor="middle" class="mn">enterReservationId()</text>
+
+        <!-- 2: CheckOutForm → Controller: requestCheckOut -->
+        <line x1="206" y1="168" x2="782" y2="168" stroke="#39d0d8" stroke-width="1.8" marker-end="url(#ac3)"/>
+        <text x="494" y="163" text-anchor="middle" class="mnum" fill="#39d0d8">2</text>
+        <text x="494" y="179" text-anchor="middle" class="mn" fill="#39d0d8">requestCheckOut(reservationId)</text>
+
+        <!-- 2.1: Controller → Reservation: getStatus -->
+        <line x1="796" y1="204" x2="922" y2="204" stroke="#ffa657" stroke-width="1.8" marker-end="url(#ao3)"/>
+        <text x="859" y="199" text-anchor="middle" class="mnum" fill="#ffa657">2.1</text>
+        <text x="859" y="214" text-anchor="middle" class="mn" fill="#ffa657">getStatus()</text>
+        <line x1="936" y1="226" x2="798" y2="226" class="mr" marker-end="url(#ag3)"/>
+        <text x="867" y="222" text-anchor="middle" class="rl">CHECKED_IN</text>
+
+        <!-- 2.2: Controller → Reservation: verifyGuestInfo -->
+        <line x1="796" y1="252" x2="922" y2="252" stroke="#ffa657" stroke-width="1.8" marker-end="url(#ao3)"/>
+        <text x="859" y="247" text-anchor="middle" class="mnum" fill="#ffa657">2.2</text>
+        <text x="859" y="262" text-anchor="middle" class="mn" fill="#ffa657">verifyGuestInfo(userId)</text>
+        <line x1="936" y1="278" x2="798" y2="278" class="mr" marker-end="url(#ag3)"/>
+        <text x="867" y="274" text-anchor="middle" class="rl">User Details</text>
+
+        <!-- 2.3: Controller → GuestLookup (boundary) -->
+        <line x1="782" y1="302" x2="357" y2="302" stroke="#ffa657" stroke-width="1.8" marker-end="url(#ao3)"/>
+        <text x="570" y="297" text-anchor="middle" class="mnum" fill="#ffa657">2.3</text>
+        <text x="570" y="312" text-anchor="middle" class="mn" fill="#39d0d8">displayGuestInfo(userDetails)</text>
+
+        <!-- 2.4: Controller → Reservation: calculateStayDuration -->
+        <line x1="796" y1="334" x2="922" y2="334" stroke="#ffa657" stroke-width="1.8" marker-end="url(#ao3)"/>
+        <text x="859" y="329" text-anchor="middle" class="mnum" fill="#ffa657">2.4</text>
+        <text x="859" y="344" text-anchor="middle" class="mn" fill="#ffa657">calculateStayDuration()</text>
+        <line x1="936" y1="358" x2="798" y2="358" class="mr" marker-end="url(#ag3)"/>
+        <text x="867" y="354" text-anchor="middle" class="rl">stayHours: number</text>
+
+        <!-- 3: Controller → INVOICE: calculateTotal -->
+        <line x1="796" y1="388" x2="1047" y2="388" stroke="#ffa657" stroke-width="1.8" marker-end="url(#ao3)"/>
+        <text x="921" y="383" text-anchor="middle" class="mnum" fill="#ffa657">3</text>
+        <text x="921" y="398" text-anchor="middle" class="mn" fill="#d2a8ff">calculateTotal()</text>
+        <rect x="1014" y="408" width="86" height="16" rx="3" fill="rgba(210,168,255,0.07)" stroke="#d2a8ff" stroke-width="1" stroke-dasharray="3 2"/>
+        <text x="1057" y="420" text-anchor="middle" font-family="JetBrains Mono" font-size="8" fill="#d2a8ff">totalAmt + tax</text>
+        <line x1="1061" y1="436" x2="798" y2="436" class="mr" style="stroke:#d2a8ff" marker-end="url(#ap3)"/>
+        <text x="930" y="432" text-anchor="middle" class="rl" fill="#d2a8ff">totalAmount</text>
+
+        <!-- 3.1: Controller → BillSummaryDisplay (boundary) -->
+        <line x1="782" y1="462" x2="502" y2="462" stroke="#ffa657" stroke-width="1.8" marker-end="url(#ao3)"/>
+        <text x="642" y="457" text-anchor="middle" class="mnum" fill="#ffa657">3.1</text>
+        <text x="642" y="472" text-anchor="middle" class="mn" fill="#39d0d8">displayBill(totalAmount)</text>
+
+        <!-- 4: Staff → CheckOutForm → PaymentInputPanel -->
+        <line x1="77" y1="496" x2="192" y2="496" stroke="#58a6ff" stroke-width="1.8" marker-end="url(#ab3)"/>
+        <text x="133" y="491" text-anchor="middle" class="mnum" fill="#58a6ff">4</text>
+        <text x="133" y="507" text-anchor="middle" class="mn">selectPaymentMethod(type)</text>
+        <line x1="206" y1="522" x2="623" y2="522" stroke="#39d0d8" stroke-width="1.8" marker-end="url(#ac3)"/>
+        <text x="414" y="517" text-anchor="middle" class="mnum" fill="#39d0d8">4.1</text>
+        <text x="414" y="532" text-anchor="middle" class="mn" fill="#39d0d8">enterPaymentDetails()</text>
+        <!-- PaymentInputPanel → Controller -->
+        <line x1="647" y1="550" x2="782" y2="550" stroke="#39d0d8" stroke-width="1.8" marker-end="url(#ac3)"/>
+        <text x="714" y="545" text-anchor="middle" class="mnum" fill="#39d0d8">4.2</text>
+        <text x="714" y="560" text-anchor="middle" class="mn" fill="#39d0d8">submitPayment(method, details)</text>
+
+        <!-- 5: Controller → PaymentMethod: validate -->
+        <line x1="796" y1="578" x2="1302" y2="578" stroke="#ffa657" stroke-width="1.8" marker-end="url(#ao3)"/>
+        <text x="1049" y="573" text-anchor="middle" class="mnum" fill="#ffa657">5</text>
+        <text x="1049" y="588" text-anchor="middle" class="mn" fill="#ffa657">validate()</text>
+        <line x1="1316" y1="600" x2="798" y2="600" class="mr" style="stroke:#ffa657" marker-end="url(#ao3)"/>
+        <text x="1057" y="596" text-anchor="middle" class="rl" fill="#ffa657">valid = true</text>
+
+        <!-- 6: Controller → PaymentTxn: createTransaction -->
+        <line x1="796" y1="626" x2="1172" y2="626" stroke="#ffa657" stroke-width="1.8" marker-end="url(#ao3)"/>
+        <text x="984" y="621" text-anchor="middle" class="mnum" fill="#ffa657">6</text>
+        <text x="984" y="636" text-anchor="middle" class="mn" fill="#f78166">createTransaction(amount, method)</text>
+        <rect x="1147" y="644" width="106" height="16" rx="3" fill="rgba(247,129,102,0.07)" stroke="#f78166" stroke-width="1" stroke-dasharray="3 2"/>
+        <text x="1200" y="655" text-anchor="middle" font-family="JetBrains Mono" font-size="8" fill="#f78166">validateTransaction()</text>
+        <line x1="1186" y1="672" x2="798" y2="672" class="mr" style="stroke:#f78166" marker-end="url(#ar3)"/>
+        <text x="992" y="668" text-anchor="middle" class="rl" fill="#f78166">TransactionStatus = SUCCESS</text>
+
+        <!-- 7: Controller → Room: updateStatus(CLEANING) -->
+        <line x1="796" y1="696" x2="1425" y2="696" stroke="#ffa657" stroke-width="1.8" marker-end="url(#ao3)"/>
+        <text x="1110" y="691" text-anchor="middle" class="mnum" fill="#ffa657">7</text>
+        <text x="1110" y="706" text-anchor="middle" class="mn" fill="#58a6ff">updateStatus(CLEANING)</text>
+        <line x1="1439" y1="718" x2="798" y2="718" class="mr" marker-end="url(#ag3)"/>
+        <text x="1118" y="714" text-anchor="middle" class="rl">success</text>
+
+        <!-- 8: Controller → Reservation: updateStatus(CHECKED_OUT) -->
+        <line x1="796" y1="740" x2="922" y2="740" stroke="#ffa657" stroke-width="1.8" marker-end="url(#ao3)"/>
+        <text x="859" y="735" text-anchor="middle" class="mnum" fill="#ffa657">8</text>
+        <text x="859" y="750" text-anchor="middle" class="mn" fill="#3fb950">updateStatus(CHECKED_OUT)</text>
+        <line x1="936" y1="760" x2="798" y2="760" class="mr" marker-end="url(#ag3)"/>
+        <text x="867" y="756" text-anchor="middle" class="rl">success</text>
+
+        <!-- 9: Controller → Invoice: updateStatus(PAID) -->
+        <line x1="796" y1="778" x2="1047" y2="778" stroke="#ffa657" stroke-width="1.8" marker-end="url(#ao3)"/>
+        <text x="921" y="773" text-anchor="middle" class="mnum" fill="#ffa657">9</text>
+        <text x="921" y="788" text-anchor="middle" class="mn" fill="#d2a8ff">updateStatus(PAID)</text>
+        <line x1="1061" y1="800" x2="798" y2="800" class="mr" marker-end="url(#ag3)"/>
+        <text x="930" y="796" text-anchor="middle" class="rl">success</text>
+
+        <!-- 10: Controller → CheckOutForm → Staff: issueReceipt -->
+        <line x1="782" y1="820" x2="206" y2="820" class="mr" style="stroke:#ffa657" marker-end="url(#ao3)"/>
+        <text x="494" y="815" text-anchor="middle" class="rl" fill="#39d0d8">showReceiptConfirmation(invoiceId)</text>
+        <line x1="194" y1="838" x2="77" y2="838" class="mr" style="stroke:#39d0d8" marker-end="url(#ac3)"/>
+        <text x="133" y="834" text-anchor="middle" class="rl" fill="#39d0d8">Check-Out Complete ✓</text>
+
+        <!-- BOTTOM LABELS -->
+        <text x="65"   y="858" text-anchor="middle" class="actor-label" fill="#58a6ff" font-size="10">Staff</text>
+        <text x="200"  y="858" text-anchor="middle" class="actor-label" fill="#39d0d8" font-size="9">CheckOutForm</text>
+        <text x="345"  y="858" text-anchor="middle" class="actor-label" fill="#39d0d8" font-size="9">GuestLookup</text>
+        <text x="490"  y="858" text-anchor="middle" class="actor-label" fill="#39d0d8" font-size="9">BillSummary</text>
+        <text x="635"  y="858" text-anchor="middle" class="actor-label" fill="#39d0d8" font-size="9">PaymentInput</text>
+        <text x="790"  y="858" text-anchor="middle" class="actor-label" fill="#ffa657" font-size="10">CheckOutCtrl</text>
+        <text x="930"  y="858" text-anchor="middle" class="actor-label" fill="#3fb950" font-size="10">Reservation</text>
+        <text x="1055" y="858" text-anchor="middle" class="actor-label" fill="#d2a8ff" font-size="10">INVOICE</text>
+        <text x="1180" y="858" text-anchor="middle" class="actor-label" fill="#f78166" font-size="10">PaymentTxn</text>
+        <text x="1310" y="858" text-anchor="middle" class="actor-label" fill="#ffa657" font-size="9">PaymentMethod</text>
+        <text x="1433" y="858" text-anchor="middle" class="actor-label" fill="#58a6ff" font-size="10">Room</text>
+      </svg>
+    </div>
+    <div class="legend">
+      <div class="li"><div class="ll2" style="background:#58a6ff"></div><span>Call message</span></div>
+      <div class="li"><div class="ld" style="border-color:#3fb950"></div><span>Return message</span></div>
+      <div class="li"><div style="width:12px;height:18px;background:rgba(57,208,216,0.1);border:1px solid #39d0d8;border-radius:2px"></div><span>Boundary activation</span></div>
+      <div class="li"><div style="width:12px;height:12px;border-radius:50%;background:rgba(57,208,216,0.08);border:1.5px solid #39d0d8"></div><span>«boundary» class</span></div>
+      <div class="li"><div style="width:12px;height:18px;background:rgba(255,166,87,0.1);border:1px solid #ffa657;border-radius:2px"></div><span>Controller activation</span></div>
+    </div>
+  </div>
+</div>
+
+<!-- ════════════════════════ CRC CHECK-IN ════════════════════════ -->
+<div id="crc-ci" class="page">
+  <div class="ph">
+    <div class="tag" style="color:var(--accent2);background:rgba(63,185,80,0.1);border:1px solid rgba(63,185,80,0.3)">CRC Cards · Check-In</div>
+    <h1>CRC Cards — กระบวนการ Check-In</h1>
+    <p>Class · Responsibility · Collaboration ของทุก Class รวมถึง <span style="color:#39d0d8">«boundary»</span> classes</p>
+  </div>
+
+  <!-- BOUNDARY SECTION -->
+  <div class="section-label" style="margin-top:0">
+    <div class="section-dot" style="background:#39d0d8"></div>
+    <h3>Boundary Classes</h3>
+    <div class="section-line"></div>
+  </div>
+  <div class="crc-grid" style="margin-bottom:36px">
+
+    <!-- CheckInForm -->
+    <div class="cc boundary"><div class="ch">
+      <div class="ci" style="background:rgba(57,208,216,0.15)">🖥️</div>
+      <div>
+        <div class="cn" style="color:#39d0d8">CheckInForm <span class="cbadge cbadge-boundary">boundary</span></div>
+        <div class="cr">UI รับ reservationId และข้อมูลเริ่มต้นจาก Staff</div>
+      </div>
+    </div><div class="cb">
+      <div class="col rc"><div class="ct">Responsibilities</div>
+        <div class="ci2"><div class="cbullet"></div><span>แสดงฟอร์มกรอก reservationId</span></div>
+        <div class="ci2"><div class="cbullet"></div><span>ตรวจสอบ input ว่าไม่ว่างเปล่า (client-side validation)</span></div>
+        <div class="ci2"><div class="cbullet"></div><span>ส่งข้อมูลไปยัง ReservationController เมื่อ submit</span></div>
+        <div class="ci2"><div class="cbullet"></div><span>แสดงสถานะ Loading / Error / Success</span></div>
+        <div class="ci2"><div class="cbullet"></div><span>แสดงข้อความ "Check-In Complete ✓" เมื่อสำเร็จ</span></div>
+      </div>
+      <div class="col xc"><div class="ct">Collaborators</div>
+        <div class="ci2"><div class="cbullet"></div><div><span class="ctag ctag-c">ReservationController</span></div></div>
+        <div class="ci2"><div class="cbullet"></div><div><span class="ctag ctag-c">GuestLookupScreen</span></div></div>
+        <div class="ci2"><div class="cbullet"></div><div><span class="ctag ctag-c">RoomStatusDisplay</span></div></div>
+      </div>
+    </div></div>
+
+    <!-- GuestLookupScreen -->
+    <div class="cc boundary"><div class="ch">
+      <div class="ci" style="background:rgba(57,208,216,0.15)">🔍</div>
+      <div>
+        <div class="cn" style="color:#39d0d8">GuestLookupScreen <span class="cbadge cbadge-boundary">boundary · shared</span></div>
+        <div class="cr">ค้นหาและแสดงข้อมูลแขก — ใช้ร่วมกัน Check-In / Check-Out</div>
+      </div>
+    </div><div class="cb">
+      <div class="col rc"><div class="ct">Responsibilities</div>
+        <div class="ci2"><div class="cbullet"></div><span>แสดงชื่อ ประเภท Room และวันที่เช็คอิน–เช็คเอาต์ของแขก</span></div>
+        <div class="ci2"><div class="cbullet"></div><span>รับข้อมูล userDetails จาก Controller แล้ว render</span></div>
+        <div class="ci2"><div class="cbullet"></div><span>ไม่เก็บ state — แสดงผลตามข้อมูลที่ได้รับเท่านั้น</span></div>
+        <div class="ci2"><div class="cbullet"></div><span>Highlight ข้อมูลผิดปกติ (เช่น reservationId ไม่ตรง)</span></div>
+      </div>
+      <div class="col xc"><div class="ct">Collaborators</div>
+        <div class="ci2"><div class="cbullet"></div><div><span class="ctag ctag-c">ReservationController</span></div></div>
+        <div class="ci2"><div class="cbullet"></div><div><span class="ctag ctag-c">CheckOutController</span></div></div>
+      </div>
+    </div></div>
+
+    <!-- PaymentVerificationPanel -->
+    <div class="cc boundary"><div class="ch">
+      <div class="ci" style="background:rgba(57,208,216,0.15)">💳</div>
+      <div>
+        <div class="cn" style="color:#39d0d8">PaymentVerificationPanel <span class="cbadge cbadge-boundary">boundary</span></div>
+        <div class="cr">แสดงยืนยันสถานะการชำระเงิน ก่อน Check-In</div>
+      </div>
+    </div><div class="cb">
+      <div class="col rc"><div class="ct">Responsibilities</div>
+        <div class="ci2"><div class="cbullet"></div><span>แสดงสถานะ Invoice: PAID / UNPAID พร้อมสี</span></div>
+        <div class="ci2"><div class="cbullet"></div><span>แสดงยอดชำระ และวันที่ชำระล่าสุด</span></div>
+        <div class="ci2"><div class="cbullet"></div><span>บล็อก Check-In หากสถานะไม่ใช่ PAID</span></div>
+        <div class="ci2"><div class="cbullet"></div><span>รับข้อมูลจาก Controller ไม่เรียก INVOICE โดยตรง</span></div>
+      </div>
+      <div class="col xc"><div class="ct">Collaborators</div>
+        <div class="ci2"><div class="cbullet"></div><div><span class="ctag ctag-c">ReservationController</span></div></div>
+      </div>
+    </div></div>
+
+    <!-- RoomStatusDisplay -->
+    <div class="cc boundary"><div class="ch">
+      <div class="ci" style="background:rgba(57,208,216,0.15)">🚪</div>
+      <div>
+        <div class="cn" style="color:#39d0d8">RoomStatusDisplay <span class="cbadge cbadge-boundary">boundary</span></div>
+        <div class="cr">แสดงสถานะห้องพักและผลการตรวจสอบความว่าง</div>
+      </div>
+    </div><div class="cb">
+      <div class="col rc"><div class="ct">Responsibilities</div>
+        <div class="ci2"><div class="cbullet"></div><span>แสดงสถานะห้อง: AVAILABLE / OCCUPIED / CLEANING</span></div>
+        <div class="ci2"><div class="cbullet"></div><span>แสดงประเภทห้อง, ชั้น และ room number</span></div>
+        <div class="ci2"><div class="cbullet"></div><span>อัปเดต display เป็น OCCUPIED หลัง Check-In สำเร็จ</span></div>
+        <div class="ci2"><div class="cbullet"></div><span>ไม่เรียก Room Entity โดยตรง รอข้อมูลจาก Controller</span></div>
+      </div>
+      <div class="col xc"><div class="ct">Collaborators</div>
+        <div class="ci2"><div class="cbullet"></div><div><span class="ctag ctag-c">ReservationController</span></div></div>
+      </div>
+    </div></div>
+
+    <!-- KeyCardPrinter -->
+    <div class="cc boundary"><div class="ch">
+      <div class="ci" style="background:rgba(57,208,216,0.15)">🗝️</div>
+      <div>
+        <div class="cn" style="color:#39d0d8">KeyCardPrinter <span class="cbadge cbadge-boundary">boundary</span></div>
+        <div class="cr">Interface กับอุปกรณ์ออกบัตรกุญแจห้องพัก</div>
+      </div>
+    </div><div class="cb">
+      <div class="col rc"><div class="ct">Responsibilities</div>
+        <div class="ci2"><div class="cbullet"></div><span>รับคำสั่ง issueKeyCard(roomId) จาก Controller</span></div>
+        <div class="ci2"><div class="cbullet"></div><span>สื่อสารกับ hardware อุปกรณ์พิมพ์บัตร</span></div>
+        <div class="ci2"><div class="cbullet"></div><span>ส่งคืน keyCardIssued = true/false</span></div>
+        <div class="ci2"><div class="cbullet"></div><span>แสดง error หากอุปกรณ์ไม่พร้อมใช้งาน</span></div>
+        <div class="ci2"><div class="cbullet"></div><span>บันทึก log การออกบัตรพร้อม timestamp</span></div>
+      </div>
+      <div class="col xc"><div class="ct">Collaborators</div>
+        <div class="ci2"><div class="cbullet"></div><div><span class="ctag ctag-c">ReservationController</span></div></div>
+      </div>
+    </div></div>
+
+  </div>
+
+  <!-- CONTROLLER + ENTITY SECTION -->
+  <div class="section-label">
+    <div class="section-dot" style="background:#ffa657"></div>
+    <h3>Controller & Entity Classes</h3>
+    <div class="section-line"></div>
+  </div>
+  <div class="crc-grid">
+
+    <!-- ReservationController -->
+    <div class="cc"><div class="ch">
+      <div class="ci" style="background:rgba(255,166,87,0.15)">🎮</div>
+      <div><div class="cn" style="color:#ffa657">ReservationController <span class="cbadge cbadge-controller">controller</span></div><div class="cr">ประสานงานกระบวนการ Check-In ทั้งหมด</div></div>
+    </div><div class="cb">
+      <div class="col rc"><div class="ct">Responsibilities</div>
+        <div class="ci2"><div class="cbullet"></div><span>รับคำขอจาก CheckInForm</span></div>
+        <div class="ci2"><div class="cbullet"></div><span>ค้นหาการจองด้วย reservationId</span></div>
+        <div class="ci2"><div class="cbullet"></div><span>ตรวจสอบสถานะ CONFIRMED</span></div>
+        <div class="ci2"><div class="cbullet"></div><span>ส่ง userDetails ให้ GuestLookupScreen แสดงผล</span></div>
+        <div class="ci2"><div class="cbullet"></div><span>ส่งสถานะ Invoice ให้ PaymentVerificationPanel</span></div>
+        <div class="ci2"><div class="cbullet"></div><span>ส่งสถานะห้องให้ RoomStatusDisplay</span></div>
+        <div class="ci2"><div class="cbullet"></div><span>สั่งอัปเดต Room → OCCUPIED</span></div>
+        <div class="ci2"><div class="cbullet"></div><span>สั่งอัปเดต Reservation → CHECKED_IN</span></div>
+        <div class="ci2"><div class="cbullet"></div><span>สั่ง KeyCardPrinter ออกบัตรกุญแจ</span></div>
+        <div class="ci2"><div class="cbullet"></div><span>แจ้ง CheckInForm เมื่อกระบวนการสำเร็จ</span></div>
+      </div>
+      <div class="col xc"><div class="ct">Collaborators</div>
+        <div class="ci2"><div class="cbullet"></div><div><span class="ctag ctag-c">CheckInForm</span></div></div>
+        <div class="ci2"><div class="cbullet"></div><div><span class="ctag ctag-c">GuestLookupScreen</span></div></div>
+        <div class="ci2"><div class="cbullet"></div><div><span class="ctag ctag-c">PaymentVerificationPanel</span></div></div>
+        <div class="ci2"><div class="cbullet"></div><div><span class="ctag ctag-c">RoomStatusDisplay</span></div></div>
+        <div class="ci2"><div class="cbullet"></div><div><span class="ctag ctag-c">KeyCardPrinter</span></div></div>
+        <div class="ci2"><div class="cbullet"></div><div><span class="ctag">Reservation</span></div></div>
+        <div class="ci2"><div class="cbullet"></div><div><span class="ctag">User</span></div></div>
+        <div class="ci2"><div class="cbullet"></div><div><span class="ctag">Room</span></div></div>
+        <div class="ci2"><div class="cbullet"></div><div><span class="ctag">INVOICE</span></div></div>
+      </div>
+    </div></div>
+
+    <!-- Reservation -->
+    <div class="cc"><div class="ch">
+      <div class="ci" style="background:rgba(63,185,80,0.15)">📄</div>
+      <div><div class="cn" style="color:#3fb950">Reservation <span class="cbadge cbadge-entity">entity</span></div><div class="cr">เก็บข้อมูลการจองห้องพัก</div></div>
+    </div><div class="cb">
+      <div class="col rc"><div class="ct">Responsibilities</div>
+        <div class="ci2"><div class="cbullet"></div><span>ให้สถานะการจอง getStatus() → CONFIRMED</span></div>
+        <div class="ci2"><div class="cbullet"></div><span>ยืนยันข้อมูลแขก verifyGuestInfo(userId)</span></div>
+        <div class="ci2"><div class="cbullet"></div><span>อัปเดตสถานะเป็น CHECKED_IN</span></div>
+        <div class="ci2"><div class="cbullet"></div><span>บันทึก actualCheckInTime = NOW</span></div>
+        <div class="ci2"><div class="cbullet"></div><span>ให้ข้อมูล roomId ที่เกี่ยวข้อง</span></div>
+      </div>
+      <div class="col xc"><div class="ct">Collaborators</div>
+        <div class="ci2"><div class="cbullet"></div><div><span class="ctag">User</span></div></div>
+        <div class="ci2"><div class="cbullet"></div><div><span class="ctag">Room</span></div></div>
+      </div>
+    </div></div>
+
+    <!-- User -->
+    <div class="cc"><div class="ch">
+      <div class="ci" style="background:rgba(210,168,255,0.15)">👤</div>
+      <div><div class="cn" style="color:#d2a8ff">User <span class="cbadge cbadge-entity">entity</span></div><div class="cr">ข้อมูลผู้ใช้ / แขกที่ Check-In</div></div>
+    </div><div class="cb">
+      <div class="col rc"><div class="ct">Responsibilities</div>
+        <div class="ci2"><div class="cbullet"></div><span>ให้ชื่อแขก getName() → fullName</span></div>
+        <div class="ci2"><div class="cbullet"></div><span>ยืนยันตัวตนด้วย userId</span></div>
+        <div class="ci2"><div class="cbullet"></div><span>ให้ข้อมูลติดต่อ email, contactNumber</span></div>
+        <div class="ci2"><div class="cbullet"></div><span>ให้ข้อมูล Role เพื่อตรวจสิทธิ์</span></div>
+      </div>
+      <div class="col xc"><div class="ct">Collaborators</div>
+        <div class="ci2"><div class="cbullet"></div><div><span class="ctag">Role</span></div></div>
+      </div>
+    </div></div>
+
+    <!-- Room -->
+    <div class="cc"><div class="ch">
+      <div class="ci" style="background:rgba(88,166,255,0.15)">🚪</div>
+      <div><div class="cn" style="color:#58a6ff">Room <span class="cbadge cbadge-entity">entity</span></div><div class="cr">ข้อมูลและสถานะของห้องพัก</div></div>
+    </div><div class="cb">
+      <div class="col rc"><div class="ct">Responsibilities</div>
+        <div class="ci2"><div class="cbullet"></div><span>ตรวจสอบว่าห้องว่าง isAvailable()</span></div>
+        <div class="ci2"><div class="cbullet"></div><span>อัปเดตสถานะห้องเป็น OCCUPIED</span></div>
+        <div class="ci2"><div class="cbullet"></div><span>ให้ข้อมูลประเภทห้องและราคา</span></div>
+        <div class="ci2"><div class="cbullet"></div><span>ให้ข้อมูลการจองปัจจุบัน</span></div>
+      </div>
+      <div class="col xc"><div class="ct">Collaborators</div>
+        <div class="ci2"><div class="cbullet"></div><div><span class="ctag">RoomType</span></div></div>
+        <div class="ci2"><div class="cbullet"></div><div><span class="ctag">Reservation</span></div></div>
+      </div>
+    </div></div>
+
+    <!-- INVOICE -->
+    <div class="cc"><div class="ch">
+      <div class="ci" style="background:rgba(247,129,102,0.15)">🧾</div>
+      <div><div class="cn" style="color:#f78166">INVOICE <span class="cbadge cbadge-entity">entity</span></div><div class="cr">ใบแจ้งหนี้และสถานะการชำระ</div></div>
+    </div><div class="cb">
+      <div class="col rc"><div class="ct">Responsibilities</div>
+        <div class="ci2"><div class="cbullet"></div><span>ตรวจสอบสถานะ InvoiceStatus (PAID/UNPAID)</span></div>
+        <div class="ci2"><div class="cbullet"></div><span>คำนวณยอดรวม calculateTotal()</span></div>
+        <div class="ci2"><div class="cbullet"></div><span>คำนวณภาษี taxAmount</span></div>
+        <div class="ci2"><div class="cbullet"></div><span>ส่งคืน PAID ให้ Controller ยืนยัน</span></div>
+      </div>
+      <div class="col xc"><div class="ct">Collaborators</div>
+        <div class="ci2"><div class="cbullet"></div><div><span class="ctag">PaymentTransaction</span></div></div>
+        <div class="ci2"><div class="cbullet"></div><div><span class="ctag">Reservation</span></div></div>
+      </div>
+    </div></div>
+
+    <!-- PaymentTransaction -->
+    <div class="cc"><div class="ch">
+      <div class="ci" style="background:rgba(247,129,102,0.1)">💳</div>
+      <div><div class="cn" style="color:#f78166">PaymentTransaction <span class="cbadge cbadge-entity">entity</span></div><div class="cr">บันทึกและยืนยันธุรกรรมการชำระ</div></div>
+    </div><div class="cb">
+      <div class="col rc"><div class="ct">Responsibilities</div>
+        <div class="ci2"><div class="cbullet"></div><span>ยืนยันธุรกรรม validateTransaction()</span></div>
+        <div class="ci2"><div class="cbullet"></div><span>ตรวจสอบ TransactionStatus = SUCCESS</span></div>
+        <div class="ci2"><div class="cbullet"></div><span>ให้ข้อมูลจำนวนเงิน amountPaid</span></div>
+        <div class="ci2"><div class="cbullet"></div><span>บันทึก paymentTimestamp อัตโนมัติ</span></div>
+      </div>
+      <div class="col xc"><div class="ct">Collaborators</div>
+        <div class="ci2"><div class="cbullet"></div><div><span class="ctag">INVOICE</span></div></div>
+        <div class="ci2"><div class="cbullet"></div><div><span class="ctag">PaymentMethod</span></div></div>
+      </div>
+    </div></div>
+
+    <!-- RoomType -->
+    <div class="cc"><div class="ch">
+      <div class="ci" style="background:rgba(88,166,255,0.1)">🏷️</div>
+      <div><div class="cn" style="color:#58a6ff">RoomType <span class="cbadge cbadge-entity">entity</span></div><div class="cr">ประเภทห้องและราคาต่อชั่วโมง</div></div>
+    </div><div class="cb">
+      <div class="col rc"><div class="ct">Responsibilities</div>
+        <div class="ci2"><div class="cbullet"></div><span>ให้ข้อมูลราคา pricePerHour</span></div>
+        <div class="ci2"><div class="cbullet"></div><span>ให้ข้อมูลความจุสูงสุด capacity</span></div>
+        <div class="ci2"><div class="cbullet"></div><span>ค้นหาห้องว่างตามประเภท</span></div>
+      </div>
+      <div class="col xc"><div class="ct">Collaborators</div>
+        <div class="ci2"><div class="cbullet"></div><div><span class="ctag">Room</span></div></div>
+      </div>
+    </div></div>
+
+    <!-- Role -->
+    <div class="cc"><div class="ch">
+      <div class="ci" style="background:rgba(210,168,255,0.1)">🔐</div>
+      <div><div class="cn" style="color:#d2a8ff">Role <span class="cbadge cbadge-entity">entity</span></div><div class="cr">สิทธิ์การเข้าถึงของผู้ใช้</div></div>
+    </div><div class="cb">
+      <div class="col rc"><div class="ct">Responsibilities</div>
+        <div class="ci2"><div class="cbullet"></div><span>ตรวจสอบสิทธิ์ Check-In hasPermission()</span></div>
+        <div class="ci2"><div class="cbullet"></div><span>ให้ชื่อ Role (Admin, Staff, Guest)</span></div>
+        <div class="ci2"><div class="cbullet"></div><span>ระบุ Permission ที่ Role มี</span></div>
+      </div>
+      <div class="col xc"><div class="ct">Collaborators</div>
+        <div class="ci2"><div class="cbullet"></div><div><span class="ctag">Permission</span></div></div>
+        <div class="ci2"><div class="cbullet"></div><div><span class="ctag">User</span></div></div>
+      </div>
+    </div></div>
+
+  </div>
+</div>
+
+<!-- ════════════════════════ CRC CHECK-OUT ════════════════════════ -->
+<div id="crc-co" class="page">
+  <div class="ph">
+    <div class="tag" style="color:var(--accent4);background:rgba(210,168,255,0.1);border:1px solid rgba(210,168,255,0.3)">CRC Cards · Check-Out</div>
+    <h1>CRC Cards — กระบวนการ Check-Out</h1>
+    <p>Class · Responsibility · Collaboration ของทุก Class รวมถึง <span style="color:#39d0d8">«boundary»</span> classes</p>
+  </div>
+
+  <!-- BOUNDARY SECTION -->
+  <div class="section-label" style="margin-top:0">
+    <div class="section-dot" style="background:#39d0d8"></div>
+    <h3>Boundary Classes</h3>
+    <div class="section-line"></div>
+  </div>
+  <div class="crc-grid" style="margin-bottom:36px">
+
+    <!-- CheckOutForm -->
+    <div class="cc boundary"><div class="ch">
+      <div class="ci" style="background:rgba(57,208,216,0.15)">🖥️</div>
+      <div>
+        <div class="cn" style="color:#39d0d8">CheckOutForm <span class="cbadge cbadge-boundary">boundary</span></div>
+        <div class="cr">UI รับ reservationId จาก Staff เพื่อเริ่ม Check-Out</div>
+      </div>
+    </div><div class="cb">
+      <div class="col rc"><div class="ct">Responsibilities</div>
+        <div class="ci2"><div class="cbullet"></div><span>แสดงฟอร์มกรอก reservationId</span></div>
+        <div class="ci2"><div class="cbullet"></div><span>ตรวจสอบ input (client-side validation)</span></div>
+        <div class="ci2"><div class="cbullet"></div><span>ส่งคำขอไปยัง CheckOutController</span></div>
+        <div class="ci2"><div class="cbullet"></div><span>แสดง Loading state ระหว่างประมวลผล</span></div>
+        <div class="ci2"><div class="cbullet"></div><span>แสดงข้อความ "Check-Out Complete ✓" เมื่อสำเร็จ</span></div>
+      </div>
+      <div class="col xc"><div class="ct">Collaborators</div>
+        <div class="ci2"><div class="cbullet"></div><div><span class="ctag ctag-c">CheckOutController</span></div></div>
+        <div class="ci2"><div class="cbullet"></div><div><span class="ctag ctag-c">GuestLookupScreen</span></div></div>
+        <div class="ci2"><div class="cbullet"></div><div><span class="ctag ctag-c">BillSummaryDisplay</span></div></div>
+        <div class="ci2"><div class="cbullet"></div><div><span class="ctag ctag-c">PaymentInputPanel</span></div></div>
+      </div>
+    </div></div>
+
+    <!-- GuestLookupScreen (shared) -->
+    <div class="cc boundary"><div class="ch">
+      <div class="ci" style="background:rgba(57,208,216,0.15)">🔍</div>
+      <div>
+        <div class="cn" style="color:#39d0d8">GuestLookupScreen <span class="cbadge cbadge-boundary">boundary · shared</span></div>
+        <div class="cr">ค้นหาและแสดงข้อมูลแขก — ใช้ร่วมกัน Check-In / Check-Out</div>
+      </div>
+    </div><div class="cb">
+      <div class="col rc"><div class="ct">Responsibilities</div>
+        <div class="ci2"><div class="cbullet"></div><span>แสดงชื่อแขก, ประเภทห้อง, วันที่เช็คอิน-เช็คเอาต์</span></div>
+        <div class="ci2"><div class="cbullet"></div><span>รับ userDetails จาก CheckOutController</span></div>
+        <div class="ci2"><div class="cbullet"></div><span>ไม่เก็บ state — display-only</span></div>
+        <div class="ci2"><div class="cbullet"></div><span>แสดงระยะเวลาพักจริง (stayHours)</span></div>
+      </div>
+      <div class="col xc"><div class="ct">Collaborators</div>
+        <div class="ci2"><div class="cbullet"></div><div><span class="ctag ctag-c">CheckOutController</span></div></div>
+        <div class="ci2"><div class="cbullet"></div><div><span class="ctag ctag-c">ReservationController</span></div></div>
+      </div>
+    </div></div>
+
+    <!-- BillSummaryDisplay -->
+    <div class="cc boundary"><div class="ch">
+      <div class="ci" style="background:rgba(57,208,216,0.15)">🧾</div>
+      <div>
+        <div class="cn" style="color:#39d0d8">BillSummaryDisplay <span class="cbadge cbadge-boundary">boundary</span></div>
+        <div class="cr">แสดงยอดรวมค่าใช้จ่ายก่อนชำระ</div>
+      </div>
+    </div><div class="cb">
+      <div class="col rc"><div class="ct">Responsibilities</div>
+        <div class="ci2"><div class="cbullet"></div><span>แสดงรายการค่าใช้จ่ายแบบแยกรายการ</span></div>
+        <div class="ci2"><div class="cbullet"></div><span>แสดง subtotal, tax, และ totalAmount</span></div>
+        <div class="ci2"><div class="cbullet"></div><span>รับข้อมูลจาก Controller — ไม่เรียก INVOICE โดยตรง</span></div>
+        <div class="ci2"><div class="cbullet"></div><span>รอ Staff ยืนยันก่อนเข้าสู่ขั้นตอนชำระ</span></div>
+        <div class="ci2"><div class="cbullet"></div><span>แสดงค่า minibar, room service เพิ่มเติม</span></div>
+      </div>
+      <div class="col xc"><div class="ct">Collaborators</div>
+        <div class="ci2"><div class="cbullet"></div><div><span class="ctag ctag-c">CheckOutController</span></div></div>
+      </div>
+    </div></div>
+
+    <!-- PaymentInputPanel -->
+    <div class="cc boundary"><div class="ch">
+      <div class="ci" style="background:rgba(57,208,216,0.15)">💳</div>
+      <div>
+        <div class="cn" style="color:#39d0d8">PaymentInputPanel <span class="cbadge cbadge-boundary">boundary</span></div>
+        <div class="cr">รับข้อมูลวิธีและรายละเอียดการชำระเงิน</div>
+      </div>
+    </div><div class="cb">
+      <div class="col rc"><div class="ct">Responsibilities</div>
+        <div class="ci2"><div class="cbullet"></div><span>แสดง dropdown เลือกประเภทการชำระ (CASH, CARD ฯลฯ)</span></div>
+        <div class="ci2"><div class="cbullet"></div><span>รับรายละเอียดบัตร / ยอดเงินสด</span></div>
+        <div class="ci2"><div class="cbullet"></div><span>ตรวจสอบ input ก่อนส่งให้ Controller</span></div>
+        <div class="ci2"><div class="cbullet"></div><span>ส่ง submitPayment(method, details) ไป CheckOutController</span></div>
+        <div class="ci2"><div class="cbullet"></div><span>แสดงสถานะ Processing / Failed / Success</span></div>
+      </div>
+      <div class="col xc"><div class="ct">Collaborators</div>
+        <div class="ci2"><div class="cbullet"></div><div><span class="ctag ctag-c">CheckOutController</span></div></div>
+      </div>
+    </div></div>
+
+    <!-- ReceiptPrinter -->
+    <div class="cc boundary"><div class="ch">
+      <div class="ci" style="background:rgba(57,208,216,0.15)">🖨️</div>
+      <div>
+        <div class="cn" style="color:#39d0d8">ReceiptPrinter <span class="cbadge cbadge-boundary">boundary</span></div>
+        <div class="cr">Interface กับอุปกรณ์พิมพ์ใบเสร็จ</div>
+      </div>
+    </div><div class="cb">
+      <div class="col rc"><div class="ct">Responsibilities</div>
+        <div class="ci2"><div class="cbullet"></div><span>รับคำสั่ง printReceipt(invoiceId) จาก Controller</span></div>
+        <div class="ci2"><div class="cbullet"></div><span>สื่อสารกับ hardware เครื่องพิมพ์</span></div>
+        <div class="ci2"><div class="cbullet"></div><span>ส่งคืน receiptPrinted = true/false</span></div>
+        <div class="ci2"><div class="cbullet"></div><span>รองรับการส่งใบเสร็จทาง email แทน</span></div>
+        <div class="ci2"><div class="cbullet"></div><span>แสดง error หากอุปกรณ์ออฟไลน์</span></div>
+      </div>
+      <div class="col xc"><div class="ct">Collaborators</div>
+        <div class="ci2"><div class="cbullet"></div><div><span class="ctag ctag-c">CheckOutController</span></div></div>
+      </div>
+    </div></div>
+
+  </div>
+
+  <!-- CONTROLLER + ENTITY SECTION -->
+  <div class="section-label">
+    <div class="section-dot" style="background:#ffa657"></div>
+    <h3>Controller & Entity Classes</h3>
+    <div class="section-line"></div>
+  </div>
+  <div class="crc-grid">
+
+    <!-- CheckOutController -->
+    <div class="cc"><div class="ch">
+      <div class="ci" style="background:rgba(255,166,87,0.15)">🎮</div>
+      <div><div class="cn" style="color:#ffa657">CheckOutController <span class="cbadge cbadge-controller">controller</span></div><div class="cr">ประสานงานกระบวนการ Check-Out ทั้งหมด</div></div>
+    </div><div class="cb">
+      <div class="col rc"><div class="ct">Responsibilities</div>
+        <div class="ci2"><div class="cbullet"></div><span>รับคำขอจาก CheckOutForm</span></div>
+        <div class="ci2"><div class="cbullet"></div><span>ค้นหาการจองที่สถานะ CHECKED_IN</span></div>
+        <div class="ci2"><div class="cbullet"></div><span>ส่ง userDetails ให้ GuestLookupScreen</span></div>
+        <div class="ci2"><div class="cbullet"></div><span>คำนวณระยะเวลาพักจริง</span></div>
+        <div class="ci2"><div class="cbullet"></div><span>ส่ง totalAmount ให้ BillSummaryDisplay</span></div>
+        <div class="ci2"><div class="cbullet"></div><span>รับ paymentDetails จาก PaymentInputPanel</span></div>
+        <div class="ci2"><div class="cbullet"></div><span>สั่งสร้างธุรกรรมการชำระ</span></div>
+        <div class="ci2"><div class="cbullet"></div><span>อัปเดต Room → CLEANING</span></div>
+        <div class="ci2"><div class="cbullet"></div><span>อัปเดต Reservation → CHECKED_OUT</span></div>
+        <div class="ci2"><div class="cbullet"></div><span>อัปเดต Invoice → PAID</span></div>
+        <div class="ci2"><div class="cbullet"></div><span>สั่ง ReceiptPrinter ออกใบเสร็จ</span></div>
+      </div>
+      <div class="col xc"><div class="ct">Collaborators</div>
+        <div class="ci2"><div class="cbullet"></div><div><span class="ctag ctag-c">CheckOutForm</span></div></div>
+        <div class="ci2"><div class="cbullet"></div><div><span class="ctag ctag-c">GuestLookupScreen</span></div></div>
+        <div class="ci2"><div class="cbullet"></div><div><span class="ctag ctag-c">BillSummaryDisplay</span></div></div>
+        <div class="ci2"><div class="cbullet"></div><div><span class="ctag ctag-c">PaymentInputPanel</span></div></div>
+        <div class="ci2"><div class="cbullet"></div><div><span class="ctag ctag-c">ReceiptPrinter</span></div></div>
+        <div class="ci2"><div class="cbullet"></div><div><span class="ctag">Reservation</span></div></div>
+        <div class="ci2"><div class="cbullet"></div><div><span class="ctag">INVOICE</span></div></div>
+        <div class="ci2"><div class="cbullet"></div><div><span class="ctag">PaymentTransaction</span></div></div>
+        <div class="ci2"><div class="cbullet"></div><div><span class="ctag">PaymentMethod</span></div></div>
+        <div class="ci2"><div class="cbullet"></div><div><span class="ctag">Room</span></div></div>
+      </div>
+    </div></div>
+
+    <!-- Reservation -->
+    <div class="cc"><div class="ch">
+      <div class="ci" style="background:rgba(63,185,80,0.15)">📄</div>
+      <div><div class="cn" style="color:#3fb950">Reservation <span class="cbadge cbadge-entity">entity</span></div><div class="cr">ข้อมูลการจองที่กำลัง Check-Out</div></div>
+    </div><div class="cb">
+      <div class="col rc"><div class="ct">Responsibilities</div>
+        <div class="ci2"><div class="cbullet"></div><span>ให้สถานะ CHECKED_IN ยืนยัน Check-Out ได้</span></div>
+        <div class="ci2"><div class="cbullet"></div><span>ยืนยันข้อมูลแขก verifyGuestInfo(userId)</span></div>
+        <div class="ci2"><div class="cbullet"></div><span>คำนวณระยะเวลาพักจริง calculateStayDuration()</span></div>
+        <div class="ci2"><div class="cbullet"></div><span>อัปเดตสถานะเป็น CHECKED_OUT</span></div>
+        <div class="ci2"><div class="cbullet"></div><span>บันทึก actualCheckOutTime = NOW</span></div>
+      </div>
+      <div class="col xc"><div class="ct">Collaborators</div>
+        <div class="ci2"><div class="cbullet"></div><div><span class="ctag">User</span></div></div>
+        <div class="ci2"><div class="cbullet"></div><div><span class="ctag">Room</span></div></div>
+        <div class="ci2"><div class="cbullet"></div><div><span class="ctag">INVOICE</span></div></div>
+      </div>
+    </div></div>
+
+    <!-- INVOICE -->
+    <div class="cc"><div class="ch">
+      <div class="ci" style="background:rgba(210,168,255,0.15)">🧾</div>
+      <div><div class="cn" style="color:#d2a8ff">INVOICE <span class="cbadge cbadge-entity">entity</span></div><div class="cr">ใบแจ้งหนี้สำหรับ Check-Out</div></div>
+    </div><div class="cb">
+      <div class="col rc"><div class="ct">Responsibilities</div>
+        <div class="ci2"><div class="cbullet"></div><span>คำนวณค่าห้องพักรวม calculateTotal()</span></div>
+        <div class="ci2"><div class="cbullet"></div><span>คำนวณภาษี taxAmount</span></div>
+        <div class="ci2"><div class="cbullet"></div><span>เพิ่มค่าบริการเสริม minibar ฯลฯ</span></div>
+        <div class="ci2"><div class="cbullet"></div><span>อัปเดตสถานะเป็น PAID หลังชำระ</span></div>
+        <div class="ci2"><div class="cbullet"></div><span>สร้างใบเสร็จ issueDate = NOW</span></div>
+      </div>
+      <div class="col xc"><div class="ct">Collaborators</div>
+        <div class="ci2"><div class="cbullet"></div><div><span class="ctag">PaymentTransaction</span></div></div>
+        <div class="ci2"><div class="cbullet"></div><div><span class="ctag">Reservation</span></div></div>
+      </div>
+    </div></div>
+
+    <!-- PaymentTransaction -->
+    <div class="cc"><div class="ch">
+      <div class="ci" style="background:rgba(247,129,102,0.15)">💸</div>
+      <div><div class="cn" style="color:#f78166">PaymentTransaction <span class="cbadge cbadge-entity">entity</span></div><div class="cr">ดำเนินการธุรกรรมชำระเงิน</div></div>
+    </div><div class="cb">
+      <div class="col rc"><div class="ct">Responsibilities</div>
+        <div class="ci2"><div class="cbullet"></div><span>สร้างธุรกรรม createTransaction(amount, method)</span></div>
+        <div class="ci2"><div class="cbullet"></div><span>ยืนยันธุรกรรม validateTransaction()</span></div>
+        <div class="ci2"><div class="cbullet"></div><span>บันทึก TransactionStatus = SUCCESS/FAILED</span></div>
+        <div class="ci2"><div class="cbullet"></div><span>บันทึก paymentTimestamp = NOW</span></div>
+      </div>
+      <div class="col xc"><div class="ct">Collaborators</div>
+        <div class="ci2"><div class="cbullet"></div><div><span class="ctag">INVOICE</span></div></div>
+        <div class="ci2"><div class="cbullet"></div><div><span class="ctag">PaymentMethod</span></div></div>
+      </div>
+    </div></div>
+
+    <!-- PaymentMethod -->
+    <div class="cc"><div class="ch">
+      <div class="ci" style="background:rgba(255,166,87,0.15)">💳</div>
+      <div><div class="cn" style="color:#ffa657">PaymentMethod <span class="cbadge cbadge-entity">entity</span></div><div class="cr">วิธีการชำระเงินของแขก</div></div>
+    </div><div class="cb">
+      <div class="col rc"><div class="ct">Responsibilities</div>
+        <div class="ci2"><div class="cbullet"></div><span>ตรวจสอบความถูกต้อง validate()</span></div>
+        <div class="ci2"><div class="cbullet"></div><span>ให้ประเภท PaymentType (CREDIT_CARD ฯลฯ)</span></div>
+        <div class="ci2"><div class="cbullet"></div><span>ให้ข้อมูล provider (Visa, Mastercard ฯลฯ)</span></div>
+        <div class="ci2"><div class="cbullet"></div><span>ส่งคืน valid = true/false</span></div>
+      </div>
+      <div class="col xc"><div class="ct">Collaborators</div>
+        <div class="ci2"><div class="cbullet"></div><div><span class="ctag">User</span></div></div>
+        <div class="ci2"><div class="cbullet"></div><div><span class="ctag">PaymentTransaction</span></div></div>
+      </div>
+    </div></div>
+
+    <!-- Room -->
+    <div class="cc"><div class="ch">
+      <div class="ci" style="background:rgba(88,166,255,0.15)">🚪</div>
+      <div><div class="cn" style="color:#58a6ff">Room <span class="cbadge cbadge-entity">entity</span></div><div class="cr">สถานะห้องพักหลัง Check-Out</div></div>
+    </div><div class="cb">
+      <div class="col rc"><div class="ct">Responsibilities</div>
+        <div class="ci2"><div class="cbullet"></div><span>อัปเดตสถานะห้องเป็น CLEANING</span></div>
+        <div class="ci2"><div class="cbullet"></div><span>ยืนยัน Check-Out สำเร็จ</span></div>
+        <div class="ci2"><div class="cbullet"></div><span>ล้างข้อมูลการจองปัจจุบัน</span></div>
+        <div class="ci2"><div class="cbullet"></div><span>ส่งคืน success ให้ Controller</span></div>
+      </div>
+      <div class="col xc"><div class="ct">Collaborators</div>
+        <div class="ci2"><div class="cbullet"></div><div><span class="ctag">Reservation</span></div></div>
+        <div class="ci2"><div class="cbullet"></div><div><span class="ctag">RoomType</span></div></div>
+      </div>
+    </div></div>
+
+    <!-- Role -->
+    <div class="cc"><div class="ch">
+      <div class="ci" style="background:rgba(210,168,255,0.1)">🔐</div>
+      <div><div class="cn" style="color:#d2a8ff">Role <span class="cbadge cbadge-entity">entity</span></div><div class="cr">สิทธิ์ตรวจสอบก่อน Check-Out</div></div>
+    </div><div class="cb">
+      <div class="col rc"><div class="ct">Responsibilities</div>
+        <div class="ci2"><div class="cbullet"></div><span>ตรวจสอบสิทธิ์ Check-Out hasPermission()</span></div>
+        <div class="ci2"><div class="cbullet"></div><span>ระบุ Permission สำหรับการออกจากห้อง</span></div>
+        <div class="ci2"><div class="cbullet"></div><span>ส่งคืนสิทธิ์ให้ Controller ตัดสินใจ</span></div>
+      </div>
+      <div class="col xc"><div class="ct">Collaborators</div>
+        <div class="ci2"><div class="cbullet"></div><div><span class="ctag">Permission</span></div></div>
+        <div class="ci2"><div class="cbullet"></div><div><span class="ctag">User</span></div></div>
+      </div>
+    </div></div>
+
+  </div>
+</div>
+
+<script>
+function show(id, btn) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+  btn.classList.add('active');
+}
+</script>
+</body>
+</html>
