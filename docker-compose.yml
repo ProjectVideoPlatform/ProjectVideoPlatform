@@ -238,41 +238,41 @@ services:
       - monitoring
 
   # Grafana Dashboard (Optional)
-  # grafana:
-  #   image: grafana/grafana:10.1.0
-  #   container_name: secure-video-grafana
-  #   restart: unless-stopped
-  #   ports:
-  #     - "3001:3000"
-  #   environment:
-  #     GF_SECURITY_ADMIN_PASSWORD: grafana123
-  #   volumes:
-  #     - grafana_data:/var/lib/grafana
-  #     - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
-  #     - ./monitoring/grafana/datasources:/etc/grafana/provisioning/datasources:ro
-  #   networks:
-  #     - secure-video-network
-  #   depends_on:
-  #     - prometheus
-  #   profiles:
-  #     - monitoring
-      # docker-compose.yml เพิ่ม grafana และ clickhouse datasource
   grafana:
-    image: grafana/grafana:latest
-    container_name: grafana
+    image: grafana/grafana:10.1.0
+    container_name: secure-video-grafana
+    restart: unless-stopped
     ports:
       - "3001:3000"
     environment:
-      - GF_SECURITY_ADMIN_PASSWORD=admin
-      - GF_INSTALL_PLUGINS=grafana-clickhouse-datasource  # ✅ เพิ่มตรงนี้
+      GF_SECURITY_ADMIN_PASSWORD: grafana123
     volumes:
-      - grafana_dataja:/var/lib/grafana
-      - ./grafana/dashboards:/etc/grafana/provisioning/dashboards
-      - ./grafana/datasources:/etc/grafana/provisioning/datasources
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./monitoring/grafana/datasources:/etc/grafana/provisioning/datasources:ro
     networks:
       - secure-video-network
     depends_on:
-      - clickhouse
+      - prometheus
+    profiles:
+      - monitoring
+      # docker-compose.yml เพิ่ม grafana และ clickhouse datasource
+  # grafana:
+  #   image: grafana/grafana:latest
+  #   container_name: grafana
+  #   ports:
+  #     - "3001:3000"
+  #   environment:
+  #     - GF_SECURITY_ADMIN_PASSWORD=admin
+  #     - GF_INSTALL_PLUGINS=grafana-clickhouse-datasource  # ✅ เพิ่มตรงนี้
+  #   volumes:
+  #     - grafana_dataja:/var/lib/grafana
+  #     - ./grafana/dashboards:/etc/grafana/provisioning/dashboards
+  #     - ./grafana/datasources:/etc/grafana/provisioning/datasources
+  #   networks:
+  #     - secure-video-network
+  #   depends_on:
+  #     - clickhouse
   # Vault - production-ready
   # vault:
   #   image: vault:1.13.3
