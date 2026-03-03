@@ -1,0 +1,23 @@
+# ---------- Stage 1: Dependencies ----------
+FROM node:20.11.1-alpine3.19@sha256:REPLACE_DIGEST AS deps
+
+WORKDIR /app
+
+COPY package.json package-lock.json ./
+RUN npm ci --only=production
+
+# ---------- Stage 2: Runtime ----------
+FROM gcr.io/distroless/nodejs20-debian12@sha256:REPLACE_DIGEST
+
+WORKDIR /app
+
+# copy node_modules
+COPY --from=deps /app/node_modules ./node_modules
+
+# copy app source (explicit files only)
+COPY server.js ./
+
+USER nonroot
+EXPOSE 3000
+
+CMD ["server.js"]

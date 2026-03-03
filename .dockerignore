@@ -139,3 +139,5 @@ processed_videos/  # Processed videos
 transcoded/        # Transcoded video files
 ssl/               # SSL certificates (mount จาก volume)
 keys/              # Private keys
+
+
