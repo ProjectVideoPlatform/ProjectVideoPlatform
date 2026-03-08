@@ -1,0 +1,21 @@
+apiVersion: traefik.containo.us/v1alpha1
+kind: IngressRoute
+metadata:
+  name: video-platform-route
+  namespace: secure-video
+spec:
+  entryPoints:
+    - websecure
+  routes:
+  - match: Host(`app.videoplatform.com`)
+    kind: Rule
+    services:
+    - name: app-service
+      port: 80
+  - match: Host(`admin.videoplatform.com`)
+    kind: Rule
+    services:
+    - name: react-app-service
+      port: 80
+  tls:
+    certResolver: letsencrypt

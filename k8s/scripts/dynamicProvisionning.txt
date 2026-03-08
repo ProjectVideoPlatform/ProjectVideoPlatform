@@ -1,0 +1,42 @@
+bash
+# 1. ติดตั้ง local-path-provisioner
+kubectl apply -f https://raw.githubusercontent.com/rancher/local-path-provisioner/master/deploy/local-path-storage.yaml
+
+# 2. ตรวจสอบการติดตั้ง
+kubectl get pods -n local-path-storage
+# NAME                                      READY   STATUS
+# local-path-provisioner-xxxxxxxxxx-xxxxx   1/1     Running
+
+# 3. ดู StorageClass ใหม่
+kubectl get storageclass
+# NAME                   PROVISIONER                    RECLAIMPOLICY
+# local-path (default)   rancher.io/local-path          Delete
+# hostpath (default)     docker.io/hostpath             Delete
+
+# 4. ทดสอบ dynamic provisioning
+cat <<EOF | kubectl apply -f -
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: test-local-pvc
+spec:
+  storageClassName: local-path
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+EOF
+
+# 5. ตรวจสอบ
+kubectl get pvc test-local-pvc
+# NAME            STATUS   VOLUME                                     CAPACITY
+# test-local-pvc  Bound    pvc-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx   1Gi
+#                                           ^^^ PV สร้างอัตโนมัติ!
+ตั้ง local-path เป็น default:
+bash
+# ทำให้ local-path เป็น default storage class
+kubectl patch storageclass local-path -p '{"metadata": {"annotations":{"storageclass.kubernetes.io/is-default-class":"true"}}}'
+
+# ลบ default annotation จาก hostpath
+kubectl patch storageclass hostpath -p '{"metadata": {"annotations":{"storageclass.kubernetes.io/is-default-class":"false"}}}'

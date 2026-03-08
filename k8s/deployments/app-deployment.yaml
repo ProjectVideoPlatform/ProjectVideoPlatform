@@ -31,7 +31,7 @@ spec:
           type: RuntimeDefault
       containers:
       - name: app
-        image: your-registry/secure-video-app:latest  # Replace with your image
+        image:   # Replace with your image
         imagePullPolicy: Always
         ports:
         - containerPort: 3000

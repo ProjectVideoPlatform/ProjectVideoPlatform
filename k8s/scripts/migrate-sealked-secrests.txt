@@ -1,0 +1,18 @@
+⚠️ ข้อควรระวัง
+เช็ค namespace ให้ถูกต้อง:
+
+bash
+# ถ้า backup มาจาก namespace อื่น ต้องแก้ให้ตรง
+sed -i 's/namespace: old-ns/namespace: sealed-secrets/' sealed-secrets-key-backup.yaml
+ลบ metadata ที่ไม่จำเป็น:
+
+bash
+# ลบพวก uid, resourceVersion ก่อน apply
+kubectl patch secret -n sealed-secrets sealed-secrets-key -p '{"metadata":{"uid":null,"resourceVersion":null}}'
+เช็ค version ให้ตรงกัน:
+
+bash
+# ควรใช้ controller version เดียวกับตอน seal
+kubeseal --version
+# ดูใน controller.yaml ว่า image version อะไร
+เข้าใจมากขึ้นมั้ยครับ? ถ้าสงสัยตรงไหนถามได้เลย! 😊

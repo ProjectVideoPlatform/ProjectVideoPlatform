@@ -10,21 +10,21 @@ spec:
   accessModes:
     - ReadWriteOnce
   persistentVolumeReclaimPolicy: Retain
-  storageClassName: standard
+  storageClassName: hostpath
   hostPath:
     path: /mnt/data/redis
     type: DirectoryOrCreate
 
 ---
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: redis-pvc
-  namespace: secure-video
-spec:
-  accessModes:
-    - ReadWriteOnce
-  resources:
-    requests:
-      storage: 5Gi
-  storageClassName: standard
+# apiVersion: v1
+# kind: PersistentVolumeClaim
+# metadata:
+#   name: redis-pvc
+#   namespace: secure-video
+# spec:
+#   accessModes:
+#     - ReadWriteOnce
+#   resources:
+#     requests:
+#       storage: 5Gi
+#   storageClassName: standard
