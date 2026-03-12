@@ -1,4 +1,3 @@
-version: '3.8'
 
 services:
   # RabbitMQ Message Broker
@@ -63,7 +62,7 @@ services:
     depends_on:
       rabbitmq:
         condition: service_healthy
-      mongodb:
+      mongodb1:
         condition: service_healthy
     user: "1001:1001"
     read_only: true
@@ -137,7 +136,7 @@ services:
     networks:
       - secure-video-network
     depends_on:
-      mongodb:
+      mongodb1:
         condition: service_healthy
       redis:
         condition: service_healthy
@@ -160,11 +159,11 @@ services:
       start_period: 30s
 
   # MongoDB Database
-  mongodb:
+  mongodb1:
     image: mongo:7.0
-    container_name: secure-video-mongodb
+    container_name: secure-video-mongodb1
     restart: unless-stopped
-    command: ["--replSet", "rs0", "--bind_ip_all"] 
+    command: ["--replSet", "rs0", "--bind_ip_all"]
     environment:
       MONGO_INITDB_DATABASE: secure-video
     ports:
@@ -175,11 +174,55 @@ services:
     networks:
       - secure-video-network
     healthcheck:
-      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"] # ปรับให้ simple ขึ้นถ้าไม่มี auth ในตัว
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
       interval: 30s
       timeout: 10s
       retries: 3
 
+  mongodb2:
+    image: mongo:7.0
+    container_name: secure-video-mongodb2
+    restart: unless-stopped
+    command: ["--replSet", "rs0", "--bind_ip_all"]
+    ports:
+      - "27018:27017"
+    volumes:
+      - mongodb2_data:/data/db
+    networks:
+      - secure-video-network
+
+  mongodb3:
+    image: mongo:7.0
+    container_name: secure-video-mongodb3
+    restart: unless-stopped
+    command: ["--replSet", "rs0", "--bind_ip_all"]
+    ports:
+      - "27019:27017"
+    volumes:
+      - mongodb3_data:/data/db
+    networks:
+      - secure-video-network
+
+  mongo-init:
+    image: mongo:7
+    depends_on:
+      - mongo1
+      - mongo2
+      - mongo3
+    restart: "no"
+    entrypoint: >
+      bash -c "
+      sleep 5 &&
+      mongosh --host mongo1:27017 --eval '
+      rs.initiate({
+        _id: \"rs0\",
+        members: [
+          {_id: 0, host: \"mongo1:27017\"},
+          {_id: 1, host: \"mongo2:27017\"},
+          {_id: 2, host: \"mongo3:27017\"}
+        ]
+      })'
+      "
   # Redis
   redis:
     image: redis:7.2-alpine
@@ -347,3 +390,5 @@ volumes:
   prometheus_data:
   grafana_data:
   clickhouse_data:
+  mongodb2_data:
+  mongodb3_data:

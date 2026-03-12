@@ -9,7 +9,7 @@ const bcrypt = require('bcryptjs');
 
 // Get profile
 router.get('/profile', authenticateToken, async (req, res) => {
-  const user = await User.findById(req.user.id).select('-password');
+  const user = await User.findById(req.user.id).select('-password').read('primary');
   res.json(user);
 });
 
@@ -34,7 +34,7 @@ router.post('/change-password', authenticateToken, async (req, res) => {
     }
 
     // 2. ดึงข้อมูล User
-    const user = await User.findById(req.user.id);
+    const user = await User.findById(req.user.id).read('primary');
     if (!user) return res.status(404).json({ error: 'ไม่พบผู้ใช้งานในระบบ' });
 
     // 3. ตรวจสอบรหัสผ่านเดิม

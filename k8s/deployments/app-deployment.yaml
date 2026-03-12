@@ -31,7 +31,7 @@ spec:
           type: RuntimeDefault
       containers:
       - name: app
-        image:   # Replace with your image
+        image: manaphat/secure-video-frontend-k8s:latest
         imagePullPolicy: Always
         ports:
         - containerPort: 3000

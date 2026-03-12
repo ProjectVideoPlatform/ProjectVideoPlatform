@@ -504,7 +504,9 @@ router.post(
   video.uploadStatus = "completed";
   video.thumbnailPath = `videos/${videoId}/thumbnails/original_thumb.0000000.jpg`;
 
-  await video.save();
+  await video.save({
+       writeConcern: { w: 'majority', wtimeout: 5000 } 
+       });
 
   // 🚀 ส่ง Email Queue
   await queueService.sendToQueue(QUEUES.EMAIL_NOTIFY, {
