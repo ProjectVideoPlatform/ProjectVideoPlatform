@@ -4,13 +4,11 @@ const mongoose = require('mongoose');
 const { setupInfra } = require('../services/rabbitmq/setupInfra');
 const BaseWorker = require('./baseWorker');
 const QUEUES = require('../services/rabbitmq/queues');
-
+const { getWSS } = require('../websocket');
 const { createMediaConvertJob } = require('../services/mediaConvert');
 const Video = require('../models/Video');
-
 async function transcodeHandler(data) {
   try {
-    console.log(`[Worker] Starting MediaConvert for: ${data.videoId}`);
 
     const job = await createMediaConvertJob(
       data.inputS3Path,
@@ -21,7 +19,7 @@ async function transcodeHandler(data) {
     await Video.findOneAndUpdate(
       { id: data.videoId },
       {
-        uploadStatus: 'processing',
+        uploadStatus: "processing",
         mediaConvertJobId: job.Id
       }
     );
@@ -33,7 +31,6 @@ async function transcodeHandler(data) {
     throw error;
   }
 }
-
 async function start() {
   try {
     // 1️⃣ Connect MongoDB

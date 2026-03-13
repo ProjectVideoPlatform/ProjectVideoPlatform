@@ -20,6 +20,7 @@ import {
 import Hls from 'hls.js';
 import { useNavigate } from 'react-router-dom';
 import VideoPlayer from './VideoPlayer';
+import useVideoStatus from "../hooks/useWebSocketVideoStatus";
 // API service matching the backend
 const API_BASE = 'http://localhost:3000/api';
 
@@ -535,17 +536,34 @@ const UploadModal = ({ isOpen, onClose, onUpload }) => {
   const [file, setFile] = useState(null);
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
-  const [currentStep, setCurrentStep] = useState('form'); // 'form', 'uploading', 'processing'
+  const [currentStep, setCurrentStep] = useState('form'); // 'form', 'uploading', 'processing', 'completed', 'failed'
+  const [processingVideoId, setProcessingVideoId] = useState(null);
+
+  // ✅ Subscribe WebSocket เฉพาะตอนมี videoId
+  useVideoStatus(processingVideoId, (data) => {
+    if (data.type === 'transcode_completed') {
+      setCurrentStep('completed');
+      setTimeout(() => {
+        onUpload();
+        onClose();
+        resetForm();
+      }, 1500);
+    } else if (data.type === 'transcode_failed') {
+      setCurrentStep('failed');
+      setUploading(false);
+    }
+  });
 
   const handleSubmit = async () => {
     if (!file || !formData.title) return;
 
     setUploading(true);
     setCurrentStep('uploading');
+    setUploadProgress(0);
 
     try {
       // Step 1: Initialize upload
-      const initData = {
+      const initResult = await api.initializeUpload({
         title: formData.title,
         description: formData.description,
         price: formData.price,
@@ -553,66 +571,36 @@ const UploadModal = ({ isOpen, onClose, onUpload }) => {
         fileName: file.name,
         fileSize: file.size,
         contentType: file.type
-      };
+      });
 
-      const initResult = await api.initializeUpload(initData);
-      console.log('Upload initialized:', initResult);
+      // Step 2: Upload to S3
+      const uploadResponse = await fetch(initResult.uploadUrl, {
+        method: 'PUT',
+        body: file,
+        headers: { 'Content-Type': file.type },
+        credentials: 'include'
+      });
 
-      // // Step 2: Upload to S3 using presigned URL
-      // const uploadFormData = new FormData();
-      
-      // // Add S3 form fields
-      // if (initResult.fields) {
-      //   Object.entries(initResult.fields).forEach(([key, value]) => {
-      //     uploadFormData.append(key, value);
-      //   });
-      // }
-      
-      // // Add file last
-      // uploadFormData.append('file', file);
-
-      // Upload to S3
-        const uploadResponse = await fetch(initResult.uploadUrl, {
-      method: 'PUT',
-      body: file,               // ส่งเฉพาะไฟล์
-      headers: {
-        'Content-Type': file.type // ต้องตรงกับตอนสร้าง Presigned URL
-      },
-           credentials: 'include'
-    });
-
-      if (!uploadResponse.ok) {
-        throw new Error('S3 upload failed');
-      }
+      if (!uploadResponse.ok) throw new Error('S3 upload failed');
 
       setUploadProgress(100);
 
-      // Step 3: Complete upload and start processing
+      // Step 3: Complete upload → trigger MediaConvert
       setCurrentStep('processing');
-      const completeResult = await api.completeUpload(initResult.videoId);
-      console.log('Upload completed:', completeResult);
+      await api.completeUpload(initResult.videoId);
 
-      // Success
-      onUpload();
-      onClose();
-      resetForm();
+      // ✅ เริ่ม subscribe รอ transcode จาก WebSocket
+      setProcessingVideoId(initResult.videoId);
 
     } catch (error) {
       console.error('Upload failed:', error);
-      alert('Upload failed: ' + error.message);
-      
-      // Try to record the failure if we have a video ID
+      setCurrentStep('failed');
+      setUploading(false);
       try {
-        if (error.videoId) {
-          await api.failUpload(error.videoId, error.message);
-        }
+        if (error.videoId) await api.failUpload(error.videoId, error.message);
       } catch (failError) {
         console.error('Failed to record upload failure:', failError);
       }
-    } finally {
-      setUploading(false);
-      setCurrentStep('form');
-      setUploadProgress(0);
     }
   };
 
@@ -621,6 +609,8 @@ const UploadModal = ({ isOpen, onClose, onUpload }) => {
     setFile(null);
     setUploadProgress(0);
     setCurrentStep('form');
+    setProcessingVideoId(null);
+    setUploading(false);
   };
 
   const handleClose = () => {
@@ -632,57 +622,75 @@ const UploadModal = ({ isOpen, onClose, onUpload }) => {
 
   if (!isOpen) return null;
 
+  const stepConfig = {
+    uploading:  { label: 'Uploading file to S3...', progress: uploadProgress },
+    processing: { label: 'Processing video (this may take a while)...', progress: 100 },
+    completed:  { label: '✅ Video is ready!', progress: 100 },
+    failed:     { label: '❌ Processing failed. Please try again.', progress: 100 },
+  };
+
+  const activeStep = stepConfig[currentStep];
+
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center">
       <div className="bg-white rounded-lg p-6 w-full max-w-md mx-4">
         <div className="flex justify-between items-center mb-4">
           <h2 className="text-xl font-bold">Upload Video</h2>
-          <button 
-            onClick={handleClose} 
+          <button
+            onClick={handleClose}
             disabled={uploading}
             className="text-gray-500 hover:text-gray-700 disabled:opacity-50"
           >
             <X className="w-5 h-5" />
           </button>
         </div>
-        
-        {/* Progress Steps */}
-        {uploading && (
+
+        {/* Progress Bar */}
+        {activeStep && (
           <div className="mb-6">
             <div className="flex justify-between text-sm text-gray-600 mb-2">
-              <span className={currentStep === 'uploading' ? 'text-blue-600 font-medium' : ''}>
+              <span className={currentStep === 'uploading' ? 'text-blue-600 font-medium' : 'text-gray-400'}>
                 Uploading
               </span>
-              <span className={currentStep === 'processing' ? 'text-blue-600 font-medium' : ''}>
+              <span className={currentStep === 'processing' ? 'text-blue-600 font-medium' : 'text-gray-400'}>
                 Processing
               </span>
+              <span className={
+                currentStep === 'completed' ? 'text-green-600 font-medium' :
+                currentStep === 'failed'    ? 'text-red-600 font-medium' : 'text-gray-400'
+              }>
+                Done
+              </span>
             </div>
+
             <div className="w-full bg-gray-200 rounded-full h-2">
-              <div 
-                className="bg-blue-600 h-2 rounded-full transition-all duration-300"
-                style={{ 
-                  width: currentStep === 'uploading' ? `${uploadProgress}%` : 
-                         currentStep === 'processing' ? '100%' : '0%' 
-                }}
+              <div
+                className={`h-2 rounded-full transition-all duration-500 ${
+                  currentStep === 'failed'    ? 'bg-red-500' :
+                  currentStep === 'completed' ? 'bg-green-500' : 'bg-blue-600'
+                }`}
+                style={{ width: `${activeStep.progress}%` }}
               />
             </div>
-            <p className="text-sm text-gray-600 mt-2">
-              {currentStep === 'uploading' && 'Uploading file to server...'}
-              {currentStep === 'processing' && 'Starting video processing...'}
+
+            <p className={`text-sm mt-2 ${
+              currentStep === 'failed'    ? 'text-red-600' :
+              currentStep === 'completed' ? 'text-green-600' : 'text-gray-600'
+            }`}>
+              {activeStep.label}
             </p>
           </div>
         )}
-        
+
         <div className="space-y-4">
           <div>
             <label className="block text-sm font-medium mb-1">Video File *</label>
-            <input 
-              type="file" 
+            <input
+              type="file"
               accept="video/*"
               onChange={(e) => setFile(e.target.files[0])}
               disabled={uploading}
               className="w-full px-3 py-2 border rounded-lg disabled:bg-gray-100"
-              required
             />
             {file && (
               <p className="text-xs text-gray-600 mt-1">
@@ -690,74 +698,70 @@ const UploadModal = ({ isOpen, onClose, onUpload }) => {
               </p>
             )}
           </div>
-          
+
           <div>
             <label className="block text-sm font-medium mb-1">Title *</label>
-            <input 
+            <input
               type="text"
               value={formData.title}
-              onChange={(e) => setFormData({...formData, title: e.target.value})}
+              onChange={(e) => setFormData({ ...formData, title: e.target.value })}
               disabled={uploading}
               className="w-full px-3 py-2 border rounded-lg disabled:bg-gray-100"
-              required
             />
           </div>
-          
+
           <div>
             <label className="block text-sm font-medium mb-1">Description</label>
-            <textarea 
+            <textarea
               value={formData.description}
-              onChange={(e) => setFormData({...formData, description: e.target.value})}
+              onChange={(e) => setFormData({ ...formData, description: e.target.value })}
               disabled={uploading}
               className="w-full px-3 py-2 border rounded-lg h-24 resize-none disabled:bg-gray-100"
             />
           </div>
-          
+
           <div>
             <label className="block text-sm font-medium mb-1">Price ($)</label>
-            <input 
+            <input
               type="number"
               min="0"
               step="0.01"
               value={formData.price}
-              onChange={(e) => setFormData({...formData, price: parseFloat(e.target.value) || 0})}
+              onChange={(e) => setFormData({ ...formData, price: parseFloat(e.target.value) || 0 })}
               disabled={uploading}
               className="w-full px-3 py-2 border rounded-lg disabled:bg-gray-100"
             />
           </div>
-          
+
           <div>
             <label className="block text-sm font-medium mb-1">Tags (comma separated)</label>
-            <input 
+            <input
               type="text"
               value={formData.tags}
-              onChange={(e) => setFormData({...formData, tags: e.target.value})}
+              onChange={(e) => setFormData({ ...formData, tags: e.target.value })}
               disabled={uploading}
               placeholder="action, comedy, thriller"
               className="w-full px-3 py-2 border rounded-lg disabled:bg-gray-100"
             />
           </div>
-          
+
           <div className="flex gap-2 pt-4">
-            <button 
-              type="button" 
+            <button
               onClick={handleClose}
               disabled={uploading}
               className="flex-1 px-4 py-2 border rounded-lg hover:bg-gray-50 disabled:opacity-50"
             >
-              {uploading ? 'Uploading...' : 'Cancel'}
+              {uploading ? 'Please wait...' : 'Cancel'}
             </button>
-            <button 
-              type="submit" 
+            <button
               onClick={handleSubmit}
               disabled={uploading || !file || !formData.title}
               className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
             >
-              {uploading ? (
-                <Loader className="w-4 h-4 animate-spin mx-auto" />
-              ) : (
-                'Upload'
-              )}
+              {uploading
+                ? <Loader className="w-4 h-4 animate-spin mx-auto" />
+                : 'Upload'
+              }
             </button>
           </div>
         </div>

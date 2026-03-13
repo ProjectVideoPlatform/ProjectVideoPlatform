@@ -1,105 +1,135 @@
 const Redis = require('ioredis');
 const logger = require('../utils/logger');
-  const path = require('path');
-   require('dotenv').config({ path: path.resolve(__dirname, '../.env') });
+const path = require('path');
+
+require('dotenv').config({ path: path.resolve(__dirname, '../.env') });
+
 class RedisClient {
   constructor() {
-    this.client = null;
+    this.publisher = null;
+    this.subscriber = null;
     this.isConnected = false;
   }
-  
-  async connect() {
-    if (this.client) return this.client;
-    
-    const options = {
+
+  getOptions() {
+    return {
       host: process.env.REDIS_HOST || 'localhost',
       port: process.env.REDIS_PORT || 6379,
       password: process.env.REDIS_PASSWORD,
       db: process.env.REDIS_DB || 0,
-      retryStrategy: (times) => {
-        const delay = Math.min(times * 50, 2000);
-        return delay;
-      },
+      retryStrategy: (times) => Math.min(times * 50, 2000),
       maxRetriesPerRequest: 3
     };
-    
-    this.client = new Redis(options);
-    
-    this.client.on('connect', () => {
+  }
+
+  async connect() {
+    if (this.publisher) return this.publisher;
+
+    const options = this.getOptions();
+
+    this.publisher = new Redis(options);
+    this.subscriber = new Redis(options);
+
+    this.publisher.on('connect', () => {
       this.isConnected = true;
-      logger.info('Redis connected successfully');
-      console.log('Redis connected successfully');
+      logger.info('Redis publisher connected');
+      console.log('Redis publisher connected');
     });
-    
-    this.client.on('error', (error) => {
-      logger.error('Redis error:', error);
-      this.isConnected = false;
-      console.error('Redis error:', error);
+
+    this.publisher.on('error', (err) => {
+      logger.error('Redis publisher error:', err);
+      console.error('Redis publisher error:', err);
     });
-    
-    this.client.on('close', () => {
-      logger.warn('Redis connection closed');
-      this.isConnected = false;
+
+    this.subscriber.on('connect', () => {
+      logger.info('Redis subscriber connected');
+      console.log('Redis subscriber connected');
     });
-    
-    // Wait for connection
+
+    this.subscriber.on('error', (err) => {
+      logger.error('Redis subscriber error:', err);
+      console.error('Redis subscriber error:', err);
+    });
+
     await new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
         reject(new Error('Redis connection timeout'));
       }, 5000);
-      
-      this.client.once('ready', () => {
+
+      this.publisher.once('ready', () => {
         clearTimeout(timeout);
         resolve();
       });
     });
-    
-    return this.client;
+
+    return this.publisher;
   }
-  async expire(key, seconds) {
-    if (!this.isConnected) await this.connect();
-    return this.client.expire(key, seconds);
-  }
+
+  // ---------- BASIC COMMANDS ----------
+
   async get(key) {
     if (!this.isConnected) await this.connect();
-    return this.client.get(key);
+    return this.publisher.get(key);
   }
-  
+
   async set(key, value, options = {}) {
     if (!this.isConnected) await this.connect();
-    
+
     if (options.EX) {
-      return this.client.set(key, value, 'EX', options.EX, 'NX');
+      return this.publisher.set(key, value, 'EX', options.EX);
     }
-    
-    return this.client.set(key, value);
+
+    return this.publisher.set(key, value);
   }
-  
+
   async del(key) {
     if (!this.isConnected) await this.connect();
-    return this.client.del(key);
+    return this.publisher.del(key);
   }
-  
+
+  async expire(key, seconds) {
+    if (!this.isConnected) await this.connect();
+    return this.publisher.expire(key, seconds);
+  }
+
   async setex(key, seconds, value) {
     if (!this.isConnected) await this.connect();
-    return this.client.setex(key, seconds, value);
+    return this.publisher.setex(key, seconds, value);
   }
-  
-  async disconnect() {
-    if (this.client) {
-      await this.client.quit();
-      this.isConnected = false;
+
+  pipeline() {
+    if (!this.publisher) {
+      throw new Error('Redis not connected');
     }
+    return this.publisher.pipeline();
   }
-  // เพิ่มเข้าไปใน class RedisClient ในไฟล์ config
-pipeline() {
-  if (!this.client) {
-    // กรณีที่ยังไม่ได้ connect แต่อยากใช้ pipeline
-    // อาจจะ throw error หรือสั่ง connect ก่อนตามความเหมาะสม
-    throw new Error('Redis client not initialized. Call connect() first.');
+
+  // ---------- PUB/SUB ----------
+
+  async publish(channel, message) {
+    if (!this.isConnected) await this.connect();
+    return this.publisher.publish(channel, JSON.stringify(message));
   }
-  return this.client.pipeline();
-}
+
+  async subscribe(channel, handler) {
+    if (!this.isConnected) await this.connect();
+
+    await this.subscriber.subscribe(channel);
+
+    this.subscriber.on('message', (ch, msg) => {
+      if (ch === channel) {
+        handler(JSON.parse(msg));
+      }
+    });
+  }
+
+  // ---------- DISCONNECT ----------
+
+  async disconnect() {
+    if (this.publisher) await this.publisher.quit();
+    if (this.subscriber) await this.subscriber.quit();
+    this.isConnected = false;
+  }
 }
 
 module.exports = new RedisClient();

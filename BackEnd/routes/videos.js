@@ -11,6 +11,7 @@ const escapeStringRegexp = require('escape-string-regexp');
   const https = require('https');
   const QUEUES = require('../services/rabbitmq/queues');
 const router = express.Router();
+const redis = require('../config/redis');
 router.get('/video-progress', authenticateToken, async (req, res) => {
   try {
     console.log("kuy  เอ้ย fetching video progress");
@@ -507,6 +508,10 @@ router.post(
   await video.save({
        writeConcern: { w: 'majority', wtimeout: 5000 } 
        });
+          await redis.publish("video-status", JSON.stringify({
+  type: "transcode_completed",
+  videoId: videoId
+}));
 
   // 🚀 ส่ง Email Queue
   await queueService.sendToQueue(QUEUES.EMAIL_NOTIFY, {
@@ -525,13 +530,12 @@ else if (status === "ERROR") {
   await queueService.sendToQueue(QUEUES.EMAIL_NOTIFY, {
     type: "VIDEO_FAILED",
     videoId: videoId,
-    email: video.email,
+    email: video.email || "manaphatg@gmail.com",
     title: video.title
   });
 
   console.log(`📧 Email queued FAILED for: ${videoId}`);
 }
-        await video.save();
         return res.json({ updated: true, videoId });
       }
 
