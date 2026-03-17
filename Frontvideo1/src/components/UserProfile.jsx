@@ -1,7 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { User, Mail, Shield, Calendar, History, LogOut, Edit2, Save, X, Eye, EyeOff, ChevronRight, Loader, CreditCard, MapPin, Video, Clock, TrendingUp, Award, Lock } from 'lucide-react';
+import { useNotif } from '../NotifContext'; // ✅ ใช้ context
 
 const UserProfile = () => {
+  const { notifications, videoNotifications, addNotification } = useNotif(); // ✅ เพิ่ม addNotification
+  
   const apiBaseUrl = 'http://localhost:3000';
   const [activeTab, setActiveTab] = useState('overview');
   const [isEditing, setIsEditing] = useState(false);
@@ -42,6 +45,11 @@ const UserProfile = () => {
       setUserData(data);
     } catch (error) {
       console.error('Error fetching profile:', error);
+      addNotification({
+        title: 'โหลดข้อมูลไม่สำเร็จ',
+        message: 'ไม่สามารถโหลดข้อมูลโปรไฟล์ได้',
+        type: 'error'
+      });
     }
   };
 
@@ -87,56 +95,81 @@ const UserProfile = () => {
   }, []);
 
   const handlePasswordChange = async () => {
+    // ✅ เปลี่ยนจาก alert → addNotification
     if (passwordForm.newPassword !== passwordForm.confirmPassword) {
-      alert('รหัสผ่านไม่ตรงกัน!');
+      addNotification({
+        title: 'รหัสผ่านไม่ตรงกัน',
+        message: 'กรุณากรอกรหัสผ่านใหม่ให้ตรงกัน',
+        type: 'error'
+      });
       return;
     }
     if (!passwordForm.currentPassword || !passwordForm.newPassword) {
-      alert('กรุณากรอกข้อมูลให้ครบถ้วน!');
+      addNotification({
+        title: 'ข้อมูลไม่ครบ',
+        message: 'กรุณากรอกข้อมูลให้ครบถ้วน',
+        type: 'error'
+      });
       return;
     }
     if (passwordForm.newPassword.length < 6) {
-      alert('รหัสผ่านใหม่ต้องมีอย่างน้อย 6 ตัวอักษร!');
+      addNotification({
+        title: 'รหัสผ่านสั้นเกินไป',
+        message: 'รหัสผ่านใหม่ต้องมีอย่างน้อย 6 ตัวอักษร',
+        type: 'error'
+      });
       return;
     }
 
     setLoading(true);
-   try {
-  setLoading(true); // เปิด Loading ก่อนเริ่ม
+    try {
+      const token = localStorage.getItem('authToken');
+      const response = await fetch(`${apiBaseUrl}/api/user/change-password`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          oldPassword: passwordForm.currentPassword,
+          newPassword: passwordForm.newPassword
+        })
+      });
 
-  // 1. เช็คเบื้องต้นที่ฝั่ง Client
-  if (passwordForm.newPassword !== passwordForm.confirmPassword) {
-    throw new Error('รหัสผ่านใหม่และยืนยันรหัสผ่านไม่ตรงกัน');
-  }
+      const data = await response.json();
 
-  const token = localStorage.getItem('authToken');
-  const response = await fetch(`${apiBaseUrl}/api/user/change-password`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${token}`
-    },
-    // credentials: 'include', // ใช้ถ้าคุณใช้ Cookie/Session ถ้าใช้ JWT อย่างเดียวเอาออกได้
-    body: JSON.stringify({
-      oldPassword: passwordForm.currentPassword,
-      newPassword: passwordForm.newPassword
-    })
-  });
+      if (!response.ok) {
+        throw new Error(data.error || 'การเปลี่ยนรหัสผ่านล้มเหลว');
+      }
 
-  const data = await response.json(); // อ่าน JSON ก่อนเพื่อเช็ค Error
+      // ✅ แจ้งเตือนสำเร็จ
+      addNotification({
+        title: 'เปลี่ยนรหัสผ่านสำเร็จ',
+        message: 'รหัสผ่านของคุณถูกเปลี่ยนเรียบร้อยแล้ว',
+        type: 'success'
+      });
+      
+      setPasswordForm({ currentPassword: '', newPassword: '', confirmPassword: '' });
 
-  if (!response.ok) {
-    throw new Error(data.error || 'การเปลี่ยนรหัสผ่านล้มเหลว');
-  }
+    } catch (error) {
+      // ✅ แจ้งเตือน error
+      addNotification({
+        title: 'เกิดข้อผิดพลาด',
+        message: error.message,
+        type: 'error'
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
 
-  alert('เปลี่ยนรหัสผ่านสำเร็จ!');
-  setPasswordForm({ currentPassword: '', newPassword: '', confirmPassword: '' });
-
-} catch (error) {
-  alert(error.message); // แสดง Error ที่มาจากทั้ง Client และ Server
-} finally {
-  setLoading(false);
-}
+  const handleLogoutDevice = (sessionId) => {
+    // ✅ เปลี่ยนจาก alert → addNotification
+    addNotification({
+      title: 'ออกจากระบบอุปกรณ์',
+      message: `ออกจากระบบอุปกรณ์: ${sessionId} เรียบร้อย`,
+      type: 'info'
+    });
   };
 
   const formatDate = (dateString) => {
@@ -187,20 +220,31 @@ const UserProfile = () => {
             <h1 className="text-2xl font-bold bg-gradient-to-r from-blue-400 via-purple-400 to-pink-400 bg-clip-text text-transparent">
               VideoStream
             </h1>
-            <button 
-              onClick={() => window.history.back()}
-              className="flex items-center gap-2 px-4 py-2 bg-slate-800/50 hover:bg-slate-700/50 text-white rounded-xl transition-all border border-slate-700/50"
-            >
-              <ChevronRight className="w-4 h-4 rotate-180" />
-              <span>ย้อนกลับ</span>
-            </button>
+            <div className="flex items-center gap-4">
+              {/* ✅ แสดงจำนวนการแจ้งเตือน */}
+              {(notifications.length + Object.keys(videoNotifications).length) > 0 && (
+                <div className="relative">
+                  <div className="bg-red-500 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center animate-pulse">
+                    {notifications.length + Object.keys(videoNotifications).length}
+                  </div>
+                </div>
+              )}
+              <button 
+                onClick={() => window.history.back()}
+                className="flex items-center gap-2 px-4 py-2 bg-slate-800/50 hover:bg-slate-700/50 text-white rounded-xl transition-all border border-slate-700/50"
+              >
+                <ChevronRight className="w-4 h-4 rotate-180" />
+                <span>ย้อนกลับ</span>
+              </button>
+            </div>
           </div>
         </div>
       </header>
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {/* Profile Header Card */}
+        {/* Profile Header Card - (เหมือนเดิม) */}
         <div className="bg-gradient-to-br from-blue-600/20 via-purple-600/20 to-pink-600/20 backdrop-blur-xl rounded-2xl border border-slate-700/50 p-8 mb-6 relative overflow-hidden">
+          {/* ... existing profile header ... */}
           <div className="absolute inset-0 bg-gradient-to-br from-blue-500/5 to-purple-500/5" />
           <div className="relative flex flex-col md:flex-row items-center md:items-start gap-6">
             <div className="relative">
@@ -271,7 +315,7 @@ const UserProfile = () => {
 
         {/* Tab Content */}
         <div className="bg-slate-900/50 backdrop-blur-xl rounded-2xl border border-slate-700/50 p-6">
-          {/* Overview Tab */}
+          {/* Overview Tab - (เหมือนเดิม) */}
           {activeTab === 'overview' && (
             <div className="space-y-6">
               <h3 className="text-2xl font-bold text-white mb-6 flex items-center gap-3">
@@ -358,7 +402,7 @@ const UserProfile = () => {
             </div>
           )}
 
-          {/* Purchases Tab */}
+          {/* Purchases Tab - (เหมือนเดิม) */}
           {activeTab === 'purchases' && (
             <div>
               <h3 className="text-2xl font-bold text-white mb-6 flex items-center gap-3">
@@ -613,10 +657,6 @@ const UserProfile = () => {
       </div>
     </div>
   );
-};
-
-const handleLogoutDevice = (sessionId) => {
-  alert(`ออกจากระบบอุปกรณ์: ${sessionId}`);
 };
 
 export default UserProfile;

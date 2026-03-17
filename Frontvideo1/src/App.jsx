@@ -11,11 +11,15 @@ import VideoDetails from './components/VideoDetails.jsx';
 import { AuthProvider } from './AuthProvider';
 import { ProtectedRoute } from './ProtectedRoute';
 import UserProfile from './components/UserProfile.jsx';
+import { NotifProvider } from './NotifContext'; // ✅ import context provider
+import GlobalNotification from './components/GLobalNotification'; // ✅ import global notification component
 function App() {
   return (
     <AuthProvider>
+       <NotifProvider> {/* ✅ เพิ่มตรงนี้ */}
       <Router>
         <Toaster position="top-center" />
+        <GlobalNotification /> {/* ✅ เพิ่มตรงนี้ */}
         <Routes>
           <Route path="/"
            element={
@@ -77,6 +81,7 @@ function App() {
           />
         </Routes>
       </Router>
+      </NotifProvider>
     </AuthProvider>
   )
 }
