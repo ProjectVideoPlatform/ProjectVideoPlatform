@@ -26,6 +26,7 @@ jobs:
         with:
           context: ./BackEnd # แก้เป็น path ที่มี Dockerfile ของคุณ
           push: true
+          file: ./BackEnd/Dockerfile
           tags: ${{ secrets.DOCKERHUB_USERNAME }}/secure-video-backend:latest
 
       - name: Build and push Frontend
@@ -33,4 +34,5 @@ jobs:
         with:
           context: ./Frontvideo1 # แก้เป็น path ที่มี Dockerfile ของคุณ
           push: true
+          file: ./Frontvideo1
           tags: ${{ secrets.DOCKERHUB_USERNAME }}/secure-video-frontend:latest
