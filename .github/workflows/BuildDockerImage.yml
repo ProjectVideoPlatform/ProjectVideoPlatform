@@ -24,7 +24,7 @@ jobs:
       - name: Build and push Backend
         uses: docker/build-push-action@v5
         with:
-          context: ./Backend # แก้เป็น path ที่มี Dockerfile ของคุณ
+          context: ./BackEnd # แก้เป็น path ที่มี Dockerfile ของคุณ
           push: true
           tags: ${{ secrets.DOCKERHUB_USERNAME }}/secure-video-backend:latest
 
