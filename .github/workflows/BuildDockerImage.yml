@@ -29,10 +29,10 @@ jobs:
           file: ./Dockerfile
           tags: ${{ secrets.DOCKERHUB_USERNAME }}/secure-video-backend:latest
 
-      - name: Build and push Frontend
-        uses: docker/build-push-action@v5
-        with:
-          context: ./Frontvideo1 # แก้เป็น path ที่มี Dockerfile ของคุณ
-          push: true
-          file: ./Frontvideo1/Dockefile
-          tags: ${{ secrets.DOCKERHUB_USERNAME }}/secure-video-frontend:latest
+      # - name: Build and push Frontend
+      #   uses: docker/build-push-action@v5
+      #   with:
+      #     context: ./Frontvideo1 # แก้เป็น path ที่มี Dockerfile ของคุณ
+      #     push: true
+      #     file: ./Frontvideo1/Dockefile
+      #     tags: ${{ secrets.DOCKERHUB_USERNAME }}/secure-video-frontend:latest
