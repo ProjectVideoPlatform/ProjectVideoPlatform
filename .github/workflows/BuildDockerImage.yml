@@ -31,6 +31,6 @@ jobs:
       - name: Build and push Frontend
         uses: docker/build-push-action@v5
         with:
-          context: ./Frontend 1 # แก้เป็น path ที่มี Dockerfile ของคุณ
+          context: ./Frontvideo1 # แก้เป็น path ที่มี Dockerfile ของคุณ
           push: true
           tags: ${{ secrets.DOCKERHUB_USERNAME }}/secure-video-frontend:latest
