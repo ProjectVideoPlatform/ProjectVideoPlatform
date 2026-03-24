@@ -11,7 +11,7 @@ const escapeStringRegexp = require('escape-string-regexp');
   const https = require('https');
   const QUEUES = require('../services/rabbitmq/queues');
 const router = express.Router();
-const redis = require('../config/redis');
+const { broadcast } = require('../websocket');
 router.get('/video-progress', authenticateToken, async (req, res) => {
   try {
     console.log("kuy  เอ้ย fetching video progress");
@@ -508,10 +508,11 @@ router.post(
   await video.save({
        writeConcern: { w: 'majority', wtimeout: 5000 } 
        });
-          await redis.publish("video-status", JSON.stringify({
-  type: "transcode_completed",
-  videoId: videoId
-}));
+  await broadcast({
+    videoId: videoId,
+    type: "transcode_completed",
+    status: "completed"
+  });
 
   // 🚀 ส่ง Email Queue
   await queueService.sendToQueue(QUEUES.EMAIL_NOTIFY, {

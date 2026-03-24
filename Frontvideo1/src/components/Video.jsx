@@ -1,15 +1,17 @@
+// Video.jsx
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
-  Play, Search, Filter, Upload, ShoppingCart, User, Video,
-  Clock, Tag, Eye, DollarSign, CheckCircle, AlertCircle,
+  Play, Search, Upload, ShoppingCart, User, Video,
+  Clock, Tag, CheckCircle, AlertCircle,
   QrCode, Loader, X
 } from 'lucide-react';
-import Hls from 'hls.js';
 import { useNavigate } from 'react-router-dom';
 import VideoPlayer from './VideoPlayer';
-import useVideoStatus from "../hooks/useWebSocketVideoStatus";
-const API_BASE = 'http://localhost:3000/api';
+// ✅ ลบ import useVideoStatus ออก — ย้ายไปอยู่ใน context แล้ว
 import { useNotif } from '../NotifContext';
+
+const API_BASE = 'http://localhost:3000/api';
+
 const api = {
   getVideos: async (params = {}) => {
     const query = new URLSearchParams(params).toString();
@@ -345,7 +347,6 @@ const VideoCard = ({ video, onPlay, isLoading, isAdmin }) => {
   );
 };
 
-// ✅ UploadModal — ลบ useVideoStatus ออก ส่ง videoId กลับผ่าน onUpload
 const UploadModal = ({ isOpen, onClose, onUpload }) => {
   const [formData, setFormData] = useState({ title: '', description: '', price: 0, tags: '' });
   const [file, setFile] = useState(null);
@@ -384,7 +385,6 @@ const UploadModal = ({ isOpen, onClose, onUpload }) => {
 
       await api.completeUpload(initResult.videoId);
 
-      // ✅ ส่ง newVideo + videoId + title กลับ parent
       onUpload(
         {
           id: initResult.videoId,
@@ -397,8 +397,8 @@ const UploadModal = ({ isOpen, onClose, onUpload }) => {
           canPlay: false,
           purchased: false,
         },
-        initResult.videoId,  // ✅ videoId
-        formData.title       // ✅ title สำหรับ notification
+        initResult.videoId,
+        formData.title
       );
 
       onClose();
@@ -499,7 +499,8 @@ const UploadModal = ({ isOpen, onClose, onUpload }) => {
 };
 
 const VideoStreamingApp = () => {
-  const { addVideoNotification, clearVideoNotification } = useNotif(); // ✅ ใช้ context
+  // ✅ เปลี่ยนจาก addVideoNotification → startWatching
+  const { startWatching } = useNotif();
 
   const navigate = useNavigate();
   const [videos, setVideos] = useState([]);
@@ -514,64 +515,7 @@ const VideoStreamingApp = () => {
   const [currentPlayer, setCurrentPlayer] = useState(null);
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [isAdmin] = useState(true);
-  const [transcodeNotif, setTranscodeNotif] = useState(null);
-  const [processingVideoId, setProcessingVideoId] = useState(null);
-  const [processingVideoTitle, setProcessingVideoTitle] = useState('');
 
-  // ✅ ใช้ ref เก็บ title ล่าสุด — ไม่ต้องเป็น dependency
-  const processingVideoTitleRef = useRef('');
-
-  // ✅ wrap ด้วย useCallback + ref pattern ป้องกัน stale closure
-const handleWsEvent = useCallback(async (data) => {
-    console.log("🔔 WS event:", data);
-
-    if (data.type === 'transcode_completed') {
-      try {
-        const result = await api.getVideo(data.videoId);
-        
-        // อัพเดท videos state
-        setVideos(prev => prev.map(v => 
-          (v.id === data.videoId || v._id === data.videoId) 
-            ? { ...v, ...result.video, uploadStatus: 'completed' }
-            : v
-        ));
-
-        // ✅ แจ้งเตือนแบบ global
-        addVideoNotification(data.videoId, {
-          status: 'completed',
-          title: processingVideoTitleRef.current,
-          message: 'วิดีโอพร้อมรับชมแล้ว'
-        });
-
-      } catch (err) {
-        console.error('Failed to fetch updated video:', err);
-        addVideoNotification(data.videoId, {
-          status: 'completed',
-          title: processingVideoTitleRef.current,
-          message: 'วิดีโอพร้อมรับชมแล้ว (แต่โหลดข้อมูลไม่สมบูรณ์)'
-        });
-      }
-      setProcessingVideoId(null);
-
-    } else if (data.type === 'transcode_failed') {
-      setVideos(prev => prev.map(v =>
-        (v.id === data.videoId || v._id === data.videoId)
-          ? { ...v, uploadStatus: 'failed' }
-          : v
-      ));
-
-      // ✅ แจ้งเตือนแบบ global
-      addVideoNotification(data.videoId, {
-        status: 'failed',
-        title: processingVideoTitleRef.current,
-        message: 'ไม่สามารถประมวลผลวิดีโอได้ กรุณาลองใหม่อีกครั้ง'
-      });
-
-      setProcessingVideoId(null);
-    }
-  }, [addVideoNotification]); // ✅ เพิ่ม dependency
-
-  useVideoStatus(processingVideoId, handleWsEvent);
 
   const loadVideos = async (params = {}) => {
     setLoading(true);
@@ -646,12 +590,11 @@ const handleWsEvent = useCallback(async (data) => {
     setSelectedCategory('');
   };
 
+  // ✅ เรียก startWatching แทน setProcessingVideoId — WS อยู่ใน context แล้ว
   const handleUploadComplete = useCallback((newVideo, videoId, title) => {
     setVideos(prev => [newVideo, ...prev]);
-    setProcessingVideoId(videoId);
-    setProcessingVideoTitle(title);
-    processingVideoTitleRef.current = title; // ✅ update ref ทันที
-  }, []);
+    startWatching(videoId, title);
+  }, [startWatching]);
 
   useEffect(() => {
     if (currentView === 'all') loadVideos();
@@ -771,8 +714,6 @@ const handleWsEvent = useCallback(async (data) => {
         onClose={() => setShowUploadModal(false)}
         onUpload={handleUploadComplete}
       />
-
-
     </div>
   );
 };

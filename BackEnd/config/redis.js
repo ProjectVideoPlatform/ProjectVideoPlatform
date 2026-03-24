@@ -9,6 +9,9 @@ class RedisClient {
     this.publisher = null;
     this.subscriber = null;
     this.isConnected = false;
+    
+    // ✅ เพิ่ม Map สำหรับเก็บ Handler ของแต่ละ Channel ป้องกัน Event ซ้ำซ้อน
+    this.messageHandlers = new Map(); 
   }
 
   getOptions() {
@@ -33,22 +36,33 @@ class RedisClient {
     this.publisher.on('connect', () => {
       this.isConnected = true;
       logger.info('Redis publisher connected');
-      console.log('Redis publisher connected');
     });
 
     this.publisher.on('error', (err) => {
       logger.error('Redis publisher error:', err);
-      console.error('Redis publisher error:', err);
     });
 
     this.subscriber.on('connect', () => {
       logger.info('Redis subscriber connected');
-      console.log('Redis subscriber connected');
     });
 
     this.subscriber.on('error', (err) => {
       logger.error('Redis subscriber error:', err);
-      console.error('Redis subscriber error:', err);
+    });
+
+    // ✅ ย้ายการดักฟัง 'message' มาไว้ตรงนี้ (ประกาศแค่ครั้งเดียวพอ)
+    this.subscriber.on('message', (channel, message) => {
+      const handler = this.messageHandlers.get(channel);
+      if (handler) {
+        try {
+          // ลอง Parse JSON ดูก่อนส่งให้ Handler
+          const parsedMessage = JSON.parse(message);
+          handler(parsedMessage);
+        } catch (e) {
+          // ถ้า Parse พลาด (เช่นเป็น String ธรรมดา) ก็ส่งไปตรงๆ
+          handler(message);
+        }
+      }
     });
 
     await new Promise((resolve, reject) => {
@@ -66,6 +80,7 @@ class RedisClient {
   }
 
   // ---------- BASIC COMMANDS ----------
+  // (Method เดิมของคุณใช้ได้ดีแล้ว คงไว้ได้เลย)
 
   async get(key) {
     if (!this.isConnected) await this.connect();
@@ -74,11 +89,9 @@ class RedisClient {
 
   async set(key, value, options = {}) {
     if (!this.isConnected) await this.connect();
-
     if (options.EX) {
       return this.publisher.set(key, value, 'EX', options.EX);
     }
-
     return this.publisher.set(key, value);
   }
 
@@ -92,40 +105,42 @@ class RedisClient {
     return this.publisher.expire(key, seconds);
   }
 
-  async setex(key, seconds, value) {
+  // ---------- LIST COMMANDS (เพิ่มใหม่สำหรับทำ Queue/Cache) ----------
+
+  async rPush(key, value) {
     if (!this.isConnected) await this.connect();
-    return this.publisher.setex(key, seconds, value);
+    // ถ้า Value เป็น Object ให้แปลงเป็น String ก่อน
+    const data = typeof value === 'string' ? value : JSON.stringify(value);
+    return this.publisher.rpush(key, data);
   }
 
-  pipeline() {
-    if (!this.publisher) {
-      throw new Error('Redis not connected');
-    }
-    return this.publisher.pipeline();
+  async lRange(key, start, stop) {
+    if (!this.isConnected) await this.connect();
+    return this.publisher.lrange(key, start, stop);
   }
 
   // ---------- PUB/SUB ----------
 
   async publish(channel, message) {
     if (!this.isConnected) await this.connect();
-    return this.publisher.publish(channel, JSON.stringify(message));
+    const data = typeof message === 'string' ? message : JSON.stringify(message);
+    return this.publisher.publish(channel, data);
   }
 
   async subscribe(channel, handler) {
     if (!this.isConnected) await this.connect();
-
-    await this.subscriber.subscribe(channel);
-
-    this.subscriber.on('message', (ch, msg) => {
-      if (ch === channel) {
-        handler(JSON.parse(msg));
-      }
-    });
+    
+    // ✅ ลงทะเบียน Handler ไว้ใน Map แทนการ .on('message') ซ้ำๆ
+    this.messageHandlers.set(channel, handler);
+    
+    // สั่งให้ ioredis Subscribe Channel นี้
+    return this.subscriber.subscribe(channel);
   }
 
   // ---------- DISCONNECT ----------
 
   async disconnect() {
+    this.messageHandlers.clear();
     if (this.publisher) await this.publisher.quit();
     if (this.subscriber) await this.subscriber.quit();
     this.isConnected = false;
