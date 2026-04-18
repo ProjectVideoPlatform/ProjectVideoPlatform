@@ -2,8 +2,11 @@ CREATE TABLE "app_db".video_watch_events
 (
     video_id               String,
     user_id                String,
+    session_id             String,  -- เพิ่มเพื่อติดตามเซสชันผู้ใช้
     event_type             LowCardinality(String),  -- play/watch/pause/seek/completed/close/error
-    watch_duration_seconds UInt32,
+    watch_duration_seconds UInt32,  -- ระยะเวลาที่ดูในครั้งนี้ (เป็นวินาที)
+    total_watch_seconds    UInt32,  -- รวมเวลาดูตั้งแต่เริ่มเซสชัน (เป็นวินาที)
+    current_time_seconds   UInt32,  -- ตำแหน่งปัจจุบันในวิดีโอ (เป็นวินาที)
     device_type            LowCardinality(String),
     country_code           LowCardinality(String),
     event_time             DateTime,

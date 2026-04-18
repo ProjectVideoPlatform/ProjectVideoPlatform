@@ -1,12 +1,13 @@
-# grafana/datasources/clickhouse.yaml
 apiVersion: 1
 datasources:
   - name: ClickHouse
     type: grafana-clickhouse-datasource
+    uid: clickhouse_ds          # <--- เพิ่มบรรทัดนี้ เพื่อให้ Dashboard อ้างอิงได้ถูกต้อง
+    access: proxy
     jsonData:
-      host: clickhouse_db
-      port: 8123
+      server: clickhouse_db
+      port: 9000
       username: app_user
-      database: app_db
+      defaultDatabase: app_db
     secureJsonData:
       password: strong_password

@@ -23,6 +23,7 @@ const VideoPlayer = ({ manifestUrl, onClose, videoId, userIdRef }) => {
   const totalWatchTime       = useRef(0);
   const lastTrackedVideoTime = useRef(0);
 
+    let isSeeking = false;
   // FIX: ไม่ต้องการ userIdRef แยกอีกแล้ว — ใช้ที่ส่งมาจาก parent โดยตรง
   // parent เป็นคนถือ ref → ค่าถูกต้องเสมอ แม้ตอน unmount
 
@@ -63,7 +64,6 @@ const VideoPlayer = ({ manifestUrl, onClose, videoId, userIdRef }) => {
       hls.attachMedia(video);
     }
 
-    let isSeeking = false;
 
     const handlePlay = () => {
       segmentStartTime.current = Date.now();
@@ -72,6 +72,7 @@ const VideoPlayer = ({ manifestUrl, onClose, videoId, userIdRef }) => {
       videoAnalytics.trackVideoEvent(makePayload({
         eventType: 'play',
         currentTime: video.currentTime,
+        duration: 0,
       }));
     };
 
@@ -82,12 +83,6 @@ const handlePause = () => {
   const elapsed = flushWatchTime();
 
   // DEBUG
-  console.log('[PLAYER pause]', {
-    elapsed,
-    segmentWasNull: segmentStartTime.current === null,
-    totalNow: totalWatchTime.current,
-    userId: userIdRef?.current,     // ← ถ้า undefined = ref ไม่ถูกส่งมา
-  });
 
   videoAnalytics.trackVideoEvent(makePayload({
     eventType: 'pause',
@@ -106,6 +101,7 @@ const handlePause = () => {
       videoAnalytics.trackVideoEvent(makePayload({
         eventType: 'seek',
         currentTime: video.currentTime,
+        duration: 0, // <--- เติมบรรทัดนี้ลงไปเพื่อให้ Log สมบูรณ์
       }));
       isSeeking = false;
       if (!video.paused) {
@@ -185,7 +181,7 @@ const handlePause = () => {
   // FIX: dependency array มีแค่ค่าที่เปลี่ยนจริง
   // makePayload ออกจาก deps แล้ว เพราะใช้ ref แทน
   // → useEffect ไม่ re-run เมื่อ parent re-render
-  }, [manifestUrl, videoId, flushWatchTime]);
+  }, [manifestUrl, videoId,flushWatchTime]);
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-90 z-50 flex items-center justify-center">

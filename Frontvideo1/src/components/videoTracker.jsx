@@ -34,10 +34,7 @@ function getCountry() {
 // ── class ──────────────────────────────────────────────
 class VideoAnalytics {
   constructor(config = {}) {
-    this.analyticsUrl = config.analyticsUrl
-      ?? (typeof window !== 'undefined'
-        ? `${window.location.origin}/api/public/analytics/video`
-        : 'http://localhost:3000/api/public/analytics/video');
+    this.analyticsUrl = 'http://localhost:3000/api/public/analytics/video';
 
     this.sessionId    = getSessionId();
     this.deviceType   = getDeviceType(); // cache ครั้งเดียว
@@ -74,7 +71,6 @@ class VideoAnalytics {
     duration: data.duration,        // ← ถ้า undefined = VideoPlayer ไม่ส่งมา
     totalWatchTime: data.totalWatchTime,
     currentTime: data.currentTime,
-    userId: data.userId,            // ← ถ้า undefined = userIdRef ไม่ทำงาน
     stack: new Error().stack.split('\n')[2], // ← บอกว่า call มาจากไหน
   });
     // ── dedup ──────────────────────────────────────────
