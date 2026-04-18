@@ -560,23 +560,31 @@ const VideoStreamingApp = () => {
       setActionLoading(null);
     }
   };
-
+const currentUserIdRef = useRef(null);
   const handlePlay = async (video) => {
-    setActionLoading(video.id);
-    try {
-      const result = await api.playVideo(video.id);
-      setCurrentPlayer({
-        video,
-        manifestUrl: result.manifestUrl,
-        videoId: video.id || video._id,
-        userId: result.userId || 'anonymous'
-      });
-    } catch (error) {
-      alert('Playback failed: ' + error.message);
-    } finally {
-      setActionLoading(null);
-    }
-  };
+  setActionLoading(video.id);
+  try {
+    const result = await api.playVideo(video.id);
+    
+    // FIX: เก็บ userId ใน ref ก่อน set state
+    // เพราะ setCurrentPlayer(null) ตอนปิดจะล้าง state แต่ ref ยังอยู่
+    currentUserIdRef.current = result.userId || null;
+    
+    // FIX: ใช้ useRef เก็บ currentPlayer แทน useState
+    // → ไม่ trigger re-render → VideoPlayer ไม่ได้ props ใหม่ → useEffect ไม่ re-run
+    setCurrentPlayer({
+      manifestUrl: result.manifestUrl,
+      videoId: video.id || video._id,
+      // ส่ง ref object ไปเลย ไม่ใช่ค่า string
+      // VideoPlayer จะอ่านจาก ref.current เสมอ
+      userIdRef: currentUserIdRef,
+    });
+  } catch (error) {
+    alert('Playback failed: ' + error.message);
+  } finally {
+    setActionLoading(null);
+  }
+};
 
   const handleSearch = () => {
     setCurrentPage(1);
@@ -700,14 +708,14 @@ const VideoStreamingApp = () => {
         )}
       </main>
 
-      {currentPlayer && (
-        <VideoPlayer
-          manifestUrl={currentPlayer.manifestUrl}
-          onClose={() => setCurrentPlayer(null)}
-          videoId={currentPlayer.videoId}
-          userId={currentPlayer.userId}
-        />
-      )}
+{currentPlayer && (
+  <VideoPlayer
+    manifestUrl={currentPlayer.manifestUrl}
+    onClose={() => setCurrentPlayer(null)}
+    videoId={currentPlayer.videoId}
+    userIdRef={currentPlayer.userIdRef}  // ส่ง ref แทน string
+  />
+)}
 
       <UploadModal
         isOpen={showUploadModal}

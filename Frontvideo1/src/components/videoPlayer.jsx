@@ -1,203 +1,202 @@
-// VideoPlayer.jsx
-import React, { useRef, useEffect, useState } from 'react';
+import React, { useRef, useEffect, useState, useCallback } from 'react';
 import Hls from 'hls.js';
 import { X, Play } from 'lucide-react';
-import videoAnalytics from './VideoTracker'; // import analytics
+import videoAnalytics from './VideoTracker';
 
-const VideoPlayer = ({ manifestUrl, onClose, videoId, userId }) => {
+const WATCH_INTERVAL_SECONDS = 10;
+
+// debounce helper — ใช้แทน lodash เพื่อไม่ต้อง import เพิ่ม
+function debounce(fn, ms) {
+  let timer;
+  return (...args) => {
+    clearTimeout(timer);
+    timer = setTimeout(() => fn(...args), ms);
+  };
+}
+
+const VideoPlayer = ({ manifestUrl, onClose, videoId, userIdRef }) => {
   const videoRef = useRef(null);
-  const hlsRef = useRef(null);
+  const hlsRef   = useRef(null);
   const [isPlaying, setIsPlaying] = useState(false);
-  const watchStartTime = useRef(null);
-  const lastTrackedTime = useRef(0);
-  const totalWatchTime = useRef(0);
-  const analyticsInterval = useRef(null);
 
-  // ติดตาม events ต่างๆ
+  const segmentStartTime     = useRef(null);
+  const totalWatchTime       = useRef(0);
+  const lastTrackedVideoTime = useRef(0);
+
+  // FIX: ไม่ต้องการ userIdRef แยกอีกแล้ว — ใช้ที่ส่งมาจาก parent โดยตรง
+  // parent เป็นคนถือ ref → ค่าถูกต้องเสมอ แม้ตอน unmount
+
+  const flushWatchTime = useCallback(() => {
+    if (segmentStartTime.current === null) return 0;
+    const elapsed = Math.round((Date.now() - segmentStartTime.current) / 1000);
+    totalWatchTime.current += elapsed;
+    segmentStartTime.current = null;
+    return elapsed;
+  }, []);
+
+  // FIX: makePayload ไม่อยู่ใน dependency array ของ useEffect หลัก
+  // แก้ด้วยการใช้ ref เก็บ makePayload แทน useCallback
+  const makePayloadRef = useRef(null);
+  makePayloadRef.current = (overrides = {}) => ({
+    videoId,
+    userId: userIdRef.current,    // อ่านจาก ref ของ parent
+    manifestUrl,
+    timestamp: new Date().toISOString(),
+    totalWatchTime: totalWatchTime.current,
+    ...overrides,
+  });
+
+  // shorthand สำหรับใช้ใน handlers
+  const makePayload = (overrides) => makePayloadRef.current(overrides);
+
   useEffect(() => {
     if (!manifestUrl || !videoRef.current) return;
-
     const video = videoRef.current;
 
-    // Setup HLS
+    // HLS setup
     if (video.canPlayType('application/vnd.apple.mpegurl')) {
       video.src = manifestUrl;
     } else if (Hls.isSupported()) {
-      const hls = new Hls({
-        xhrSetup: (xhr, url) => {
-          xhr.withCredentials = true;
-        },
-      });
-
+      const hls = new Hls({ xhrSetup: (xhr) => { xhr.withCredentials = true; } });
       hlsRef.current = hls;
       hls.loadSource(manifestUrl);
       hls.attachMedia(video);
     }
 
-    // Event Listeners
+    let isSeeking = false;
+
     const handlePlay = () => {
+      segmentStartTime.current = Date.now();
+      if (isSeeking) return;
       setIsPlaying(true);
-      watchStartTime.current = Date.now();
-      
-      // Track play event
-      videoAnalytics.trackVideoEvent({
-        videoId,
+      videoAnalytics.trackVideoEvent(makePayload({
         eventType: 'play',
         currentTime: video.currentTime,
-        manifestUrl
-      });
-
-      // เริ่ม interval เพื่อ track การดูทุก 10 วินาที
-      if (analyticsInterval.current) {
-        clearInterval(analyticsInterval.current);
-      }
-      
-      analyticsInterval.current = setInterval(() => {
-        if (video.paused) return;
-        
-        const currentSeconds = Math.floor(video.currentTime);
-        // Track ทุก 10 วินาที
-        if (currentSeconds % 10 === 0 && currentSeconds > lastTrackedTime.current) {
-          lastTrackedTime.current = currentSeconds;
-          
-          videoAnalytics.trackVideoEvent({
-            videoId,
-            eventType: 'watch',
-            duration: 10,
-            currentTime: video.currentTime,
-            manifestUrl
-          });
-        }
-      }, 1000);
+      }));
     };
 
-    const handlePause = () => {
-      setIsPlaying(false);
-      const watchDuration = watchStartTime.current ? 
-        Math.round((Date.now() - watchStartTime.current) / 1000) : 0;
-      
-      totalWatchTime.current += watchDuration;
-      
-      // Track pause event
-      videoAnalytics.trackVideoEvent({
-        videoId,
-        eventType: 'pause',
-        duration: watchDuration,
-        totalDuration: totalWatchTime.current,
+    // VideoPlayer.jsx — handlePause
+const handlePause = () => {
+  if (isSeeking) return;
+  setIsPlaying(false);
+  const elapsed = flushWatchTime();
+
+  // DEBUG
+  console.log('[PLAYER pause]', {
+    elapsed,
+    segmentWasNull: segmentStartTime.current === null,
+    totalNow: totalWatchTime.current,
+    userId: userIdRef?.current,     // ← ถ้า undefined = ref ไม่ถูกส่งมา
+  });
+
+  videoAnalytics.trackVideoEvent(makePayload({
+    eventType: 'pause',
+    duration: elapsed,
+    currentTime: video.currentTime,
+  }));
+};
+
+    const handleSeeking = () => {
+      isSeeking = true;
+      flushWatchTime();
+    };
+
+    const handleSeeked = debounce(() => {
+      lastTrackedVideoTime.current = video.currentTime;
+      videoAnalytics.trackVideoEvent(makePayload({
+        eventType: 'seek',
         currentTime: video.currentTime,
-        manifestUrl
-      });
-
-      if (analyticsInterval.current) {
-        clearInterval(analyticsInterval.current);
-        analyticsInterval.current = null;
+      }));
+      isSeeking = false;
+      if (!video.paused) {
+        segmentStartTime.current = Date.now();
+        setIsPlaying(true);
       }
-    };
+    }, 200);
 
     const handleEnded = () => {
       setIsPlaying(false);
-      
-      videoAnalytics.trackVideoEvent({
-        videoId,
+      const elapsed = flushWatchTime();
+      videoAnalytics.trackVideoEvent(makePayload({
         eventType: 'completed',
-        totalDuration: totalWatchTime.current,
-        duration: video.duration,
+        duration: elapsed,
+        videoDuration: video.duration,
         currentTime: video.currentTime,
-        manifestUrl
-      });
+      }));
+    };
 
-      if (analyticsInterval.current) {
-        clearInterval(analyticsInterval.current);
-        analyticsInterval.current = null;
+    const handleTimeUpdate = () => {
+      if (video.paused || video.ended || isSeeking) return;
+      if (segmentStartTime.current === null) {
+        segmentStartTime.current = Date.now();
+      }
+      const elapsed = video.currentTime - lastTrackedVideoTime.current;
+      if (elapsed >= WATCH_INTERVAL_SECONDS) {
+        lastTrackedVideoTime.current = video.currentTime;
+        videoAnalytics.trackVideoEvent(makePayload({
+          eventType: 'watch',
+          duration: WATCH_INTERVAL_SECONDS,
+          currentTime: video.currentTime,
+        }));
       }
     };
 
-    const handleSeeked = () => {
-      videoAnalytics.trackVideoEvent({
-        videoId,
-        eventType: 'seek',
-        currentTime: video.currentTime,
-        manifestUrl
-      });
-    };
-
-    const handleError = (error) => {
-      console.error('Video error:', error);
-      videoAnalytics.trackVideoEvent({
-        videoId,
-        userId,
+    const handleError = () => {
+      const err = video.error;
+      videoAnalytics.trackVideoEvent(makePayload({
         eventType: 'error',
-        error: error.message || 'Unknown error',
+        errorCode: err?.code,
+        errorMessage: err?.message ?? 'Unknown error',
         currentTime: video.currentTime,
-        manifestUrl
-      });
+      }));
     };
 
-    // Add event listeners
-    video.addEventListener('play', handlePlay);
-    video.addEventListener('pause', handlePause);
-    video.addEventListener('ended', handleEnded);
-    video.addEventListener('seeked', handleSeeked);
-    video.addEventListener('error', handleError);
+    video.addEventListener('play',       handlePlay);
+    video.addEventListener('pause',      handlePause);
+    video.addEventListener('seeking',    handleSeeking);
+    video.addEventListener('seeked',     handleSeeked);
+    video.addEventListener('ended',      handleEnded);
+    video.addEventListener('timeupdate', handleTimeUpdate);
+    video.addEventListener('error',      handleError);
 
-    // Auto play
     video.play().catch(() => {});
 
     return () => {
-      // Cleanup
-      video.removeEventListener('play', handlePlay);
-      video.removeEventListener('pause', handlePause);
-      video.removeEventListener('ended', handleEnded);
-      video.removeEventListener('seeked', handleSeeked);
-      video.removeEventListener('error', handleError);
-      
-      if (analyticsInterval.current) {
-        clearInterval(analyticsInterval.current);
-      }
+      video.removeEventListener('play',       handlePlay);
+      video.removeEventListener('pause',      handlePause);
+      video.removeEventListener('seeking',    handleSeeking);
+      video.removeEventListener('seeked',     handleSeeked);
+      video.removeEventListener('ended',      handleEnded);
+      video.removeEventListener('timeupdate', handleTimeUpdate);
+      video.removeEventListener('error',      handleError);
 
-      // Track close event
-      if (!video.paused) {
-        const watchDuration = watchStartTime.current ? 
-          Math.round((Date.now() - watchStartTime.current) / 1000) : 0;
-        
-        videoAnalytics.trackVideoEvent({
-          videoId,
-          userId,
-          eventType: 'close',
-          duration: watchDuration,
-          totalDuration: totalWatchTime.current + watchDuration,
-          currentTime: video.currentTime,
-          manifestUrl
-        });
-      }
+      const elapsed = flushWatchTime();
+      videoAnalytics.trackVideoEvent(makePayload({
+        eventType: 'close',
+        duration: elapsed,
+        currentTime: video.currentTime,
+      }));
 
-      // Destroy HLS
       if (hlsRef.current) {
         hlsRef.current.destroy();
         hlsRef.current = null;
       }
     };
-  }, [manifestUrl, videoId, userId]);
+  // FIX: dependency array มีแค่ค่าที่เปลี่ยนจริง
+  // makePayload ออกจาก deps แล้ว เพราะใช้ ref แทน
+  // → useEffect ไม่ re-run เมื่อ parent re-render
+  }, [manifestUrl, videoId, flushWatchTime]);
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-90 z-50 flex items-center justify-center">
       <div className="relative w-full max-w-6xl mx-4">
-        <button 
-          onClick={onClose}
-          className="absolute -top-12 right-0 text-white hover:text-gray-300"
-        >
+        <button onClick={onClose} className="absolute -top-12 right-0 text-white hover:text-gray-300">
           <X className="w-6 h-6" />
         </button>
         <div className="aspect-video bg-black rounded-lg overflow-hidden relative">
-          <video 
-            ref={videoRef}
-            controls
-            className="w-full h-full"
-          >
+          <video ref={videoRef} controls className="w-full h-full">
             Your browser does not support HTML5 video.
           </video>
-
-          {/* Overlay - ซ่อนเมื่อเล่นแล้ว */}
           {!isPlaying && (
             <div className="absolute inset-0 flex items-center justify-center text-white pointer-events-none">
               <div className="text-center">

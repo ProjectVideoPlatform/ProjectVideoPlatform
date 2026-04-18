@@ -1,11 +1,20 @@
--- ถ้าต้องการเก็บ currentTime จริงๆ
-CREATE TABLE video_watch_events (
-    video_id String,
-    user_id String,
-    watch_duration_seconds Float32,
-    device_type String,
-    event_time DateTime,
-    country_code String,
-    current_time Float32  -- ✅ เพิ่มฟิลด์นี้
-) ENGINE = MergeTree()
-ORDER BY (event_time, video_id);
+CREATE TABLE "app_db".video_watch_events
+(
+    video_id               String,
+    user_id                String,
+    event_type             LowCardinality(String),  -- play/watch/pause/seek/completed/close/error
+    watch_duration_seconds UInt32,
+    device_type            LowCardinality(String),
+    country_code           LowCardinality(String),
+    event_time             DateTime,
+
+    -- dedup key: ถ้า client ส่ง event เดิมซ้ำ ClickHouse จะ merge ทิ้ง
+    -- ใช้ ReplacingMergeTree แทน MergeTree
+    _inserted_at           DateTime DEFAULT now()
+)
+ENGINE = ReplacingMergeTree(_inserted_at)
+PARTITION BY toYYYYMM(event_time)
+ORDER BY (video_id, user_id, event_type, event_time)  -- dedup key
+SETTINGS index_granularity = 8192;
+//ALTER TABLE video_watch_events 
+//MODIFY TTL event_time + INTERVAL 3 MONTH;

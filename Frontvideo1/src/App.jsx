@@ -12,7 +12,7 @@ import { AuthProvider } from './AuthProvider';
 import { ProtectedRoute } from './ProtectedRoute';
 import UserProfile from './components/UserProfile.jsx';
 import { NotifProvider } from './NotifContext'; // ✅ import context provider
-import GlobalNotification from './components/GLobalNotification'; // ✅ import global notification component
+import GlobalNotification from './components/GlobalNotification'; // ✅ import global notification component
 function App() {
   return (
     <AuthProvider>

@@ -30,6 +30,7 @@ async function setupInfra() {
     await ch.assertQueue(QUEUES.VIDEO_LOGS, {
         durable: true,
         arguments: {
+            'x-queue-mode': 'lazy', // ✅ เปลี่ยนเป็น Lazy Queue
             'x-dead-letter-exchange': QUEUES.DLX_EXCHANGE,
             'x-dead-letter-routing-key': QUEUES.DLX_ANALYTICS_ROUTING_KEY
         }
