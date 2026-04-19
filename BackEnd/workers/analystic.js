@@ -93,7 +93,14 @@ class ClickHouseKafkaWorker {
       retry: { initialRetryTime: 100, retries: 8 },
     });
 
-    this.consumer = this.kafka.consumer({ groupId: 'clickhouse-worker-group', sessionTimeout: 30000 });
+   this.consumer = this.kafka.consumer({ 
+  groupId: 'clickhouse-worker-group', 
+  sessionTimeout: 30000,
+  
+  // ✅ เพิ่ม 2 บรรทัดนี้เข้าไปครับ
+  maxWaitTimeInMs: 9000,   // รอสะสมข้อความนานสูงสุด 9 วินาที
+  minBytes: 1024 * 500,    // หรือรอให้ข้อมูลสะสมครบ 500 KB ก่อน ค่อยส่งมาให้ Worker ทำ
+});
     this.producer = this.kafka.producer();
   }
 
