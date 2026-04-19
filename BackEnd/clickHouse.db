@@ -1,23 +1,25 @@
 CREATE TABLE "app_db".video_watch_events
 (
+    -- ✅ เพิ่ม event_id สำหรับ dedup
+    event_id               String,
     video_id               String,
     user_id                String,
-    session_id             String,  -- เพิ่มเพื่อติดตามเซสชันผู้ใช้
-    event_type             LowCardinality(String),  -- play/watch/pause/seek/completed/close/error
-    watch_duration_seconds UInt32,  -- ระยะเวลาที่ดูในครั้งนี้ (เป็นวินาที)
-    total_watch_seconds    UInt32,  -- รวมเวลาดูตั้งแต่เริ่มเซสชัน (เป็นวินาที)
-    current_time_seconds   UInt32,  -- ตำแหน่งปัจจุบันในวิดีโอ (เป็นวินาที)
+    session_id             String,
+    event_type             LowCardinality(String),
+    watch_duration_seconds UInt32,
+    total_watch_seconds    UInt32,
+    current_time_seconds   UInt32,
     device_type            LowCardinality(String),
     country_code           LowCardinality(String),
     event_time             DateTime,
-
-    -- dedup key: ถ้า client ส่ง event เดิมซ้ำ ClickHouse จะ merge ทิ้ง
-    -- ใช้ ReplacingMergeTree แทน MergeTree
     _inserted_at           DateTime DEFAULT now()
 )
 ENGINE = ReplacingMergeTree(_inserted_at)
 PARTITION BY toYYYYMM(event_time)
-ORDER BY (video_id, user_id, event_type, event_time)  -- dedup key
+-- ✅ เพิ่ม event_id ใน ORDER BY เพื่อ dedup ระดับ ClickHouse
+ORDER BY (video_id, event_time, event_id)
 SETTINGS index_granularity = 8192;
-//ALTER TABLE video_watch_events 
+
+-- ✅ TTL ล้างข้อมูลเก่าอัตโนมัติหลัง 3 เดือน
+//ALTER TABLE "app_db".video_watch_events
 //MODIFY TTL event_time + INTERVAL 3 MONTH;

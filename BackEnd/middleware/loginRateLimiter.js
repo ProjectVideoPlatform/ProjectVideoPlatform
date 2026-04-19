@@ -1,77 +1,143 @@
 const redisClient = require('../config/redis');
 const logger = require('../utils/logger');
 
-// 1. Middleware สำหรับเช็คก่อนเริ่ม Login
+// ── config ──────────────────────────────────────────────
+const RATE_LIMIT = {
+  maxUserAttempts:  10,
+  maxIpAttempts:    30,
+  softLockSec:      15 * 60,
+  hardBlockSec:     60 * 60,
+  hardBlockTrigger: 100,
+  counterTtlSec:    60 * 60,
+  blockCountTtlSec: 24 * 60 * 60,
+};
+
+// ── helpers ─────────────────────────────────────────────
+const formatTtlMessage = (ttlSeconds) => {
+  if (!ttlSeconds || ttlSeconds <= 0) return 'Please try again later.';
+
+  const hours   = Math.floor(ttlSeconds / 3600);
+  const minutes = Math.ceil((ttlSeconds % 3600) / 60);
+
+  if (hours > 0 && minutes > 0) {
+    return `Your account is locked. Please try again in ${hours} hour${hours > 1 ? 's' : ''} and ${minutes} minute${minutes > 1 ? 's' : ''}.`;
+  }
+  if (hours > 0) {
+    return `Your account is locked. Please try again in ${hours} hour${hours > 1 ? 's' : ''}.`;
+  }
+  return `Your account is locked. Please try again in ${minutes} minute${minutes > 1 ? 's' : ''}.`;
+};
+
+const formatLockResponse = (type, ttlSeconds) => {
+  const hours   = Math.floor(ttlSeconds / 3600);
+  const minutes = Math.ceil((ttlSeconds % 3600) / 60);
+
+  let timeStr = '';
+  if (hours > 0 && minutes > 0) {
+    timeStr = `${hours} hour${hours > 1 ? 's' : ''} and ${minutes} minute${minutes > 1 ? 's' : ''}`;
+  } else if (hours > 0) {
+    timeStr = `${hours} hour${hours > 1 ? 's' : ''}`;
+  } else {
+    timeStr = `${minutes} minute${minutes > 1 ? 's' : ''}`;
+  }
+
+  if (type === 'ip') {
+    return {
+      error: 'Your IP has been temporarily blocked due to too many failed attempts.',
+      retryAfter: ttlSeconds,
+      retryAfterMinutes: Math.ceil(ttlSeconds / 60),
+      message: `Access from your IP is blocked. Please try again in ${timeStr}.`,
+    };
+  }
+
+  return {
+    error: 'Your account has been temporarily locked due to too many failed login attempts.',
+    retryAfter: ttlSeconds,
+    retryAfterMinutes: Math.ceil(ttlSeconds / 60),
+    message: `Please try again in ${timeStr}.`,
+  };
+};
+
+// ── middleware ───────────────────────────────────────────
 const loginRateLimiter = async (req, res, next) => {
   const { email } = req.body;
   const ip = req.ip;
-  
+
   if (!email) return next();
 
-  const userKey = `rate:user:${email}`;
-  const ipKey = `rate:ip:${ip}`;
-  const blockKey = `block:${ip}`;  // เปลี่ยนจาก blocked เป็น block เพื่อให้สอดคล้อง
-  const waitKey = `wait:${email}`; // เพิ่มคีย์สำหรับรอ
+  const userKey  = `rate:user:${email}`;
+  const ipKey    = `rate:ip:${ip}`;
+  const blockKey = `block:${ip}`;
+  const waitKey  = `wait:${email}`;
 
   try {
-    // 1. เช็คว่าถูกบล็อกหรือไม่
-    const blocked = await redisClient.get(blockKey);
+    const pipeline = redisClient.pipeline();
+    pipeline.get(blockKey);
+    pipeline.ttl(blockKey);
+    pipeline.get(waitKey);
+    pipeline.ttl(waitKey);
+    pipeline.get(userKey);
+    pipeline.get(ipKey);
+
+    const results = await pipeline.exec();
+    const [
+      [, blocked],  [, blockTtl],
+      [, waiting],  [, waitTtl],
+      [, userVal],  [, ipVal],
+    ] = results;
+
+    // 1. IP hard block
     if (blocked) {
-      const ttl = await redisClient.ttl(blockKey);
-      return res.status(429).json({ 
-        error: 'Account temporarily locked. Too many failed attempts.',
-        retryAfter: ttl,
-        message: `Please try again in ${Math.ceil(ttl / 60)} minutes`
-      });
+      let ttl = blockTtl;
+      if (ttl < 0) {
+        await redisClient.expire(blockKey, RATE_LIMIT.hardBlockSec);
+        ttl = RATE_LIMIT.hardBlockSec;
+        logger.warn(`Fixed missing TTL on blockKey for ${ip}`);
+      }
+      return res.status(429).json(formatLockResponse('ip', ttl));
     }
 
-    // 2. เช็คว่าต้องรอหรือไม่ (กรณีเกิน limit แล้ว)
-    const waitTime = await redisClient.get(waitKey);
-    if (waitTime) {
-      const ttl = await redisClient.ttl(waitKey);
-      return res.status(429).json({
-        error: 'Too many attempts. Please wait before trying again.',
-        retryAfter: ttl,
-        message: `Please try again in ${ttl} seconds`
-      });
+    // 2. Email soft lock
+    if (waiting) {
+      let ttl = waitTtl;
+      if (ttl < 0) {
+        await redisClient.expire(waitKey, RATE_LIMIT.softLockSec);
+        ttl = RATE_LIMIT.softLockSec;
+        logger.warn(`Fixed missing TTL on waitKey for ${email}`);
+      }
+      return res.status(429).json(formatLockResponse('email', ttl));
     }
 
-    // 3. ดึงค่า attempts ปัจจุบัน
-    const [userAttempts, ipAttempts] = await Promise.all([
-      redisClient.get(userKey),
-      redisClient.get(ipKey)
-    ]);
+    // 3. เช็ค attempt count
+    const userCount = parseInt(userVal) || 0;
+    const ipCount   = parseInt(ipVal)   || 0;
 
-    const userCount = parseInt(userAttempts) || 0;
-    const ipCount = parseInt(ipAttempts) || 0;
+    logger.debug(`Login attempt: ${email} from ${ip} — user: ${userCount}/${RATE_LIMIT.maxUserAttempts}, ip: ${ipCount}/${RATE_LIMIT.maxIpAttempts}`);
 
-    logger.debug(`Login attempt for ${email} from IP ${ip} - User attempts: ${userCount}, IP attempts: ${ipCount}`);
-
-    // 4. เช็คขีดจำกัด
-    if (userCount >= 5 || ipCount >= 20) {
+    if (userCount >= RATE_LIMIT.maxUserAttempts || ipCount >= RATE_LIMIT.maxIpAttempts) {
       logger.warn(`Rate limit exceeded: ${email} from ${ip}`);
-      
-      // ถ้าเกิน limit ให้ตั้งค่ารอ 1 ชั่วโมง
-      await redisClient.setex(waitKey, 3600, '1'); // รอ 1 ชั่วโมง
-      
-      // บล็อก IP ถ้าพยายามมากเกินไป (50+ ครั้ง)
+
+      await redisClient.set(waitKey, '1', 'EX', RATE_LIMIT.softLockSec);
+
       try {
-        const blockCount = await redisClient.incr(`blockcount:${ip}`);
-        if (blockCount === 1) {
-          await redisClient.expire(`blockcount:${ip}`, 86400);
-        }
-        if (blockCount >= 50) {
-          await redisClient.setex(blockKey, 86400, '1'); // บล็อก 24 ชั่วโมง
+        const blockCountKey = `blockcount:${ip}`;
+        const blockCount = await redisClient.incr(blockCountKey);
+        if (blockCount === 1) await redisClient.expire(blockCountKey, RATE_LIMIT.blockCountTtlSec);
+        if (blockCount >= RATE_LIMIT.hardBlockTrigger) {
+          await redisClient.set(blockKey, '1', 'EX', RATE_LIMIT.hardBlockSec);
+          logger.warn(`IP ${ip} hard blocked for 1h (blockcount: ${blockCount})`);
         }
       } catch (blockError) {
-        logger.error('Error blocking IP:', blockError);
+        logger.error('Error updating block count:', blockError);
       }
 
-      return res.status(429).json({ 
-        error: 'Too many attempts. Please try again later.',
-        retryAfter: 3600,
-        message: 'Your account has been temporarily locked for 1 hour due to too many failed attempts.'
-      });
+      return res.status(429).json(formatLockResponse('email', RATE_LIMIT.softLockSec));
+    }
+
+    // แจ้งเตือนล่วงหน้าเมื่อใกล้ถึง limit
+    const attemptsLeft = RATE_LIMIT.maxUserAttempts - userCount;
+    if (attemptsLeft <= 3) {
+      res.setHeader('X-RateLimit-Warning', `${attemptsLeft} attempt${attemptsLeft > 1 ? 's' : ''} remaining before account lockout`);
     }
 
     next();
@@ -81,35 +147,30 @@ const loginRateLimiter = async (req, res, next) => {
   }
 };
 
-// 2. Helper สำหรับบันทึกเมื่อ Login พลาด
+// ── record / clear ───────────────────────────────────────
 const recordFailedAttempt = async (email, ip) => {
   try {
-    logger.debug(`Recording failed login for ${email} from IP ${ip}`);
-    
     const userKey = `rate:user:${email}`;
-    const ipKey = `rate:ip:${ip}`;
+    const ipKey   = `rate:ip:${ip}`;
+    const waitKey = `wait:${email}`;
 
-    const pipeline = redisClient.pipeline();
-    pipeline.incr(userKey);
-    pipeline.expire(userKey, 3600);
-    pipeline.incr(ipKey);
-    pipeline.expire(ipKey, 3600);
-    
-    const results = await pipeline.exec();
-    
-    const userAttempts = results[0][1];
-    const ipAttempts = results[2][1];
+    const userAttempts = await redisClient.incr(userKey);
+    if (userAttempts === 1) await redisClient.expire(userKey, RATE_LIMIT.counterTtlSec);
 
-    // ถ้าถึง limit ให้ตั้งค่ารอทันที
-    if (userAttempts >= 5 || ipAttempts >= 20) {
-      const waitKey = `wait:${email}`;
-      await redisClient.setex(waitKey, 3600, '1');
-      logger.warn(`Rate limit triggered for ${email} - setting wait period`);
+    const ipAttempts = await redisClient.incr(ipKey);
+    if (ipAttempts === 1) await redisClient.expire(ipKey, RATE_LIMIT.counterTtlSec);
+
+    if (userAttempts >= RATE_LIMIT.maxUserAttempts || ipAttempts >= RATE_LIMIT.maxIpAttempts) {
+      await redisClient.set(waitKey, '1', 'EX', RATE_LIMIT.softLockSec);
+      logger.warn(`Wait period set for ${email}`);
     }
 
-    logger.info(`Failed login recorded: ${email} [${ip}] - User: ${userAttempts}, IP: ${ipAttempts}`);
-    await debugRedisKeys(email, ip);
-    
+    logger.info(`Failed login: ${email} [${ip}] — user: ${userAttempts}, ip: ${ipAttempts}`);
+
+    if (process.env.NODE_ENV === 'development') {
+      await debugRedisKeys(email, ip);
+    }
+
     return { userAttempts, ipAttempts };
   } catch (error) {
     logger.error('Record failed attempt error:', error);
@@ -117,60 +178,64 @@ const recordFailedAttempt = async (email, ip) => {
   }
 };
 
-// 3. Helper สำหรับล้างเมื่อ Login สำเร็จ
 const clearFailedAttempts = async (email, ip) => {
   try {
-    // ต้องล้างทั้ง attempts และ wait key
     await redisClient.del(
-      `rate:user:${email}`, 
+      `rate:user:${email}`,
       `rate:ip:${ip}`,
-      `wait:${email}`  // ล้าง wait key ด้วย
+      `wait:${email}`
     );
-    
-    logger.info(`Cleared all rate limit data for ${email} from ${ip}`);
-    await debugRedisKeys(email, ip);
+    logger.info(`Cleared rate limit data for ${email} from ${ip}`);
+
+    if (process.env.NODE_ENV === 'development') {
+      await debugRedisKeys(email, ip);
+    }
   } catch (error) {
     logger.error('Clear failed attempts error:', error);
   }
 };
 
-// 4. Debug function
+// ── debug ────────────────────────────────────────────────
 const debugRedisKeys = async (email, ip) => {
   try {
-    const userKey = `rate:user:${email}`;
-    const ipKey = `rate:ip:${ip}`;
-    const blockKey = `block:${ip}`;
-    const blockCountKey = `blockcount:${ip}`;
-    const waitKey = `wait:${email}`;
-    
+    const keys = {
+      user:       `rate:user:${email}`,
+      ip:         `rate:ip:${ip}`,
+      block:      `block:${ip}`,
+      blockCount: `blockcount:${ip}`,
+      wait:       `wait:${email}`,
+    };
+
     const pipeline = redisClient.pipeline();
-    pipeline.get(userKey);
-    pipeline.ttl(userKey);
-    pipeline.get(ipKey);
-    pipeline.ttl(ipKey);
-    pipeline.get(blockKey);
-    pipeline.ttl(blockKey);
-    pipeline.get(blockCountKey);
-    pipeline.get(waitKey);
-    pipeline.ttl(waitKey);
-    
+    pipeline.get(keys.user);
+    pipeline.ttl(keys.user);
+    pipeline.get(keys.ip);
+    pipeline.ttl(keys.ip);
+    pipeline.get(keys.block);
+    pipeline.ttl(keys.block);
+    pipeline.get(keys.blockCount);
+    pipeline.get(keys.wait);
+    pipeline.ttl(keys.wait);
+
     const results = await pipeline.exec();
-    
+    const v = results.map(([err, val]) => (err ? null : val));
+
     console.log('\n=== Redis Rate Limit Debug ===');
-    console.log(`User (${userKey}): ${results[0][1] || 0} (TTL: ${results[1][1]}s)`);
-    console.log(`IP (${ipKey}): ${results[2][1] || 0} (TTL: ${results[3][1]}s)`);
-    console.log(`Block: ${results[4][1] || 'No'} (TTL: ${results[5][1]}s)`);
-    console.log(`Block Count: ${results[6][1] || 0}`);
-    console.log(`Wait (${waitKey}): ${results[7][1] || 'No'} (TTL: ${results[8][1]}s)`);
+    console.log(`User       : ${v[0] || 0} (TTL: ${v[1]}s)`);
+    console.log(`IP         : ${v[2] || 0} (TTL: ${v[3]}s)`);
+    console.log(`Block      : ${v[4] || 'No'} (TTL: ${v[5]}s)`);
+    console.log(`Block Count: ${v[6] || 0}`);
+    console.log(`Wait       : ${v[7] || 'No'} (TTL: ${v[8]}s)`);
     console.log('==============================\n');
   } catch (error) {
     console.error('Debug error:', error.message);
   }
 };
 
-module.exports = { 
-  loginRateLimiter, 
-  recordFailedAttempt, 
+// ── exports ──────────────────────────────────────────────
+module.exports = {
+  loginRateLimiter,
+  recordFailedAttempt,
   clearFailedAttempts,
-  debugRedisKeys 
+  debugRedisKeys,
 };

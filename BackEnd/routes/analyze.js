@@ -1,13 +1,14 @@
 const express = require('express');
 const router = express.Router();
-const amqplib = require('amqplib');
-const QUEUES = require('../services/rabbitmq/queues');
-const queueService = require('../services/queueService');
-// ── constants ──────────────────────────────────────────
-const MAX_BATCH_SIZE = 1000; // hard cap per request
-const REQUIRED_FIELDS = ['videoId', 'eventType'];
+const crypto = require('crypto'); // ✅ เพิ่ม crypto
+const kafkaService = require('../services/kafkaService');
 
-// ── validation ─────────────────────────────────────────
+// สมมติว่ามีไฟล์เก็บชื่อ Topic ไว้
+const TOPICS = { VIDEO_LOGS: process.env.KAFKA_TOPIC || 'video-logs' };
+
+const MAX_BATCH_SIZE = 1000;
+const REQUIRED_FIELDS = ['videoId', 'eventType']; // ตามโค้ดเดิมของคุณ (eventType แบบ camelCase)
+
 function validateEvent(event) {
   for (const field of REQUIRED_FIELDS) {
     if (!event[field]) return `Missing field: ${field}`;
@@ -16,28 +17,17 @@ function validateEvent(event) {
   return null;
 }
 
-// ── route ──────────────────────────────────────────────
-// POST /analytics/video
-// Body: { events: [...] }   (batch)
-//   or: { ...singleEvent }  (compat)
 router.post('/analytics/video', async (req, res) => {
   try {
-    // normalise: single event หรือ batch เข้าด้วยกัน
-    let events = Array.isArray(req.body.events)
-      ? req.body.events
-      : [req.body];
+    let events = Array.isArray(req.body.events) ? req.body.events : [req.body];
 
     if (events.length === 0) {
       return res.status(400).json({ error: 'No events provided' });
     }
-
     if (events.length > MAX_BATCH_SIZE) {
-      return res.status(400).json({
-        error: `Batch too large. Max ${MAX_BATCH_SIZE} events per request`,
-      });
+      return res.status(400).json({ error: `Batch too large. Max ${MAX_BATCH_SIZE}` });
     }
 
-    // validate + enrich ทุก event ก่อน queue
     const valid = [];
     const invalid = [];
 
@@ -48,16 +38,22 @@ router.post('/analytics/video', async (req, res) => {
       } else {
         valid.push({
           ...events[i],
-          // server-side timestamp (ไม่เชื่อ client clock)
+          // ✅ สร้าง event_id ทันที เพื่อรับประกันว่าถ้า Kafka retry ID จะไม่เปลี่ยน
+          event_id: events[i].event_id || crypto.randomUUID(),
           receivedAt: new Date().toISOString(),
         });
       }
     }
 
-    // FIX: ส่ง batch เดียวเข้า RabbitMQ แทน loop N ครั้ง
-    // → 1 round-trip แทน N round-trips
     if (valid.length > 0) {
-      await queueService.sendToQueue(QUEUES.VIDEO_LOGS, valid);
+      // ✅ แปลงเป็น Format ของ Kafka
+      const kafkaMessages = valid.map(event => ({
+        // ใช้ sessionId เป็นคีย์หลัก เพื่อให้ event ของ session เดียวกันลง Partition เดียวกัน (รักษาลำดับ)
+        key: event.sessionId || event.userId || event.videoId || 'unknown',
+        value: JSON.stringify(event)
+      }));
+
+      await kafkaService.sendBatch(TOPICS.VIDEO_LOGS, kafkaMessages);
     }
 
     return res.status(202).json({

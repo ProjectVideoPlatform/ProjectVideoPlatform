@@ -103,21 +103,21 @@ services:
     env_file:
       - ./BackEnd/.env
     environment:
-        - NODE_ENV=production
-        # - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672  <-- ลบออก
-        - KAFKA_BROKERS=kafka:9092                         # <-- เพิ่มบรรทัดนี้
-        - CLICKHOUSE_HOST=clickhouse
-        - CLICKHOUSE_PORT=8123
-        - CLICKHOUSE_USER=app_user
-        - CLICKHOUSE_PASSWORD=strong_password
-        - CLICKHOUSE_DB=app_db
+      - NODE_ENV=production
+      - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672
+      - CLICKHOUSE_HOST=clickhouse
+      - CLICKHOUSE_PORT=8123
+      - CLICKHOUSE_USER=app_user
+      - CLICKHOUSE_PASSWORD=strong_password
+      - CLICKHOUSE_DB=app_db
     networks:
-        - secure-video-network
+      - secure-video-network
     depends_on:
-        kafka:                                             # <-- เปลี่ยนจาก rabbitmq
-          condition: service_healthy
-        clickhouse:
-          condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+
   # Main Node.js API (Producer)
   app:
     build:
@@ -133,7 +133,6 @@ services:
       - NODE_ENV=production
       - PORT=3000
       - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672
-      - KAFKA_BROKERS=kafka:9092
     volumes:
       - ./BackEnd/keys:/app/keys:ro
       - ./BackEnd/vault/certs:/app/vault-certs:ro
@@ -146,8 +145,6 @@ services:
       redis:
         condition: service_healthy
       rabbitmq:
-        condition: service_healthy
-      kafka:                                             # <-- เพิ่มบรรทัดนี้
         condition: service_healthy
     user: "1001:1001"
     read_only: true
@@ -261,35 +258,29 @@ services:
       retries: 3
 # Kafka Message Broker (KRaft Mode)
   kafka:
-      image: apache/kafka:latest   # <-- เปลี่ยนมาใช้ Official Apache Image
-      container_name: secure-video-kafka
-      restart: unless-stopped
-      ports:
-        - "9092:9092"
-      environment:
-        # ลบ prefix KAFKA_CFG_ ออกทั้งหมด
-        KAFKA_NODE_ID: 1
-        KAFKA_PROCESS_ROLES: broker,controller
-        KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
-        KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
-        KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
-        KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
-        KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
-        KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
-        # เพิ่มค่า CLUSTER_ID จำเป็นสำหรับ KRaft Mode ของ Apache
-        CLUSTER_ID: 'secure-video-kafka-cluster' 
-        KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
-      networks:
-        - secure-video-network
-      volumes:
-        # ปรับ path เก็บข้อมูลให้ตรงกับโครงสร้างของ Apache image
-        - kafka_data:/var/lib/kafka/data
-      healthcheck:
-        # ปรับ path ของ script ตรวจสอบ healthcheck
-        test: ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list"]
-        interval: 10s
-        timeout: 5s
-        retries: 5
+    image: bitnami/kafka:3.5
+    container_name: secure-video-kafka
+    restart: unless-stopped
+    ports:
+      - "9092:9092"
+    environment:
+      - KAFKA_CFG_NODE_ID=1
+      - KAFKA_CFG_PROCESS_ROLES=broker,controller
+      - KAFKA_CFG_CONTROLLER_QUORUM_VOTERS=1@kafka:9093
+      - KAFKA_CFG_LISTENERS=PLAINTEXT://:9092,CONTROLLER://:9093
+      - KAFKA_CFG_ADVERTISED_LISTENERS=PLAINTEXT://kafka:9092
+      - KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP=CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      - KAFKA_CFG_CONTROLLER_LISTENER_NAMES=CONTROLLER
+      - KAFKA_CFG_INTER_BROKER_LISTENER_NAME=PLAINTEXT
+    networks:
+      - secure-video-network
+    volumes:
+      - kafka_data:/bitnami/kafka
+    healthcheck:
+      test: ["CMD", "kafka-topics.sh", "--bootstrap-server=localhost:9092", "--list"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
   # Nginx
   nginx:
     image: nginx:1.25-alpine
@@ -453,4 +444,3 @@ volumes:
   grafana_data:
   clickhouse_data:
   loki-storage: # ประกาศชื่อ Volume ไว้ที่นี่
-  kafka_data:

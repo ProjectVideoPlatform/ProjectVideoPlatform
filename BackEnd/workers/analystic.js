@@ -1,303 +1,237 @@
 'use strict';
 
-const amqp = require('amqplib');
+const { Kafka } = require('kafkajs');
 const { createClient } = require('@clickhouse/client');
-const config = require('../config/rabbitmq');
-const QUEUES = require('../services/rabbitmq/queues');
+const crypto = require('crypto'); // เปลี่ยนจาก randomUUID เป็นใช้งาน crypto แบบเต็ม
+const redisClient = require('../config/redis');
 
-// ── ClickHouse client (singleton) ──────────────────────
 const clickhouse = createClient({
-  url: process.env.CLICKHOUSE_URL || 'http://clickhouse_db:8123',
-  username: process.env.CLICKHOUSE_USER || 'app_user',
-  password: process.env.CLICKHOUSE_PASS || 'strong_password',
-  database: process.env.CLICKHOUSE_DB || 'app_db',
-  clickhouse_settings: {
-    async_insert: 1,
-    wait_for_async_insert: 0, // fire-and-forget async insert
-  },
-  compression: { request: true },
-  request_timeout: 10_000,
-  keep_alive: { enabled: true },
+  url:     'http://clickhouse:8123',
+  username: process.env.CLICKHOUSE_USER     || 'app_user',
+  password: process.env.CLICKHOUSE_PASSWORD || 'strong_password',
+  database: process.env.CLICKHOUSE_DB       || 'app_db',
 });
 
-// ── helpers ────────────────────────────────────────────
-function toClickhouseTimestamp(raw) {
-  // รับได้ทั้ง ISO string, unix ms, undefined
-  const d = raw ? new Date(raw) : new Date();
-  if (isNaN(d.getTime())) return new Date().toISOString().slice(0, 19).replace('T', ' ');
-  return d.toISOString().slice(0, 19).replace('T', ' ');
+const DEDUPE_TTL_SEC = 60 * 60 * 24;
+
+async function filterNewEvents(eventIds) {
+  if (eventIds.length === 0) return new Set();
+  const pipeline = redisClient.pipeline();
+  for (const id of eventIds) {
+    pipeline.set(`dedupe:event:${id}`, '1', 'EX', DEDUPE_TTL_SEC, 'NX');
+  }
+  const results = await pipeline.exec();
+  const newIds = new Set();
+  results.forEach(([err, result], index) => {
+    if (!err && result === 'OK') newIds.add(eventIds[index]);
+  });
+  return newIds;
 }
 
-// แทนที่ mapToRow เดิม
+function validateMessage(payload) {
+  if (!payload || typeof payload !== 'object') throw new Error('Payload is not JSON object');
+  // สังเกตว่าฝั่ง Express ส่งมาเป็น eventType (camelCase) ต้อง map ให้ดี
+  if (!payload.videoId || (!payload.eventType && !payload.event_type)) {
+    throw new Error('Missing required fields');
+  }
+  return true;
+}
+
+function toClickhouseTimestamp(raw) {
+  return new Date(raw || Date.now()).toISOString().replace('T', ' ').substring(0, 19);
+}
+
+// 👉 อย่าลืมใส่บรรทัดนี้ไว้บนสุดของไฟล์ (ถ้ายังไม่มี)
+
+
 function mapToRow(data) {
+  // 1. ดัก Type ให้ถูกต้อง (รองรับทั้ง key แบบใหม่และแบบเก่า)
   const VALID_TYPES = new Set([
     'play', 'watch', 'pause', 'seek', 'completed', 'close', 'error',
   ]);
+  const eventType = String(data.eventType || data.event_type || 'unknown');
 
-  const eventType = String(data.eventType || 'unknown');
-
-  // กรอง event type ที่ไม่รู้จัก → throw ให้ caller ส่ง DLQ
   if (!VALID_TYPES.has(eventType)) {
     throw new Error(`Invalid eventType: "${eventType}"`);
   }
 
+  // 2. ต้องประกาศตัวแปร fallbackId ก่อน return เสมอ (ไม่งั้น Error)
+  const fallbackId = crypto
+    .createHash('md5')
+    .update(`${data.videoId || data.video_id || ''}_${data.userId || data.user_id || ''}_${eventType}_${data.currentTime || data.current_time_seconds || 0}_${data.timestamp || data.event_time || Date.now()}`)
+    .digest('hex');
+
+  // 3. Return ค่าโดยดักจับ (Fallback) ทั้งชื่อตัวแปรเก่าและใหม่
   return {
-    video_id:               String(data.videoId  || ''),
-    user_id:                String(data.userId   || 'anonymous'),
-    session_id:             String(data.sessionId || ''),
+    event_id:               String(data.eventId || data.event_id || fallbackId),
+    video_id:               String(data.videoId || data.video_id || ''),
+    user_id:                String(data.userId  || data.user_id  || 'anonymous'),
+    session_id:             String(data.sessionId || data.session_id || ''),
     event_type:             eventType,
 
-    // FIX: อ่าน duration ถูก field — VideoTracker ส่งมาเป็น "duration" ไม่ใช่ "watch_duration_seconds"
-    watch_duration_seconds: Math.max(0, Math.round(Number(data.duration || 0))),
-    total_watch_seconds:    Math.max(0, Math.round(Number(data.totalWatchTime || 0))),
-    current_time_seconds:   Math.max(0, Math.round(Number(data.currentTime || 0))),
+    // รองรับทั้ง data.duration (ใหม่) และ data.watch_duration_seconds (เก่า)
+    watch_duration_seconds: Math.max(0, Math.round(Number(data.duration || data.watch_duration_seconds || 0))),
+    total_watch_seconds:    Math.max(0, Math.round(Number(data.totalWatchTime || data.total_watch_seconds || 0))),
+    current_time_seconds:   Math.max(0, Math.round(Number(data.currentTime || data.current_time_seconds || 0))),
 
-    device_type:            String(data.device   || 'desktop'),
-    country_code:           String(data.country  || 'TH'),
-    event_time:             toClickhouseTimestamp(data.timestamp || data.receivedAt),
+    device_type:            String(data.device  || data.device_type || 'unknown'),
+    country_code:           String(data.country || data.country_code || 'unknown'),
+    event_time:             toClickhouseTimestamp(data.timestamp || data.event_time || data.receivedAt),
   };
 }
-
-// ── worker ─────────────────────────────────────────────
-class ClickHouseWorker {
+class ClickHouseKafkaWorker {
   constructor() {
-    this.BATCH_LIMIT      = Number(process.env.CH_BATCH_LIMIT)    || 500;
-    this.FLUSH_INTERVAL   = Number(process.env.CH_FLUSH_INTERVAL) || 5_000;
-    this.MIN_FLUSH_SIZE   = Number(process.env.CH_MIN_FLUSH)      || 10;
-    this.MAX_RETRIES      = 3;
+    this.MAX_RETRIES  = 3;
+    this.BATCH_SIZE   = parseInt(process.env.BATCH_SIZE || '1000', 10);
+    this.TOPIC        = process.env.KAFKA_TOPIC     || 'video-logs';
+    this.DLQ_TOPIC    = process.env.KAFKA_DLQ_TOPIC || 'video-logs-dlq';
+    this.isShuttingDown = false;
 
-    this.rowBuffer  = [];  // mapped rows รอ insert
-    this.msgBuffer  = [];  // amqp messages รอ ack/nack (1 ต่อ 1 กับ rowBuffer)
-    this.channel    = null;
-    this.intervalId = null;
-    this.lastFlush  = Date.now();
-    this.stats      = { received: 0, inserted: 0, failed: 0, flushes: 0 };
+    this.kafka = new Kafka({
+      clientId: 'clickhouse-ingester',
+      brokers: (process.env.KAFKA_BROKERS || 'kafka:9092').split(','),
+      retry: { initialRetryTime: 100, retries: 8 },
+    });
 
-    // FIX: ใช้ Promise เป็น mutex แทน boolean — ปลอดภัยใน async/await
-    this._flushPromise = null;
+    this.consumer = this.kafka.consumer({ groupId: 'clickhouse-worker-group', sessionTimeout: 30000 });
+    this.producer = this.kafka.producer();
   }
-
-  // ── lifecycle ─────────────────────────────────────────
 
   async start() {
     try {
-      await this._testConnection();
+      await clickhouse.query({ query: 'SELECT 1', format: 'JSONEachRow' });
+      await this.producer.connect();
+      await this.consumer.connect();
+      await this.consumer.subscribe({ topic: this.TOPIC, fromBeginning: false });
+      console.log(`[Worker] Started consuming ${this.TOPIC}`);
 
-      const connection = await amqp.connect(config.url);
-      this.setupConnectionHandlers(connection);
-
-      this.channel = await connection.createChannel();
-      await this.channel.prefetch(this.BATCH_LIMIT * 2);
-      await this._setupQueue(this.channel);
-      await this._startConsuming(this.channel);
-      this._startIntervalFlush();
-
-      console.log('[ClickHouseWorker] started', {
-        batchLimit: this.BATCH_LIMIT,
-        minFlush: this.MIN_FLUSH_SIZE,
-        flushInterval: this.FLUSH_INTERVAL,
+      await this.consumer.run({
+        partitionsConsumedConcurrently: 1,
+        autoCommit: false,
+        eachBatchAutoResolve: false,
+        eachBatch: async ({ batch, resolveOffset, heartbeat, commitOffsetsIfNecessary, isStale }) => {
+          if (this.isShuttingDown || isStale()) return;
+          await this._processBatch(batch, resolveOffset, heartbeat, commitOffsetsIfNecessary);
+        },
       });
-
-      setInterval(() => {
-        console.log('[stats]', {
-          buffer: this.rowBuffer.length,
-          ...this.stats,
-        });
-      }, 30_000);
-
     } catch (err) {
-      console.error('[ClickHouseWorker] startup failed, retry in 5s:', err.message);
-      setTimeout(() => this.start(), 5_000);
+      console.error('[Worker] Startup failed:', err.message);
+      setTimeout(() => this.start(), 5000);
+    }
+  }
+
+  async _processBatch(batch, resolveOffset, heartbeat, commitOffsetsIfNecessary) {
+    const messages = batch.messages;
+    for (let i = 0; i < messages.length; i += this.BATCH_SIZE) {
+      if (this.isShuttingDown) break;
+      const chunk = messages.slice(i, i + this.BATCH_SIZE);
+      await this._processChunk(chunk, heartbeat);
+
+      const lastMessage = chunk[chunk.length - 1];
+      resolveOffset(lastMessage.offset);
+      await commitOffsetsIfNecessary();
+      await heartbeat();
+    }
+  }
+
+  async _processChunk(chunk, heartbeat) {
+    const candidateRows  = [];  
+    const failedMessages = [];
+
+    // 1. Parse + Validate
+    for (const msg of chunk) {
+      try {
+        const rawValue = msg.value?.toString();
+        if (!rawValue) throw new Error('Empty message value');
+        const payload = JSON.parse(rawValue);
+        const items = Array.isArray(payload) ? payload : [payload];
+
+        for (const item of items) {
+          validateMessage(item);
+          candidateRows.push({ row: mapToRow(item), msg });
+        }
+      } catch (err) {
+        failedMessages.push({
+          key: msg.key || Buffer.from('validation-error'),
+          value: msg.value || Buffer.from(''),
+          headers: { error: err.message, originalOffset: String(msg.offset) },
+        });
+      }
+    }
+
+    // 2. ✅ Redis Dedupe (มี Try-Catch ป้องกันระบบพัง)
+    const eventIds = candidateRows.map(({ row }) => row.event_id);
+    let newEventIds = new Set(eventIds); // ค่าเริ่มต้น: ยอมให้ผ่านหมดถ้า Redis ตาย
+    
+    try {
+      newEventIds = await filterNewEvents(eventIds);
+    } catch (redisErr) {
+      console.error(`[Worker] Redis Dedupe Error: ${redisErr.message}. Bypassing dedupe.`);
+    }
+
+    const rowsToInsert = candidateRows.filter(({ row }) => newEventIds.has(row.event_id));
+
+    // 3. Insert เข้า ClickHouse
+    if (rowsToInsert.length > 0) {
+      let retries = 0, success = false;
+      const insertData = rowsToInsert.map(({ row }) => row);
+
+      while (retries < this.MAX_RETRIES && !success) {
+        try {
+          await clickhouse.insert({
+            table: 'video_watch_events',
+            values: insertData,
+            format: 'JSONEachRow',
+          });
+          success = true;
+        } catch (err) {
+          retries++;
+          if (retries < this.MAX_RETRIES) {
+            await heartbeat();
+            await new Promise(r => setTimeout(r, 1000 * 2 ** (retries - 1)));
+          }
+        }
+      }
+
+      // ✅ FIX: ถ้า Insert พังทั้งหมด ให้โยนลง DLQ เฉพาะตัวที่เราพยายาม Insert (ไม่รวมตัวที่ซ้ำ)
+      if (!success) {
+        console.error(`[Worker] FATAL: Insert failed. Sending to DLQ.`);
+        for (const { msg } of rowsToInsert) {
+          failedMessages.push({
+            key: msg.key || Buffer.from('db-error'),
+            value: msg.value,
+            headers: { error: 'ClickHouse Insert Failed', originalOffset: String(msg.offset) },
+          });
+        }
+      }
+    }
+
+    // 4. DLQ
+    if (failedMessages.length > 0) {
+      try {
+        await this.producer.send({ topic: this.DLQ_TOPIC, messages: failedMessages });
+      } catch (dlqErr) {
+        console.error(`[Worker] CRITICAL: DLQ send failed!`, dlqErr.message);
+      }
     }
   }
 
   async shutdown() {
-    console.log('[ClickHouseWorker] shutting down...');
-
-    // FIX: หยุด interval ก่อน — ป้องกัน flush ซ้อนตอน shutdown
-    if (this.intervalId) {
-      clearInterval(this.intervalId);
-      this.intervalId = null;
-    }
-
-    // flush สิ่งที่เหลืออยู่
-    if (this.rowBuffer.length > 0 && this.channel) {
-      await this._flush();
-    }
-
-    if (this.channel) {
-      await this.channel.close().catch(() => {});
-    }
-
-    console.log('[ClickHouseWorker] final stats:', this.stats);
-    process.exit(0);
-  }
-
-  // ── queue setup ───────────────────────────────────────
-
-  async _testConnection() {
-    await clickhouse.query({ query: 'SELECT 1', format: 'JSONEachRow' }).then(r => r.json());
-    console.log('[ClickHouseWorker] ClickHouse connected');
-  }
-
-  async _setupQueue(ch) {
-    const queueArgs = {
-      durable: true,
-      arguments: {
-        'x-queue-mode': 'lazy',
-        'x-dead-letter-exchange': QUEUES.DLX_EXCHANGE,
-        'x-dead-letter-routing-key': QUEUES.DLX_ANALYTICS_ROUTING_KEY,
-      },
-    };
-
+    if (this.isShuttingDown) return;
+    this.isShuttingDown = true;
     try {
-      await ch.checkQueue(QUEUES.VIDEO_LOGS);
+      await this.consumer.disconnect();
+      await this.producer.disconnect();
+      await clickhouse.close();
+      process.exit(0);
     } catch (err) {
-      if (err.code !== 404) throw err;
-      // queue ยังไม่มี → สร้างใหม่
+      process.exit(1);
     }
-
-    await ch.assertQueue(QUEUES.VIDEO_LOGS, queueArgs);
-    console.log('[ClickHouseWorker] queue ready:', QUEUES.VIDEO_LOGS);
-  }
-
-  // ── consuming ─────────────────────────────────────────
-
-  async _startConsuming(ch) {
-    await ch.consume(QUEUES.VIDEO_LOGS, async (msg) => {
-      if (!msg) return;
-
-      let payload;
-      try {
-        payload = JSON.parse(msg.content.toString());
-      } catch {
-        // JSON เสีย → ส่ง DLQ ทันที ไม่ requeue
-        console.error('[consumer] invalid JSON, sending to DLQ');
-        ch.nack(msg, false, false);
-        return;
-      }
-
-      // normalise: route ส่งมาเป็น array เสมอ
-      // แต่ยังรองรับ legacy single-object ด้วย
-      const items = Array.isArray(payload) ? payload : [payload];
-
-      // FIX: map rows ทั้งหมดก่อน แล้วค่อย push พร้อมกัน
-      // → ack/nack ต่อ 1 AMQP message ถูกต้อง
-      const rows = [];
-      for (const item of items) {
-        try {
-          rows.push(mapToRow(item));
-        } catch (err) {
-          console.error('[consumer] mapToRow failed:', err.message, item);
-          // skip item ที่ map ไม่ได้ แต่ไม่ทิ้ง message ทั้งก้อน
-        }
-      }
-
-      if (rows.length === 0) {
-        // ทุก item ใน message นี้ map ไม่ได้ → DLQ
-        ch.nack(msg, false, false);
-        return;
-      }
-
-      // push rows + 1 msg reference (ไม่ใช่ rows.length references)
-      for (const row of rows) {
-        this.rowBuffer.push(row);
-      }
-      this.msgBuffer.push(msg); // 1 msg ต่อ 1 AMQP message เสมอ
-      this.stats.received += rows.length;
-
-      if (this.rowBuffer.length >= this.BATCH_LIMIT) {
-        // ไม่ต้อง await — flush จะรันใน background ผ่าน mutex
-        this._triggerFlush();
-      }
-    }, { noAck: false });
-  }
-
-  // ── flush ─────────────────────────────────────────────
-
-  _startIntervalFlush() {
-    this.intervalId = setInterval(() => {
-      if (this.rowBuffer.length >= this.MIN_FLUSH_SIZE) {
-        this._triggerFlush();
-      }
-    }, this.FLUSH_INTERVAL);
-  }
-
-  // FIX: mutex ผ่าน Promise chain — ป้องกัน concurrent flush ใน async context
-  _triggerFlush() {
-    if (this._flushPromise) return; // กำลัง flush อยู่ → skip
-    this._flushPromise = this._flush().finally(() => {
-      this._flushPromise = null;
-    });
-  }
-
-  async _flush() {
-    if (this.rowBuffer.length === 0) return;
-
-    // snapshot + clear atomically (single-threaded JS event loop)
-    const rows = this.rowBuffer.splice(0);
-    const msgs = this.msgBuffer.splice(0);
-    this.lastFlush = Date.now();
-
-    let retries = 0;
-    while (retries < this.MAX_RETRIES) {
-      try {
-        await clickhouse.insert({
-          table: 'video_watch_events',
-          values: rows,
-          format: 'JSONEachRow',
-        });
-
-        // ack ทุก message ใน batch นี้
-        for (const msg of msgs) {
-          try { this.channel.ack(msg); } catch { /* channel อาจปิดแล้ว */ }
-        }
-
-        this.stats.inserted += rows.length;
-        this.stats.flushes++;
-        console.log(`[flush #${this.stats.flushes}] inserted ${rows.length} rows`);
-        return;
-
-      } catch (err) {
-        retries++;
-        console.error(`[flush] attempt ${retries}/${this.MAX_RETRIES} failed:`, err.message);
-
-        if (retries < this.MAX_RETRIES) {
-          // exponential backoff: 1s, 2s, 4s
-          await new Promise(r => setTimeout(r, 1_000 * 2 ** (retries - 1)));
-        }
-      }
-    }
-
-    // หมด retry → DLQ (requeue=false)
-    // FIX: ไม่ requeue ถ้า ClickHouse reject ซ้ำ — ป้องกัน infinite loop
-    console.error(`[flush] giving up on ${rows.length} rows after ${this.MAX_RETRIES} retries → DLQ`);
-    this.stats.failed += rows.length;
-
-    for (const msg of msgs) {
-      try { this.channel.nack(msg, false, false); } catch { /* channel อาจปิดแล้ว */ }
-    }
-  }
-
-  // ── connection handlers ───────────────────────────────
-
-  setupConnectionHandlers(connection) {
-    connection.on('close', () => {
-      console.warn('[ClickHouseWorker] RabbitMQ connection closed, reconnecting in 5s...');
-      this.channel = null;
-      setTimeout(() => this.start(), 5_000);
-    });
-    connection.on('error', (err) => {
-      console.error('[ClickHouseWorker] RabbitMQ connection error:', err.message);
-    });
   }
 }
 
-// ── entry point ────────────────────────────────────────
-const worker = new ClickHouseWorker();
+const worker = new ClickHouseKafkaWorker();
 worker.start();
 
 process.on('SIGINT',  () => worker.shutdown());
 process.on('SIGTERM', () => worker.shutdown());
-
-module.exports = ClickHouseWorker;

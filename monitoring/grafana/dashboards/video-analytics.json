@@ -3,7 +3,7 @@
   "timezone": "browser",
   "panels": [
     {
-      "title": "Total Views (Last 30 Days)",
+      "title": "Total Views",
       "type": "stat",
       "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse_ds" },
       "targets": [
@@ -11,10 +11,10 @@
           "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse_ds" },
           "refId": "A",
           "queryType": "sql",
-          "rawSql": "SELECT COUNT(DISTINCT session_id) FROM app_db.video_watch_events WHERE event_time >= now() - INTERVAL 30 DAY"
+          "rawSql": "SELECT uniq(session_id) FROM app_db.video_watch_events WHERE $__timeFilter(event_time)"
         }
       ],
-      "gridPos": { "h": 4, "w": 4, "x": 0, "y": 0 }
+      "gridPos": { "h": 4, "w": 8, "x": 0, "y": 0 }
     },
     {
       "title": "Unique Users",
@@ -25,10 +25,10 @@
           "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse_ds" },
           "refId": "A",
           "queryType": "sql",
-          "rawSql": "SELECT COUNT(DISTINCT user_id) FROM app_db.video_watch_events WHERE event_time >= now() - INTERVAL 30 DAY"
+          "rawSql": "SELECT uniq(user_id) FROM app_db.video_watch_events WHERE $__timeFilter(event_time)"
         }
       ],
-      "gridPos": { "h": 4, "w": 4, "x": 4, "y": 0 }
+      "gridPos": { "h": 4, "w": 8, "x": 8, "y": 0 }
     },
     {
       "title": "Total Watch Time (hours)",
@@ -39,10 +39,10 @@
           "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse_ds" },
           "refId": "A",
           "queryType": "sql",
-          "rawSql": "SELECT ROUND(SUM(watch_duration_seconds)/3600) FROM app_db.video_watch_events WHERE event_time >= now() - INTERVAL 30 DAY AND event_type IN ('completed', 'pause', 'close', 'watch')"
+          "rawSql": "SELECT ROUND(SUM(watch_duration_seconds)/3600) FROM app_db.video_watch_events WHERE $__timeFilter(event_time) AND event_type IN ('completed', 'pause', 'close', 'watch', 'heartbeat')"
         }
       ],
-      "gridPos": { "h": 4, "w": 4, "x": 8, "y": 0 }
+      "gridPos": { "h": 4, "w": 8, "x": 16, "y": 0 }
     },
     {
       "title": "Views Over Time",
@@ -53,7 +53,7 @@
           "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse_ds" },
           "refId": "A",
           "queryType": "sql",
-          "rawSql": "SELECT toStartOfHour(event_time) as time, COUNT(DISTINCT session_id) as views FROM app_db.video_watch_events WHERE $__timeFilter(event_time) GROUP BY time ORDER BY time"
+          "rawSql": "SELECT toStartOfHour(event_time) as time, uniq(session_id) as views FROM app_db.video_watch_events WHERE $__timeFilter(event_time) GROUP BY time ORDER BY time"
         }
       ],
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 }
@@ -67,73 +67,35 @@
           "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse_ds" },
           "refId": "A",
           "queryType": "sql",
-          "rawSql": "SELECT video_id, COUNT(DISTINCT session_id) as views, COUNT(DISTINCT user_id) as unique_users, ROUND(SUM(watch_duration_seconds)/COUNT(DISTINCT session_id)) as avg_duration FROM app_db.video_watch_events WHERE $__timeFilter(event_time) AND event_type IN ('completed', 'pause', 'close', 'watch') GROUP BY video_id ORDER BY views DESC LIMIT 10"
+          "rawSql": "SELECT video_id, uniq(session_id) as views, uniq(user_id) as unique_users, ROUND(AVG(session_watch_time)) as avg_duration FROM (SELECT video_id, session_id, user_id, MAX(total_watch_seconds) as session_watch_time FROM app_db.video_watch_events WHERE $__timeFilter(event_time) GROUP BY video_id, session_id, user_id) GROUP BY video_id ORDER BY views DESC, avg_duration DESC"
         }
       ],
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 }
     },
-  {
-  "title": "Device Distribution",
-  "type": "barchart",
-  "datasource": {
-    "type": "grafana-clickhouse-datasource",
-    "uid": "clickhouse_ds"
-  },
-  "targets": [
     {
-      "datasource": {
-        "type": "grafana-clickhouse-datasource",
-        "uid": "clickhouse_ds"
-      },
-      "refId": "A",
-      "queryType": "sql",
-      "rawSql": "SELECT device_type, COUNT(DISTINCT session_id) as views FROM app_db.video_watch_events WHERE $__timeFilter(event_time) GROUP BY device_type ORDER BY views DESC"
-    }
-  ],
-  "options": {
-    "orientation": "auto",
-    "stacking": "none",
-    "showValue": "always",
-    "barRadius": 0,
-    "barWidth": 0.8,
-    "groupWidth": 0.7,
-    "legend": {
-      "showLegend": true,
-      "displayMode": "list",
-      "placement": "bottom",
-      "calcs": []
-    },
-    "tooltip": {
-      "mode": "single",
-      "sort": "none"
-    },
-    "xTickLabelRotation": 0,
-    "xTickLabelSpacing": 0
-  },
-  "fieldConfig": {
-    "defaults": {
-      "unit": "short",
-      "color": {
-        "mode": "palette-classic"
-      },
-      "custom": {
-        "fillOpacity": 80,
-        "lineWidth": 1,
-        "axisPlacement": "auto",
-        "scaleDistribution": {
-          "type": "linear"
+      "title": "Device Distribution",
+      "type": "barchart",
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse_ds" },
+      "targets": [
+        {
+          "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse_ds" },
+          "refId": "A",
+          "queryType": "sql",
+          "rawSql": "SELECT device_type, uniq(session_id) as views FROM app_db.video_watch_events WHERE $__timeFilter(event_time) GROUP BY device_type ORDER BY views DESC"
         }
-      }
+      ],
+      "options": {
+        "orientation": "auto",
+        "stacking": "none",
+        "showValue": "always",
+        "barRadius": 0,
+        "barWidth": 0.8,
+        "groupWidth": 0.7,
+        "legend": { "showLegend": true, "displayMode": "list", "placement": "bottom" },
+        "tooltip": { "mode": "single", "sort": "none" }
+      },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 12 }
     },
-    "overrides": []
-  },
-  "gridPos": {
-    "h": 8,
-    "w": 8,
-    "x": 0,
-    "y": 12
-  }
-},
     {
       "title": "Country Heatmap",
       "type": "geomap",
@@ -143,12 +105,12 @@
           "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse_ds" },
           "refId": "A",
           "queryType": "sql",
-          "rawSql": "SELECT country_code as code, COUNT(DISTINCT session_id) as views FROM app_db.video_watch_events WHERE $__timeFilter(event_time) GROUP BY country_code"
+          "rawSql": "SELECT country_code as code, uniq(session_id) as views FROM app_db.video_watch_events WHERE $__timeFilter(event_time) GROUP BY country_code"
         }
       ],
-      "gridPos": { "h": 6, "w": 12, "x": 6, "y": 12 }
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 12 }
     },
-      {
+    {
       "title": "Peak Hours",
       "type": "barchart",
       "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse_ds" },
@@ -157,11 +119,30 @@
           "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse_ds" },
           "refId": "A",
           "queryType": "sql",
-          "rawSql": "SELECT toString(toHour(event_time)) as hour, COUNT(DISTINCT session_id) as views FROM app_db.video_watch_events WHERE $__timeFilter(event_time) GROUP BY toHour(event_time) ORDER BY toHour(event_time)"
+          "rawSql": "SELECT toString(toHour(event_time)) as hour, uniq(session_id) as views FROM app_db.video_watch_events WHERE $__timeFilter(event_time) GROUP BY toHour(event_time) ORDER BY toInt32(hour)"
         }
       ],
-      "gridPos": { "h": 6, "w": 6, "x": 18, "y": 12 }
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 12 }
+    },
+    {
+      "title": "Video Drop-off (When users leave)",
+      "type": "barchart",
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse_ds" },
+      "targets": [
+        {
+          "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse_ds" },
+          "refId": "A",
+          "queryType": "sql",
+          "rawSql": "SELECT toString(intDiv(current_time_seconds, 10) * 10) as second_bucket, uniq(session_id) as drop_offs FROM app_db.video_watch_events WHERE $__timeFilter(event_time) AND event_type IN ('stop', 'close') GROUP BY second_bucket ORDER BY toInt32(second_bucket)"
+        }
+      ],
+      "options": {
+        "orientation": "auto",
+        "showValue": "auto",
+        "tooltip": { "mode": "single" },
+        "legend": { "showLegend": false }
+      },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 20 }
     }
-
   ]
 }
