@@ -133,7 +133,7 @@
           "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse_ds" },
           "refId": "A",
           "queryType": "sql",
-          "rawSql": "SELECT toString(intDiv(current_time_seconds, 10) * 10) as second_bucket, uniq(session_id) as drop_offs FROM app_db.video_watch_events WHERE $__timeFilter(event_time) AND event_type IN ('stop', 'close') GROUP BY second_bucket ORDER BY toInt32(second_bucket)"
+          "rawSql": "WITH session_dropoff AS (SELECT session_id, argMax(current_time_seconds, event_time) AS final_dropoff_time FROM app_db.video_watch_events WHERE $__timeFilter(event_time) GROUP BY session_id) SELECT toString(intDiv(final_dropoff_time, 10) * 10) AS second_bucket, COUNT(DISTINCT session_id) AS drop_offs FROM session_dropoff GROUP BY second_bucket ORDER BY toInt32(second_bucket)"
         }
       ],
       "options": {

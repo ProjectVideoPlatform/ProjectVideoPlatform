@@ -53,7 +53,7 @@ const VideoPlayer = ({ manifestUrl, onClose, videoId, userIdRef }) => {
   useEffect(() => {
     if (!manifestUrl || !videoRef.current) return;
     const video = videoRef.current;
-let isEnded = false;
+
     // HLS setup
     if (video.canPlayType('application/vnd.apple.mpegurl')) {
       video.src = manifestUrl;
@@ -65,8 +65,7 @@ let isEnded = false;
     }
 
 
-  const handlePlay = () => {
-      isEnded = false; // รีเซ็ตสถานะเมื่อเริ่มเล่นใหม่
+    const handlePlay = () => {
       segmentStartTime.current = Date.now();
       if (isSeeking) return;
       setIsPlaying(true);
@@ -76,20 +75,22 @@ let isEnded = false;
         duration: 0,
       }));
     };
+
     // VideoPlayer.jsx — handlePause
 const handlePause = () => {
-      // ✅ ถ้าเป็นเพราะ Seek หรือวิดีโอเพิ่งจบไปหมาดๆ ให้ข้ามการยิง Event pause
-      if (isSeeking || isEnded) return;
-      
-      setIsPlaying(false);
-      const elapsed = flushWatchTime();
+  if (isSeeking) return;
+  setIsPlaying(false);
+  const elapsed = flushWatchTime();
 
-      videoAnalytics.trackVideoEvent(makePayload({
-        eventType: 'pause',
-        duration: elapsed,
-        currentTime: video.currentTime,
-      }));
-    };
+  // DEBUG
+
+  videoAnalytics.trackVideoEvent(makePayload({
+    eventType: 'pause',
+    duration: elapsed,
+    currentTime: video.currentTime,
+  }));
+};
+
     const handleSeeking = () => {
       isSeeking = true;
       flushWatchTime();
@@ -110,7 +111,6 @@ const handlePause = () => {
     }, 200);
 
     const handleEnded = () => {
-      isEnded = true; // ✅ เซ็ต flag ว่าจบแล้ว เพื่อให้ดัก pause ได้ทัน
       setIsPlaying(false);
       const elapsed = flushWatchTime();
       videoAnalytics.trackVideoEvent(makePayload({
