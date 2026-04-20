@@ -5,16 +5,11 @@ const VALID_EVENT_TYPES = new Set([
   'play', 'watch', 'watch_chunk', 'pause', 'seek', 'completed', 'close', 'error',
 ]);
 
-const DEDUP_WINDOW_MS     = 300;    // ป้องกัน double-fire ภายใน 300ms
+const DEDUP_WINDOW_MS     = 300;
 const MAX_DEDUP_CACHE     = 200;
-const FLUSH_INTERVAL      = 8_000; // inactivity flush threshold
+const FLUSH_INTERVAL      = 8_000;
 const MAX_BUFFER_SIZE     = 30;
-const ADAPTIVE_BURST_SIZE = 50;    // flush ทันทีถ้า buffer > 50
-
-// ── ลบ WATCH_THROTTLE_MS และ WATCH_PROGRESS_DELTA ออกแล้ว ──
-// YouTube / Netflix philosophy: client ส่ง "honest data" ทุก 10s
-// การ throttle ที่ client = ข้อมูล retention เพี้ยน
-// ให้ ClickHouse Materialized View จัดการ aggregation แทน
+const ADAPTIVE_BURST_SIZE = 50;
 
 // ── helpers ────────────────────────────────────────────
 function getSessionId() {
@@ -51,13 +46,7 @@ class VideoAnalytics {
     this.pendingFlush  = false;
 
     this._dedupCache = new Map();
-
-    // coalescer state — merge watch events เป็น watch_chunk
-    // ไม่ throttle แล้ว แต่ยัง coalesce เพื่อลด row explosion
-    // flush chunk ทันทีเมื่อ: non-watch event มา / buffer stall / tab hidden
     this._watchChunk = null;
-
-    // adaptive buffer state
     this._lastEventAt = 0;
 
     this._init();
@@ -69,17 +58,11 @@ class VideoAnalytics {
     this.currentUserId = id ?? null;
   }
 
-  /**
-   * เรียกจาก VideoPlayer เมื่อ:
-   * - BUFFER_STALLED (HLS buffer หมด — มี gap จริงในการดู)
-   * - tab hidden (user ออกจากหน้า)
-   * การ flush ทำให้ chunk ที่ค้างไม่รวม gap เข้าไป → retention ถูกต้อง
-   */
   forceFlushChunk() {
     this._flushWatchChunk();
   }
 
-trackVideoEvent(data) {
+  trackVideoEvent(data) {
     if (!data?.videoId || !data?.eventType) {
       console.warn('[VideoAnalytics] missing videoId or eventType', data);
       return;
@@ -90,20 +73,20 @@ trackVideoEvent(data) {
       return;
     }
 
-    // ── dedup (300ms window) ────────────────────────────
-    // ✅ เพิ่มเงื่อนไขให้รองรับ watch_chunk ด้วย
-    const timeKey  = (data.eventType === 'watch' || data.eventType === 'watch_chunk')
-      ? Math.floor((data.currentTime ?? 0) / 5) 
-      : Math.round(data.currentTime ?? 0);
-    const dedupKey = `${data.videoId}|${data.eventType}|${timeKey}`;
+    // ── dedup ──────────────────────────────────────────
+    // แก้ไข #1: watch event ใช้ timestamp จริง (wall clock) เป็น key
+    // เดิมใช้ Math.floor(currentTime/5) ทำให้ watch events ที่ต่างช่วงเวลา
+    // แต่ตกใน bucket เดียวกัน ถูก dedup ออกหมด → _watchChunk ไม่มีข้อมูล
+    const dedupKey = data.eventType === 'watch'
+      ? `${data.videoId}|watch|${Math.floor(Date.now() / DEDUP_WINDOW_MS)}`
+      : `${data.videoId}|${data.eventType}|${Math.round(data.currentTime ?? 0)}`;
+
     const now      = Date.now();
     const lastSeen = this._dedupCache.get(dedupKey);
-
     if (lastSeen && now - lastSeen < DEDUP_WINDOW_MS) return;
 
     this._dedupCache.set(dedupKey, now);
     this._cleanDedupCache(now);
-
     this._lastEventAt = now;
 
     // ── build event ────────────────────────────────────
@@ -122,14 +105,10 @@ trackVideoEvent(data) {
       ...(data.errorCode     && { errorCode:     data.errorCode }),
       ...(data.errorMessage  && { errorMessage:  data.errorMessage }),
       ...(data.videoDuration && { videoDuration: Math.round(data.videoDuration) }),
-      
-      // ✅ เพิ่ม VIP List ให้ฟิลด์ Chunk ผ่านเข้าสู่ Buffer ได้!
       ...(typeof data.chunk_start_seconds === 'number' && { chunk_start_seconds: data.chunk_start_seconds }),
       ...(typeof data.chunk_end_seconds   === 'number' && { chunk_end_seconds:   data.chunk_end_seconds }),
-      
-      // ✅ ป้องกัน max_progress เป็น 0 ด้วยการ fallback กลับไปใช้ currentTime
-      max_progress_seconds: typeof data.max_progress_seconds === 'number' 
-        ? data.max_progress_seconds 
+      max_progress_seconds: typeof data.max_progress_seconds === 'number'
+        ? data.max_progress_seconds
         : Math.round(data.currentTime ?? 0),
     };
 
@@ -146,41 +125,50 @@ trackVideoEvent(data) {
 
   // ── private: coalescer ─────────────────────────────────
 
-  _coalesceWatch(event) {
-    // ถ้ารับ watch_chunk สำเร็จรูปมาจาก VideoPlayer (หรือเป็น event อื่น) ให้ข้าม coalescer ไปเลย
-    if (event.eventType !== 'watch') {
-      this._flushWatchChunk();
-      return event;
-    }
+ _coalesceWatch(event) {
+  if (event.eventType !== 'watch') {
+    this._flushWatchChunk();
+    return event;
+  }
 
-    if (!this._watchChunk) {
-      // ก้อนแรกที่เข้ามาของ Chunk นี้
-      this._watchChunk = {
-        ...event,
-        eventType:            'watch_chunk',
-        // ✅ เปลี่ยนชื่อ Field ฝั่ง Coalescer ให้ตรงกับ Database Schema
-        chunk_start_seconds:  Math.max(0, event.currentTime - (event.duration || 0)), 
-        chunk_end_seconds:    event.currentTime,
-        max_progress_seconds: event.currentTime,
-      };
-      return null;
-    }
+  if (!this._watchChunk) {
+    // แก้ไข: ใช้ currentTime - duration แต่ clamp ที่ 0
+    // แล้ว adjust duration ให้ตรงกับ start จริงๆ
+    const rawStart   = event.currentTime - (event.duration || 0);
+    const chunkStart = Math.max(0, rawStart);
+    const realDuration = event.currentTime - chunkStart; // ← duration จริงหลัง clamp
 
-    // merge — อัปเดตด้วยชื่อ Field ใหม่
-    this._watchChunk.chunk_end_seconds    = event.currentTime;
-    this._watchChunk.max_progress_seconds = Math.max(this._watchChunk.max_progress_seconds || 0, event.currentTime);
-    this._watchChunk.duration             = (this._watchChunk.duration || 0) + (event.duration || 0);
-    this._watchChunk.totalWatchTime       = event.totalWatchTime || this._watchChunk.totalWatchTime;
-    this._watchChunk.timestamp            = event.timestamp; 
-
+    this._watchChunk = {
+      ...event,
+      eventType:            'watch_chunk',
+      chunk_start_seconds:  chunkStart,
+      chunk_end_seconds:    event.currentTime,
+      max_progress_seconds: event.currentTime,
+      duration:             realDuration, // ← ใช้ค่าจริง ไม่ใช่ interval
+    };
     return null;
   }
 
+  // merge ส่วนนี้เหมือนเดิม
+  this._watchChunk.chunk_end_seconds    = event.currentTime;
+  this._watchChunk.max_progress_seconds = Math.max(
+    this._watchChunk.max_progress_seconds || 0,
+    event.currentTime,
+  );
+  this._watchChunk.duration       = (this._watchChunk.duration || 0) + (event.duration || 0);
+  this._watchChunk.totalWatchTime = event.totalWatchTime || this._watchChunk.totalWatchTime;
+  this._watchChunk.timestamp      = event.timestamp;
+
+  return null;
+}
   _flushWatchChunk() {
     if (!this._watchChunk) return;
 
-    // ✅ เช็คเงื่อนไขทิ้ง Chunk ขยะ ด้วยชื่อ Field ใหม่
-    if (this._watchChunk.chunk_end_seconds <= this._watchChunk.chunk_start_seconds) {
+    const { chunk_start_seconds, chunk_end_seconds } = this._watchChunk;
+
+    // แก้ไข #3: ใช้ threshold เล็กน้อย (0.5s) แทน strict > 0
+    // ป้องกัน floating point ทำให้ chunk ที่ valid ถูกทิ้ง
+    if ((chunk_end_seconds - chunk_start_seconds) < 0.5) {
       this._watchChunk = null;
       return;
     }
@@ -188,10 +176,10 @@ trackVideoEvent(data) {
     this.buffer.push(this._watchChunk);
     this._watchChunk = null;
   }
+
   // ── private: flush ────────────────────────────────────
 
   _init() {
-    // adaptive flush — check ทุก 1 วิ
     setInterval(() => {
       if (this.buffer.length === 0 && !this._watchChunk) return;
       const burstReady    = this.buffer.length > ADAPTIVE_BURST_SIZE;
@@ -201,7 +189,6 @@ trackVideoEvent(data) {
     }, 1_000);
 
     window.addEventListener('beforeunload', () => this._flushSync());
-    // fallback สำหรับ tracker เท่านั้น — VideoPlayer handle visibility ก่อน
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'hidden') this._flushSync();
     });

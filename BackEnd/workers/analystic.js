@@ -77,9 +77,9 @@ function mapToRow(data) {
     // ── watch_chunk fields ─────────────────────────────
     // startTime/endTime/maxProgress มีค่าเฉพาะ event_type = 'watch_chunk'
     // event อื่น default เป็น 0 (ClickHouse schema ต้องรองรับ column นี้)
-    chunk_start_seconds: Math.max(0, Math.round(Number(data.startTime   || 0))),
-    chunk_end_seconds:   Math.max(0, Math.round(Number(data.endTime     || 0))),
-    max_progress_seconds:Math.max(0, Math.round(Number(data.maxProgress || 0))),
+   chunk_start_seconds:  Math.max(0, Number(data.chunk_start_seconds  || 0)),
+chunk_end_seconds:    Math.max(0, Number(data.chunk_end_seconds    || 0)),
+max_progress_seconds: Math.max(0, Number(data.max_progress_seconds || 0)),
 
     device_type:  String(data.device  || data.device_type  || 'unknown'),
     country_code: String(data.country || data.country_code || 'unknown'),
