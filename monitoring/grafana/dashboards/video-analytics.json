@@ -121,54 +121,88 @@
       ],
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 12 }
     },
-   {
-  "title": "Drop-off by Video",
-  "type": "barchart",
-  "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse_ds" },
-  "targets": [
     {
-      "refId": "A",
-      "queryType": "sql",
-      "rawSql": "SELECT toString(intDiv(final_time, 10) * 10) AS second_bucket, COUNT(*) AS drop_offs FROM (SELECT session_id, argMax(current_time_seconds, event_time) AS final_time, max(event_type = 'completed') AS is_completed FROM app_db.video_watch_events WHERE $__timeFilter(event_time) GROUP BY session_id) WHERE is_completed = 0 GROUP BY second_bucket ORDER BY toInt32(second_bucket)"
-    }
-  ],
-  "options": {
-    "orientation": "auto",
-    "xTickLabelRotation": 0,
-    "showValue": "auto",
-    "tooltip": {
-      "mode": "single",
-      "sort": "none"
-    }
-  },
-  "fieldConfig": {
-    "defaults": {
-      "custom": {
-        "lineWidth": 1,
-        "fillOpacity": 80,
-        "gradientMode": "none"
+      "title": "Drop-off by Video",
+      "type": "barchart",
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse_ds" },
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "sql",
+          "rawSql": "SELECT toString(intDiv(total_watched, 10) * 10) AS second_bucket, COUNT(*) AS drop_offs FROM (SELECT session_id, SUM(watch_duration_seconds) AS total_watched, max(event_type = 'completed') AS is_completed FROM app_db.video_watch_events WHERE $__timeFilter(event_time) GROUP BY session_id) WHERE is_completed = 0 GROUP BY second_bucket ORDER BY toInt32(second_bucket)"
+        }
+      ],
+      "options": {
+        "orientation": "auto",
+        "xTickLabelRotation": 0,
+        "showValue": "auto",
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
       },
-      "color": {
-        "mode": "palette-classic"
-      }
-    },
-    "overrides": [
-      {
-        "matcher": {
-          "id": "byName",
-          "options": "second_bucket"
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "lineWidth": 1,
+            "fillOpacity": 80,
+            "gradientMode": "none"
+          },
+          "color": {
+            "mode": "palette-classic"
+          }
         },
-        "properties": [
+        "overrides": [
           {
-            "id": "unit",
-            "value": "s"
+            "matcher": {
+              "id": "byName",
+              "options": "second_bucket"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "s"
+              }
+            ]
           }
         ]
-      }
-    ]
-  },
-  "gridPos": { "h": 9, "w": 12, "x": 0, "y": 0 }
-},
+      },
+      "gridPos": { "h": 9, "w": 12, "x": 0, "y": 20 }
+    },
+    {
+      "title": "📉 Retention Curve (Fast MV)",
+      "type": "barchart",
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse_ds" },
+      "targets": [
+        {
+          "refId": "B",
+          "queryType": "sql",
+          "rawSql": "SELECT bucket_seconds AS second, uniqMerge(viewers) AS viewers FROM app_db.video_retention_mv WHERE event_date >= toDate($__fromTime) AND event_date <= toDate($__toTime) /* ลบ Comment ทิ้งถ้ามี dropdown: AND video_id = '$video_id' */ GROUP BY bucket_seconds ORDER BY bucket_seconds"
+        }
+      ],
+      "options": {
+        "orientation": "auto",
+        "xTickLabelRotation": 0,
+        "showValue": "auto",
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "lineWidth": 1,
+            "fillOpacity": 80,
+            "gradientMode": "none"
+          },
+          "color": {
+            "mode": "palette-classic"
+          }
+        }
+      },
+      "gridPos": { "h": 9, "w": 12, "x": 12, "y": 20 }
+    },
     {
       "title": "⏰ Peak Hours",
       "type": "barchart",
@@ -179,38 +213,38 @@
           "rawSql": "SELECT toString(toHour(event_time)) as hour, uniq(session_id) as views FROM app_db.video_watch_events WHERE $__timeFilter(event_time) AND event_type = 'play' GROUP BY toHour(event_time) ORDER BY toInt32(hour)"
         }
       ],
-      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 20 }
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 29 }
     },
-{
-  "title": "🏆 Video Performance Summary",
-  "type": "table",
-  "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse_ds" },
-  "targets": [
     {
-      "queryType": "sql",
-      "rawSql": "WITH session_stats AS (SELECT video_id, session_id, SUM(watch_duration_seconds) AS session_watch_time_sec, MAX(event_type = 'completed') AS is_completed, MAX(event_type = 'play') AS is_play FROM app_db.video_watch_events WHERE $__timeFilter(event_time) GROUP BY video_id, session_id) SELECT video_id AS Video, COUNT(session_id) AS \"Total Views\", ROUND(AVG(session_watch_time_sec), 0) AS \"Avg Watch Time (s)\", ROUND((SUM(is_completed) / NULLIF(SUM(is_play), 0)) * 100, 1) AS \"Completion Rate (%)\" FROM session_stats GROUP BY video_id ORDER BY \"Total Views\" DESC"
-    }
-  ],
-  "fieldConfig": {
-    "defaults": {
-      "custom": { "align": "center" }
-    },
-    "overrides": [
-      {
-        "matcher": { "id": "byName", "options": "Completion Rate (%)" },
-        "properties": [
-          { "id": "custom.displayMode", "value": "color-background" },
-          { "id": "thresholds", "value": { "mode": "absolute", "steps": [ { "color": "red", "value": null }, { "color": "orange", "value": 30 }, { "color": "green", "value": 70 } ] } },
-          { "id": "unit", "value": "percent" }
+      "title": "🏆 Video Performance Summary",
+      "type": "table",
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse_ds" },
+      "targets": [
+        {
+          "queryType": "sql",
+          "rawSql": "WITH session_stats AS (SELECT video_id, session_id, SUM(watch_duration_seconds) AS session_watch_time_sec, MAX(event_type = 'completed') AS is_completed, MAX(event_type = 'play') AS is_play FROM app_db.video_watch_events WHERE $__timeFilter(event_time) GROUP BY video_id, session_id) SELECT video_id AS Video, COUNT(session_id) AS \"Total Views\", ROUND(AVG(session_watch_time_sec), 0) AS \"Avg Watch Time (s)\", ROUND((SUM(is_completed) / NULLIF(SUM(is_play), 0)) * 100, 1) AS \"Completion Rate (%)\" FROM session_stats GROUP BY video_id ORDER BY \"Total Views\" DESC"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "align": "center" }
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "Completion Rate (%)" },
+            "properties": [
+              { "id": "custom.displayMode", "value": "color-background" },
+              { "id": "thresholds", "value": { "mode": "absolute", "steps": [ { "color": "red", "value": null }, { "color": "orange", "value": 30 }, { "color": "green", "value": 70 } ] } },
+              { "id": "unit", "value": "percent" }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "Avg Watch Time (s)" },
+            "properties": [ { "id": "unit", "value": "s" } ]
+          }
         ]
       },
-      {
-        "matcher": { "id": "byName", "options": "Avg Watch Time (s)" },
-        "properties": [ { "id": "unit", "value": "s" } ]
-      }
-    ]
-  },
-  "gridPos": { "h": 8, "w": 24, "x": 0, "y": 10 }
-}
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 37 }
+    }
   ]
 }

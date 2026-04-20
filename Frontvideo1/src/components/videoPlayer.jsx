@@ -5,7 +5,6 @@ import videoAnalytics from './VideoTracker';
 
 const WATCH_INTERVAL_SECONDS = 10;
 
-// debounce helper — ใช้แทน lodash เพื่อไม่ต้อง import เพิ่ม
 function debounce(fn, ms) {
   let timer;
   return (...args) => {
@@ -23,9 +22,16 @@ const VideoPlayer = ({ manifestUrl, onClose, videoId, userIdRef }) => {
   const totalWatchTime       = useRef(0);
   const lastTrackedVideoTime = useRef(0);
 
-    let isSeeking = false;
-  // FIX: ไม่ต้องการ userIdRef แยกอีกแล้ว — ใช้ที่ส่งมาจาก parent โดยตรง
-  // parent เป็นคนถือ ref → ค่าถูกต้องเสมอ แม้ตอน unmount
+  const isSeekingRef   = useRef(false);
+  const isBufferingRef = useRef(false);
+  const isHiddenRef    = useRef(false);
+  const seekCountRef   = useRef(0);
+  const seekTimerRef   = useRef(null);
+  const prevTimeRef    = useRef(0);
+
+  // ✅ wall clock ref — track ว่ายิง watch event ครั้งล่าสุดเมื่อไหร่
+  // ใช้ Date.now() แทน video position เพื่อให้ยิงทุก 10s จริงๆ
+  const lastWatchTrackedAt = useRef(0);
 
   const flushWatchTime = useCallback(() => {
     if (segmentStartTime.current === null) return 0;
@@ -35,26 +41,23 @@ const VideoPlayer = ({ manifestUrl, onClose, videoId, userIdRef }) => {
     return elapsed;
   }, []);
 
-  // FIX: makePayload ไม่อยู่ใน dependency array ของ useEffect หลัก
-  // แก้ด้วยการใช้ ref เก็บ makePayload แทน useCallback
   const makePayloadRef = useRef(null);
   makePayloadRef.current = (overrides = {}) => ({
     videoId,
-    userId: userIdRef.current,    // อ่านจาก ref ของ parent
+    userId:         userIdRef.current,
     manifestUrl,
-    timestamp: new Date().toISOString(),
+    timestamp:      new Date().toISOString(),
     totalWatchTime: totalWatchTime.current,
     ...overrides,
   });
 
-  // shorthand สำหรับใช้ใน handlers
   const makePayload = (overrides) => makePayloadRef.current(overrides);
 
   useEffect(() => {
     if (!manifestUrl || !videoRef.current) return;
     const video = videoRef.current;
 
-    // HLS setup
+    // ── HLS setup ────────────────────────────────────
     if (video.canPlayType('application/vnd.apple.mpegurl')) {
       video.src = manifestUrl;
     } else if (Hls.isSupported()) {
@@ -62,88 +65,205 @@ const VideoPlayer = ({ manifestUrl, onClose, videoId, userIdRef }) => {
       hlsRef.current = hls;
       hls.loadSource(manifestUrl);
       hls.attachMedia(video);
+
+      hls.on(Hls.Events.BUFFER_STALLED, () => {
+        isBufferingRef.current = true;
+        if (segmentStartTime.current !== null) {
+          const elapsed = Math.round((Date.now() - segmentStartTime.current) / 1000);
+          totalWatchTime.current  += elapsed;
+          segmentStartTime.current = null;
+        }
+        videoAnalytics.forceFlushChunk();
+        // ✅ reset wall clock — ไม่นับช่วง buffer เป็นเวลาดู
+        lastWatchTrackedAt.current = 0;
+      });
+
+      hls.on(Hls.Events.FRAG_BUFFERED, () => {
+        if (!isBufferingRef.current) return;
+        isBufferingRef.current = false;
+        if (!video.paused) {
+          segmentStartTime.current   = Date.now();
+          // ✅ reset wall clock เมื่อ buffer หาย — เริ่มนับใหม่
+          lastWatchTrackedAt.current = Date.now();
+        }
+      });
     }
 
+    // ── Visibility tracking ───────────────────────────
+    const handleVisibility = () => {
+      if (document.visibilityState === 'hidden') {
+        isHiddenRef.current = true;
+        videoAnalytics.forceFlushChunk();
+        // ✅ reset wall clock เมื่อ tab hidden
+        lastWatchTrackedAt.current = 0;
+        const elapsed = flushWatchTime();
+        if (elapsed > 0) {
+          videoAnalytics.trackVideoEvent(makePayload({
+            eventType:   'pause',
+            duration:    elapsed,
+            currentTime: video.currentTime,
+            reason:      'tab_hidden',
+          }));
+        }
+      } else {
+        isHiddenRef.current = false;
+        if (!document.hidden && !video.paused && !isBufferingRef.current) {
+          segmentStartTime.current   = Date.now();
+          // ✅ set wall clock เมื่อ user กลับมา
+          lastWatchTrackedAt.current = Date.now();
+        }
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+
+    // ── Event handlers ───────────────────────────────
 
     const handlePlay = () => {
+      if (isSeekingRef.current || document.hidden) return;
+      isHiddenRef.current      = false;
       segmentStartTime.current = Date.now();
-      if (isSeeking) return;
+      // ✅ เริ่มนับ wall clock ตอน play
+      lastWatchTrackedAt.current = Date.now();
       setIsPlaying(true);
       videoAnalytics.trackVideoEvent(makePayload({
-        eventType: 'play',
+        eventType:   'play',
         currentTime: video.currentTime,
-        duration: 0,
+        duration:    0,
       }));
     };
 
-    // VideoPlayer.jsx — handlePause
-const handlePause = () => {
-  if (isSeeking) return;
-  setIsPlaying(false);
-  const elapsed = flushWatchTime();
-
-  // DEBUG
-
-  videoAnalytics.trackVideoEvent(makePayload({
-    eventType: 'pause',
-    duration: elapsed,
-    currentTime: video.currentTime,
-  }));
-};
+    const handlePause = () => {
+      if (isSeekingRef.current) return;
+      setIsPlaying(false);
+      // ✅ reset wall clock ตอน pause
+      lastWatchTrackedAt.current = 0;
+      const elapsed = flushWatchTime();
+      videoAnalytics.trackVideoEvent(makePayload({
+        eventType:   'pause',
+        duration:    elapsed,
+        currentTime: video.currentTime,
+      }));
+    };
 
     const handleSeeking = () => {
-      isSeeking = true;
+      isSeekingRef.current = true;
+      // ✅ reset wall clock ตอน seek — ไม่งั้น watch event จะยิงทันทีหลัง seek
+      lastWatchTrackedAt.current = 0;
       flushWatchTime();
+
+      seekCountRef.current += 1;
+      clearTimeout(seekTimerRef.current);
+      seekTimerRef.current = setTimeout(() => {
+        seekCountRef.current = 0;
+      }, 1_000);
     };
 
     const handleSeeked = debounce(() => {
+      const isScrubNoise = seekCountRef.current > 3;
       lastTrackedVideoTime.current = video.currentTime;
-      videoAnalytics.trackVideoEvent(makePayload({
-        eventType: 'seek',
-        currentTime: video.currentTime,
-        duration: 0, // <--- เติมบรรทัดนี้ลงไปเพื่อให้ Log สมบูรณ์
-      }));
-      isSeeking = false;
+
+      if (!isScrubNoise) {
+        videoAnalytics.trackVideoEvent(makePayload({
+          eventType:   'seek',
+          currentTime: video.currentTime,
+          duration:    0,
+        }));
+      }
+
+      isSeekingRef.current = false;
       if (!video.paused) {
         segmentStartTime.current = Date.now();
+        // ✅ set wall clock หลัง seek เสร็จ — เริ่มนับใหม่จาก 0
+        lastWatchTrackedAt.current = Date.now();
         setIsPlaying(true);
       }
-    }, 200);
+    }, 300);
 
     const handleEnded = () => {
       setIsPlaying(false);
+      lastWatchTrackedAt.current = 0;
       const elapsed = flushWatchTime();
       videoAnalytics.trackVideoEvent(makePayload({
-        eventType: 'completed',
-        duration: elapsed,
+        eventType:     'completed',
+        duration:      elapsed,
         videoDuration: video.duration,
-        currentTime: video.currentTime,
+        currentTime:   video.currentTime,
       }));
     };
 
     const handleTimeUpdate = () => {
-      if (video.paused || video.ended || isSeeking) return;
+      if (video.paused || video.ended) return;
+      if (isSeekingRef.current) return;
+      if (isHiddenRef.current || document.hidden) return;
+
+      const currentTime = video.currentTime;
+
+      // ── Spike filtering ──────────────────────────────
+      const timeDiff = Math.abs(currentTime - prevTimeRef.current);
+      if (timeDiff > 10 && prevTimeRef.current > 0) {
+        segmentStartTime.current     = Date.now();
+        lastTrackedVideoTime.current = currentTime;
+        prevTimeRef.current          = currentTime;
+        return;
+      }
+      prevTimeRef.current = currentTime;
+
+      // ── Buffering fallback (readyState) ─────────────
+      if (video.readyState < HTMLMediaElement.HAVE_FUTURE_DATA) {
+        if (!isBufferingRef.current) {
+          isBufferingRef.current = true;
+          if (segmentStartTime.current !== null) {
+            const elapsed = Math.round((Date.now() - segmentStartTime.current) / 1000);
+            totalWatchTime.current  += elapsed;
+            segmentStartTime.current = null;
+          }
+          videoAnalytics.forceFlushChunk();
+          lastWatchTrackedAt.current = 0;
+        }
+        return;
+      } else if (isBufferingRef.current) {
+        isBufferingRef.current     = false;
+        segmentStartTime.current   = Date.now();
+        lastWatchTrackedAt.current = Date.now();
+      }
+
       if (segmentStartTime.current === null) {
         segmentStartTime.current = Date.now();
       }
-      const elapsed = video.currentTime - lastTrackedVideoTime.current;
-      if (elapsed >= WATCH_INTERVAL_SECONDS) {
-        lastTrackedVideoTime.current = video.currentTime;
-        videoAnalytics.trackVideoEvent(makePayload({
-          eventType: 'watch',
-          duration: WATCH_INTERVAL_SECONDS,
-          currentTime: video.currentTime,
-        }));
-      }
+
+      // ✅ ใช้ wall clock แทน video position delta
+      // เดิม: elapsed = currentTime - lastTrackedVideoTime (video position)
+      //   → ต้องรอ video เดิน 10s → watch event แรกมาตอน t=10 เสมอ
+      //   → chunk มีแค่ event เดียว → start=end → MV filter ออก
+      // ใหม่: wallElapsed = Date.now() - lastWatchTrackedAt (wall clock)
+      //   → ยิงทุก 10s จริงๆ โดยไม่สนว่า video position อยู่ที่ไหน
+      if (lastWatchTrackedAt.current === 0) return; // ยังไม่ได้ play
+
+      // ในฟังก์ชัน handleTimeUpdate
+const wallElapsed = Date.now() - lastWatchTrackedAt.current;
+if (wallElapsed >= WATCH_INTERVAL_SECONDS * 1000) {
+  
+  // ✅ เพิ่มบรรทัดนี้: หาว่าวิดีโอขยับไปกี่วินาทีแล้วจริงๆ
+  const videoDelta = currentTime - lastTrackedVideoTime.current;
+
+  lastWatchTrackedAt.current   = Date.now();
+  lastTrackedVideoTime.current = currentTime;
+  
+  videoAnalytics.trackVideoEvent(makePayload({
+    eventType:   'watch',
+    duration:    Math.max(0, videoDelta), // ✅ ส่งค่าที่วิดีโอขยับจริง ไม่ใช่ 10 ตายตัว
+    currentTime: currentTime,
+  }));
+}
     };
 
     const handleError = () => {
       const err = video.error;
       videoAnalytics.trackVideoEvent(makePayload({
-        eventType: 'error',
-        errorCode: err?.code,
+        eventType:    'error',
+        errorCode:    err?.code,
         errorMessage: err?.message ?? 'Unknown error',
-        currentTime: video.currentTime,
+        currentTime:  video.currentTime,
       }));
     };
 
@@ -165,11 +285,14 @@ const handlePause = () => {
       video.removeEventListener('ended',      handleEnded);
       video.removeEventListener('timeupdate', handleTimeUpdate);
       video.removeEventListener('error',      handleError);
+      document.removeEventListener('visibilitychange', handleVisibility);
+
+      clearTimeout(seekTimerRef.current);
 
       const elapsed = flushWatchTime();
       videoAnalytics.trackVideoEvent(makePayload({
-        eventType: 'close',
-        duration: elapsed,
+        eventType:   'close',
+        duration:    elapsed,
         currentTime: video.currentTime,
       }));
 
@@ -178,10 +301,7 @@ const handlePause = () => {
         hlsRef.current = null;
       }
     };
-  // FIX: dependency array มีแค่ค่าที่เปลี่ยนจริง
-  // makePayload ออกจาก deps แล้ว เพราะใช้ ref แทน
-  // → useEffect ไม่ re-run เมื่อ parent re-render
-  }, [manifestUrl, videoId,flushWatchTime]);
+  }, [manifestUrl, videoId, flushWatchTime]);
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-90 z-50 flex items-center justify-center">

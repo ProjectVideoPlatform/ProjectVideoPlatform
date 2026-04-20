@@ -13,6 +13,9 @@ CREATE TABLE "app_db".video_watch_events
     country_code           LowCardinality(String),
     event_time             DateTime,
     _inserted_at           DateTime DEFAULT now()
+ chunk_start_seconds  UInt32 DEFAULT 0,
+     chunk_end_seconds    UInt32 DEFAULT 0,
+     max_progress_seconds UInt32 DEFAULT 0;
 )
 ENGINE = ReplacingMergeTree(_inserted_at)
 PARTITION BY toYYYYMM(event_time)
@@ -20,6 +23,36 @@ PARTITION BY toYYYYMM(event_time)
 ORDER BY (video_id, event_time, event_id)
 SETTINGS index_granularity = 8192;
 
--- ✅ TTL ล้างข้อมูลเก่าอัตโนมัติหลัง 3 เดือน
-//ALTER TABLE "app_db".video_watch_events
-//MODIFY TTL event_time + INTERVAL 3 MONTH;
+CREATE TABLE IF NOT EXISTS app_db.video_retention_mv
+(
+    video_id       String,
+    bucket_seconds UInt32,   -- 0, 10, 20, 30, ... (ทุก 10 วิ)
+    viewers        AggregateFunction(uniq, String),  -- unique session_id
+    event_date     Date
+)
+ENGINE = AggregatingMergeTree()
+PARTITION BY event_date
+ORDER BY (video_id, bucket_seconds, event_date);
+
+CREATE MATERIALIZED VIEW IF NOT EXISTS app_db.mv_video_retention
+TO app_db.video_retention_mv
+AS
+SELECT
+    video_id,
+    -- explode chunk range เป็น bucket ทุก 10 วิ
+    -- intDiv(n, 10) * 10 → snap to 10s grid
+    arrayJoin(
+        arrayMap(
+            i -> toUInt32(i * 10),
+            range(
+                toUInt32(intDiv(chunk_start_seconds, 10)),
+                toUInt32(intDiv(chunk_end_seconds,   10) + 1)
+            )
+        )
+    ) AS bucket_seconds,
+    uniqState(session_id) AS viewers,
+    toDate(event_time) AS event_date
+FROM app_db.video_watch_events
+WHERE event_type = 'watch_chunk'
+  AND chunk_end_seconds > chunk_start_seconds  -- ป้องกัน chunk ที่ invalid
+GROUP BY video_id, bucket_seconds, event_date;
