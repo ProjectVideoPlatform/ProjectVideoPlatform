@@ -129,17 +129,14 @@
         {
           "refId": "A",
           "queryType": "sql",
-          "rawSql": "SELECT toString(intDiv(total_watched, 10) * 10) AS second_bucket, COUNT(*) AS drop_offs FROM (SELECT session_id, SUM(watch_duration_seconds) AS total_watched, max(event_type = 'completed') AS is_completed FROM app_db.video_watch_events WHERE $__timeFilter(event_time) GROUP BY session_id) WHERE is_completed = 0 GROUP BY second_bucket ORDER BY toInt32(second_bucket)"
+          "rawSql": "SELECT toString(intDiv(total_watched, 10) * 10) || 's' AS second_bucket, COUNT(*) AS drop_offs FROM (SELECT session_id, SUM(watch_duration_seconds) AS total_watched, max(event_type = 'completed') AS is_completed FROM app_db.video_watch_events WHERE $__timeFilter(event_time) GROUP BY session_id) WHERE is_completed = 0 GROUP BY second_bucket ORDER BY toInt32(replaceAll(second_bucket, 's', '')) ASC"
         }
       ],
       "options": {
         "orientation": "auto",
         "xTickLabelRotation": 0,
         "showValue": "auto",
-        "tooltip": {
-          "mode": "single",
-          "sort": "none"
-        }
+        "tooltip": { "mode": "single", "sort": "none" }
       },
       "fieldConfig": {
         "defaults": {
@@ -148,24 +145,8 @@
             "fillOpacity": 80,
             "gradientMode": "none"
           },
-          "color": {
-            "mode": "palette-classic"
-          }
-        },
-        "overrides": [
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "second_bucket"
-            },
-            "properties": [
-              {
-                "id": "unit",
-                "value": "s"
-              }
-            ]
-          }
-        ]
+          "color": { "mode": "palette-classic" }
+        }
       },
       "gridPos": { "h": 9, "w": 12, "x": 0, "y": 20 }
     },
@@ -177,17 +158,14 @@
         {
           "refId": "B",
           "queryType": "sql",
-          "rawSql": "SELECT bucket_seconds AS second, uniqMerge(viewers) AS viewers FROM app_db.video_retention_mv WHERE event_date >= toDate($__fromTime) AND event_date <= toDate($__toTime) /* ลบ Comment ทิ้งถ้ามี dropdown: AND video_id = '$video_id' */ GROUP BY bucket_seconds ORDER BY bucket_seconds"
+          "rawSql": "SELECT toString(bucket_seconds) || 's' AS bucket_seconds, uniqMerge(viewers) AS viewers FROM app_db.video_retention_mv WHERE event_date >= toDate($__fromTime) AND event_date <= toDate($__toTime) GROUP BY bucket_seconds ORDER BY toInt32(replaceAll(bucket_seconds, 's', '')) ASC"
         }
       ],
       "options": {
         "orientation": "auto",
         "xTickLabelRotation": 0,
         "showValue": "auto",
-        "tooltip": {
-          "mode": "single",
-          "sort": "none"
-        }
+        "tooltip": { "mode": "single", "sort": "none" }
       },
       "fieldConfig": {
         "defaults": {
@@ -196,9 +174,7 @@
             "fillOpacity": 80,
             "gradientMode": "none"
           },
-          "color": {
-            "mode": "palette-classic"
-          }
+          "color": { "mode": "palette-classic" }
         }
       },
       "gridPos": { "h": 9, "w": 12, "x": 12, "y": 20 }
@@ -210,7 +186,7 @@
       "targets": [
         {
           "queryType": "sql",
-          "rawSql": "SELECT toString(toHour(event_time)) as hour, uniq(session_id) as views FROM app_db.video_watch_events WHERE $__timeFilter(event_time) AND event_type = 'play' GROUP BY toHour(event_time) ORDER BY toInt32(hour)"
+          "rawSql": "SELECT toString(toHour(event_time)) || ':00' AS hour, uniq(session_id) as views FROM app_db.video_watch_events WHERE $__timeFilter(event_time) AND event_type = 'play' GROUP BY hour ORDER BY toInt32(replaceAll(hour, ':00', '')) ASC"
         }
       ],
       "gridPos": { "h": 8, "w": 8, "x": 16, "y": 29 }

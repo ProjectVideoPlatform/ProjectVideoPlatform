@@ -79,7 +79,7 @@ class VideoAnalytics {
     this._flushWatchChunk();
   }
 
-  trackVideoEvent(data) {
+trackVideoEvent(data) {
     if (!data?.videoId || !data?.eventType) {
       console.warn('[VideoAnalytics] missing videoId or eventType', data);
       return;
@@ -91,11 +91,11 @@ class VideoAnalytics {
     }
 
     // ── dedup (300ms window) ────────────────────────────
-    // ป้องกัน double-fire จาก timeupdate เท่านั้น ไม่ใช่ throttle
-   const timeKey  = data.eventType === 'watch'
-  ? Math.floor((data.currentTime ?? 0) / 5)  // bucket 5s — ป้องกัน double-fire แต่ไม่ตัด progress ใหม่
-  : Math.round(data.currentTime ?? 0);
-const dedupKey = `${data.videoId}|${data.eventType}|${timeKey}`;
+    // ✅ เพิ่มเงื่อนไขให้รองรับ watch_chunk ด้วย
+    const timeKey  = (data.eventType === 'watch' || data.eventType === 'watch_chunk')
+      ? Math.floor((data.currentTime ?? 0) / 5) 
+      : Math.round(data.currentTime ?? 0);
+    const dedupKey = `${data.videoId}|${data.eventType}|${timeKey}`;
     const now      = Date.now();
     const lastSeen = this._dedupCache.get(dedupKey);
 
@@ -122,11 +122,18 @@ const dedupKey = `${data.videoId}|${data.eventType}|${timeKey}`;
       ...(data.errorCode     && { errorCode:     data.errorCode }),
       ...(data.errorMessage  && { errorMessage:  data.errorMessage }),
       ...(data.videoDuration && { videoDuration: Math.round(data.videoDuration) }),
+      
+      // ✅ เพิ่ม VIP List ให้ฟิลด์ Chunk ผ่านเข้าสู่ Buffer ได้!
+      ...(typeof data.chunk_start_seconds === 'number' && { chunk_start_seconds: data.chunk_start_seconds }),
+      ...(typeof data.chunk_end_seconds   === 'number' && { chunk_end_seconds:   data.chunk_end_seconds }),
+      
+      // ✅ ป้องกัน max_progress เป็น 0 ด้วยการ fallback กลับไปใช้ currentTime
+      max_progress_seconds: typeof data.max_progress_seconds === 'number' 
+        ? data.max_progress_seconds 
+        : Math.round(data.currentTime ?? 0),
     };
 
     // ── coalescer ──────────────────────────────────────
-    // watch → accumulate เป็น chunk (ยังไม่ push buffer)
-    // non-watch → flush chunk ที่ค้าง แล้วส่งตรง
     const coalesced = this._coalesceWatch(event);
     if (coalesced === null) {
       if (this.buffer.length >= MAX_BUFFER_SIZE) this._flush();
@@ -139,9 +146,9 @@ const dedupKey = `${data.videoId}|${data.eventType}|${timeKey}`;
 
   // ── private: coalescer ─────────────────────────────────
 
-_coalesceWatch(event) {
+  _coalesceWatch(event) {
+    // ถ้ารับ watch_chunk สำเร็จรูปมาจาก VideoPlayer (หรือเป็น event อื่น) ให้ข้าม coalescer ไปเลย
     if (event.eventType !== 'watch') {
-      // non-watch มา → flush chunk ก่อน → ไม่รวม gap เข้า chunk
       this._flushWatchChunk();
       return event;
     }
@@ -150,37 +157,37 @@ _coalesceWatch(event) {
       // ก้อนแรกที่เข้ามาของ Chunk นี้
       this._watchChunk = {
         ...event,
-        eventType:   'watch_chunk',
-        // ✅ แก้ไข: คำนวณจุดเริ่มต้น โดยเอา currentTime ถอยหลังกลับไปด้วย duration
-        startTime:   Math.max(0, event.currentTime - (event.duration || 0)), 
-        endTime:     event.currentTime,
-        maxProgress: event.currentTime,
+        eventType:            'watch_chunk',
+        // ✅ เปลี่ยนชื่อ Field ฝั่ง Coalescer ให้ตรงกับ Database Schema
+        chunk_start_seconds:  Math.max(0, event.currentTime - (event.duration || 0)), 
+        chunk_end_seconds:    event.currentTime,
+        max_progress_seconds: event.currentTime,
       };
       return null;
     }
 
-    // merge — สะสม startTime (ไม่เปลี่ยน), อัปเดต endTime/maxProgress/duration ไว้ใน chunk เดียว
-    this._watchChunk.endTime        = event.currentTime;
-    this._watchChunk.maxProgress    = Math.max(this._watchChunk.maxProgress, event.currentTime);
-    this._watchChunk.duration       = (this._watchChunk.duration || 0) + (event.duration || 0);
-    this._watchChunk.totalWatchTime = event.totalWatchTime || this._watchChunk.totalWatchTime;
-    this._watchChunk.timestamp      = event.timestamp; // timestamp ล่าสุดเสมอ
+    // merge — อัปเดตด้วยชื่อ Field ใหม่
+    this._watchChunk.chunk_end_seconds    = event.currentTime;
+    this._watchChunk.max_progress_seconds = Math.max(this._watchChunk.max_progress_seconds || 0, event.currentTime);
+    this._watchChunk.duration             = (this._watchChunk.duration || 0) + (event.duration || 0);
+    this._watchChunk.totalWatchTime       = event.totalWatchTime || this._watchChunk.totalWatchTime;
+    this._watchChunk.timestamp            = event.timestamp; 
 
     return null;
   }
 
-_flushWatchChunk() {
-  if (!this._watchChunk) return;
+  _flushWatchChunk() {
+    if (!this._watchChunk) return;
 
-  // ✅ ทิ้ง chunk ที่ไม่มี range — single event ไม่มีข้อมูล retention จริง
-  if (this._watchChunk.endTime <= this._watchChunk.startTime) {
+    // ✅ เช็คเงื่อนไขทิ้ง Chunk ขยะ ด้วยชื่อ Field ใหม่
+    if (this._watchChunk.chunk_end_seconds <= this._watchChunk.chunk_start_seconds) {
+      this._watchChunk = null;
+      return;
+    }
+
+    this.buffer.push(this._watchChunk);
     this._watchChunk = null;
-    return;
   }
-
-  this.buffer.push(this._watchChunk);
-  this._watchChunk = null;
-}
   // ── private: flush ────────────────────────────────────
 
   _init() {
