@@ -3,12 +3,12 @@ import Hls from 'hls.js';
 import { X, Play } from 'lucide-react';
 import videoAnalytics from './VideoTracker';
 
+// เปลี่ยนจาก const WATCH_INTERVAL_SECONDS = 10; เป็นฟังก์ชันนี้
 const getAdaptiveInterval = (currentTime) => {
-  if (currentTime < 60) return 5;
-  if (currentTime < 300) return 10;
-  return 30;
+  if (currentTime < 60) return 5;      // 1 นาทีแรก: ยิงทุก 5 วินาที (ละเอียดพิเศษ)
+  if (currentTime < 300) return 10;    // 1-5 นาที: ยิงทุก 10 วินาที
+  return 30;                           // 5 นาทีขึ้นไป: ยิงทุก 30 วินาที (ลด Load)
 };
-
 function debounce(fn, ms) {
   let timer;
   return (...args) => {
@@ -33,6 +33,8 @@ const VideoPlayer = ({ manifestUrl, onClose, videoId, userIdRef }) => {
   const seekTimerRef   = useRef(null);
   const prevTimeRef    = useRef(0);
 
+  // ✅ wall clock ref — track ว่ายิง watch event ครั้งล่าสุดเมื่อไหร่
+  // ใช้ Date.now() แทน video position เพื่อให้ยิงทุก 10s จริงๆ
   const lastWatchTrackedAt = useRef(0);
 
   const flushWatchTime = useCallback(() => {
@@ -76,6 +78,7 @@ const VideoPlayer = ({ manifestUrl, onClose, videoId, userIdRef }) => {
           segmentStartTime.current = null;
         }
         videoAnalytics.forceFlushChunk();
+        // ✅ reset wall clock — ไม่นับช่วง buffer เป็นเวลาดู
         lastWatchTrackedAt.current = 0;
       });
 
@@ -84,6 +87,7 @@ const VideoPlayer = ({ manifestUrl, onClose, videoId, userIdRef }) => {
         isBufferingRef.current = false;
         if (!video.paused) {
           segmentStartTime.current   = Date.now();
+          // ✅ reset wall clock เมื่อ buffer หาย — เริ่มนับใหม่
           lastWatchTrackedAt.current = Date.now();
         }
       });
@@ -91,23 +95,24 @@ const VideoPlayer = ({ manifestUrl, onClose, videoId, userIdRef }) => {
 
     // ── Visibility tracking ───────────────────────────
     const handleVisibility = () => {
-      if (document.visibilityState === 'hidden') {
+     if (document.visibilityState === 'hidden') {
         isHiddenRef.current = true;
         videoAnalytics.forceFlushChunk();
         lastWatchTrackedAt.current = 0;
-
-        if (!video.paused) {
-          flushWatchTime();
-          videoAnalytics.trackVideoEvent(makePayload({
-            eventType:   'pause',
-            currentTime: video.currentTime,
-            reason:      'tab_hidden',
-          }));
-        }
+        
+         if (!video.paused) {  // ← เพิ่ม guard
+    flushWatchTime();
+    videoAnalytics.trackVideoEvent(makePayload({
+      eventType:   'pause',
+      currentTime: video.currentTime,
+      reason:      'tab_hidden',
+    }));
+  }
       } else {
         isHiddenRef.current = false;
         if (!document.hidden && !video.paused && !isBufferingRef.current) {
           segmentStartTime.current   = Date.now();
+          // ✅ set wall clock เมื่อ user กลับมา
           lastWatchTrackedAt.current = Date.now();
         }
       }
@@ -118,8 +123,9 @@ const VideoPlayer = ({ manifestUrl, onClose, videoId, userIdRef }) => {
 
     const handlePlay = () => {
       if (isSeekingRef.current || document.hidden) return;
-      isHiddenRef.current        = false;
-      segmentStartTime.current   = Date.now();
+      isHiddenRef.current      = false;
+      segmentStartTime.current = Date.now();
+      // ✅ เริ่มนับ wall clock ตอน play
       lastWatchTrackedAt.current = Date.now();
       setIsPlaying(true);
       videoAnalytics.trackVideoEvent(makePayload({
@@ -129,37 +135,39 @@ const VideoPlayer = ({ manifestUrl, onClose, videoId, userIdRef }) => {
       }));
     };
 
-    const handlePause = () => {
-      if (isSeekingRef.current) return;
-      setIsPlaying(false);
+const handlePause = () => {
+  if (isSeekingRef.current) return;
+  setIsPlaying(false);
+  
+  // ✅ เพิ่ม: เก็บตกวินาทีสุดท้ายก่อนหยุด
+  const finalDelta = videoRef.current.currentTime - lastTrackedVideoTime.current;
+  if (finalDelta > 0.5) { // ถ้าดูเกินครึ่งวิ ค่อยนับ
+    videoAnalytics.trackVideoEvent(makePayload({
+      eventType:   'watch',
+      duration:    Math.round(finalDelta),
+      currentTime: videoRef.current.currentTime,
+    }));
+  }
 
-      // แก้ไข #1: ลบ finalDelta watch event ออก
-      // เดิมทำให้นับเวลาซ้ำซ้อนกับ flushWatchTime() ด้านล่าง
-      // forceFlushChunk() จัดการ flush chunk ที่ค้างอยู่อยู่แล้ว
+  lastWatchTrackedAt.current = 0;
+  lastTrackedVideoTime.current = videoRef.current.currentTime;
+  
+  flushWatchTime(); 
+  videoAnalytics.forceFlushChunk(); // ตอนนี้ท่อจะมีข้อมูลพร้อมคายออกมาแล้ว
 
-      lastWatchTrackedAt.current   = 0;
-      lastTrackedVideoTime.current = video.currentTime;
-
-      flushWatchTime();
-      videoAnalytics.forceFlushChunk();
-
-      videoAnalytics.trackVideoEvent(makePayload({
-        eventType:   'pause',
-        currentTime: video.currentTime,
-      }));
-    };
-
-    const handleSeeking = () => {
+  videoAnalytics.trackVideoEvent(makePayload({
+    eventType:   'pause',
+    currentTime: videoRef.current.currentTime,
+  }));
+};
+  const handleSeeking = () => {
       isSeekingRef.current = true;
       lastWatchTrackedAt.current = 0;
-
-      // แก้ไข #2: บันทึก position ก่อน seek ทันที เพื่อป้องกัน chunk window พองเกิน
-      lastTrackedVideoTime.current = video.currentTime;
-
       flushWatchTime();
 
+      // ✅ 1. เพิ่มตรงนี้: คายเวลาดูของช่วงก่อนหน้าออกมาก่อนกระโดด
       if (videoAnalytics && typeof videoAnalytics.forceFlushChunk === 'function') {
-        videoAnalytics.forceFlushChunk();
+        videoAnalytics.forceFlushChunk(); 
       }
 
       seekCountRef.current += 1;
@@ -171,8 +179,6 @@ const VideoPlayer = ({ manifestUrl, onClose, videoId, userIdRef }) => {
 
     const handleSeeked = debounce(() => {
       const isScrubNoise = seekCountRef.current > 3;
-
-      // รีเซ็ต position หลัง seek เสร็จ (เปิด window ใหม่จากตำแหน่งหลัง seek)
       lastTrackedVideoTime.current = video.currentTime;
 
       if (!isScrubNoise) {
@@ -185,20 +191,22 @@ const VideoPlayer = ({ manifestUrl, onClose, videoId, userIdRef }) => {
 
       isSeekingRef.current = false;
       if (!video.paused) {
-        segmentStartTime.current   = Date.now();
+        segmentStartTime.current = Date.now();
+        // ✅ set wall clock หลัง seek เสร็จ — เริ่มนับใหม่จาก 0
         lastWatchTrackedAt.current = Date.now();
         setIsPlaying(true);
       }
     }, 300);
 
-    const handleEnded = () => {
+const handleEnded = () => {
       setIsPlaying(false);
       lastWatchTrackedAt.current = 0;
+      
+      flushWatchTime(); 
 
-      flushWatchTime();
-
+      // ✅ 2. เพิ่มตรงนี้: คาย Chunk ก้อนสุดท้ายก่อนวิดีโอจบ
       if (videoAnalytics && typeof videoAnalytics.forceFlushChunk === 'function') {
-        videoAnalytics.forceFlushChunk();
+        videoAnalytics.forceFlushChunk(); 
       }
 
       videoAnalytics.trackVideoEvent(makePayload({
@@ -207,7 +215,6 @@ const VideoPlayer = ({ manifestUrl, onClose, videoId, userIdRef }) => {
         currentTime:   video.currentTime,
       }));
     };
-
     const handleTimeUpdate = () => {
       if (video.paused || video.ended) return;
       if (isSeekingRef.current) return;
@@ -235,7 +242,7 @@ const VideoPlayer = ({ manifestUrl, onClose, videoId, userIdRef }) => {
             segmentStartTime.current = null;
           }
           videoAnalytics.forceFlushChunk();
-          lastWatchTrackedAt.current = 0;
+          lastWatchTrackedAt.current = 0; 
         }
         return;
       } else if (isBufferingRef.current) {
@@ -248,25 +255,31 @@ const VideoPlayer = ({ manifestUrl, onClose, videoId, userIdRef }) => {
         segmentStartTime.current = Date.now();
       }
 
-      if (lastWatchTrackedAt.current === 0) return;
+      // ✅ ใช้ wall clock แทน video position delta
+      // เดิม: elapsed = currentTime - lastTrackedVideoTime (video position)
+      //   → ต้องรอ video เดิน 10s → watch event แรกมาตอน t=10 เสมอ
+      //   → chunk มีแค่ event เดียว → start=end → MV filter ออก
+      // ใหม่: wallElapsed = Date.now() - lastWatchTrackedAt (wall clock)
+      //   → ยิงทุก 10s จริงๆ โดยไม่สนว่า video position อยู่ที่ไหน
+      if (lastWatchTrackedAt.current === 0) return; // ยังไม่ได้ play
 
-      const wallElapsed     = Date.now() - lastWatchTrackedAt.current;
-      const currentInterval = getAdaptiveInterval(currentTime);
+      // ในฟังก์ชัน handleTimeUpdate
+const wallElapsed = Date.now() - lastWatchTrackedAt.current;
+const currentInterval = getAdaptiveInterval(currentTime);
+if (wallElapsed >= currentInterval * 1000) {
+  
+  // ✅ เพิ่มบรรทัดนี้: หาว่าวิดีโอขยับไปกี่วินาทีแล้วจริงๆ
+  const videoDelta = currentTime - lastTrackedVideoTime.current;
 
-      if (wallElapsed >= currentInterval * 1000) {
-        // แก้ไข #3: ส่ง videoDelta จริงๆ แทน currentInterval
-        // เพื่อสะท้อนระยะวิดีโอที่ขยับจริง (ถูกต้องกว่าเมื่อ playback rate เปลี่ยน)
-        const videoDelta = currentTime - lastTrackedVideoTime.current;
-
-        lastWatchTrackedAt.current   = Date.now();
-        lastTrackedVideoTime.current = currentTime;
-
-        videoAnalytics.trackVideoEvent(makePayload({
-          eventType:   'watch',
-          duration:    Math.round(videoDelta), // ใช้ค่าจริงจาก video position
-          currentTime: currentTime,
-        }));
-      }
+  lastWatchTrackedAt.current   = Date.now();
+  lastTrackedVideoTime.current = currentTime;
+  
+  videoAnalytics.trackVideoEvent(makePayload({
+    eventType:   'watch',
+    duration:    currentInterval, // ใช้ interval ที่กำหนดเป็น duration
+    currentTime: currentTime,
+  }));
+}
     };
 
     const handleError = () => {
@@ -297,13 +310,14 @@ const VideoPlayer = ({ manifestUrl, onClose, videoId, userIdRef }) => {
       video.removeEventListener('ended',      handleEnded);
       video.removeEventListener('timeupdate', handleTimeUpdate);
       video.removeEventListener('error',      handleError);
-      document.removeEventListener('visibilitychange', handleVisibility);
-      clearTimeout(seekTimerRef.current);
+   document.removeEventListener('visibilitychange', handleVisibility);
+   clearTimeout(seekTimerRef.current);
 
-      flushWatchTime();
+      flushWatchTime(); 
 
+      // ✅ 3. เพิ่มตรงนี้: บังคับคายของก่อน Unmount
       if (videoAnalytics && typeof videoAnalytics.forceFlushChunk === 'function') {
-        videoAnalytics.forceFlushChunk();
+        videoAnalytics.forceFlushChunk(); 
       }
 
       videoAnalytics.trackVideoEvent(makePayload({

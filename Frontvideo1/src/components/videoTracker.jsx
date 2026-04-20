@@ -125,42 +125,40 @@ class VideoAnalytics {
 
   // ── private: coalescer ─────────────────────────────────
 
- _coalesceWatch(event) {
-  if (event.eventType !== 'watch') {
-    this._flushWatchChunk();
-    return event;
-  }
+  _coalesceWatch(event) {
+    if (event.eventType !== 'watch') {
+      this._flushWatchChunk();
+      return event;
+    }
 
-  if (!this._watchChunk) {
-    // แก้ไข: ใช้ currentTime - duration แต่ clamp ที่ 0
-    // แล้ว adjust duration ให้ตรงกับ start จริงๆ
-    const rawStart   = event.currentTime - (event.duration || 0);
-    const chunkStart = Math.max(0, rawStart);
-    const realDuration = event.currentTime - chunkStart; // ← duration จริงหลัง clamp
+    if (!this._watchChunk) {
+      // แก้ไข #2: คำนวณ chunk_start_seconds จาก currentTime - duration
+      // (duration คือ videoDelta จริงที่ส่งมาจาก VideoPlayer หลังแก้ไข #3)
+      // ไม่ใช้ Math.max(0, ...) เพื่อไม่ให้ start collapse เป็น 0 ผิดๆ
+      const chunkStart = event.currentTime - (event.duration || 0);
+      this._watchChunk = {
+        ...event,
+        eventType:            'watch_chunk',
+        chunk_start_seconds:  chunkStart,
+        chunk_end_seconds:    event.currentTime,
+        max_progress_seconds: event.currentTime,
+      };
+      return null;
+    }
 
-    this._watchChunk = {
-      ...event,
-      eventType:            'watch_chunk',
-      chunk_start_seconds:  chunkStart,
-      chunk_end_seconds:    event.currentTime,
-      max_progress_seconds: event.currentTime,
-      duration:             realDuration, // ← ใช้ค่าจริง ไม่ใช่ interval
-    };
+    // merge
+    this._watchChunk.chunk_end_seconds    = event.currentTime;
+    this._watchChunk.max_progress_seconds = Math.max(
+      this._watchChunk.max_progress_seconds || 0,
+      event.currentTime,
+    );
+    this._watchChunk.duration       = (this._watchChunk.duration || 0) + (event.duration || 0);
+    this._watchChunk.totalWatchTime = event.totalWatchTime || this._watchChunk.totalWatchTime;
+    this._watchChunk.timestamp      = event.timestamp;
+
     return null;
   }
 
-  // merge ส่วนนี้เหมือนเดิม
-  this._watchChunk.chunk_end_seconds    = event.currentTime;
-  this._watchChunk.max_progress_seconds = Math.max(
-    this._watchChunk.max_progress_seconds || 0,
-    event.currentTime,
-  );
-  this._watchChunk.duration       = (this._watchChunk.duration || 0) + (event.duration || 0);
-  this._watchChunk.totalWatchTime = event.totalWatchTime || this._watchChunk.totalWatchTime;
-  this._watchChunk.timestamp      = event.timestamp;
-
-  return null;
-}
   _flushWatchChunk() {
     if (!this._watchChunk) return;
 
