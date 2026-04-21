@@ -270,7 +270,7 @@ const UserProfile = () => {
                   { label: 'อีเมลที่ลงทะเบียน', val: userData?.email, icon: Mail, color: 'text-blue-400' },
                   { label: 'ประเภทผู้ใช้งาน', val: userData?.role === 'admin' ? 'ผู้ดูแลระบบ' : 'สมาชิกทั่วไป', icon: Shield, color: 'text-purple-400' },
                   { label: 'วันที่เริ่มใช้งาน', val: formatDate(userData?.createdAt), icon: Calendar, color: 'text-green-400' },
-                  { label: 'การเคลื่อนไหวล่าสุด', val: formatDateTime(userData?.updatedAt), icon: History, color: 'text-orange-400' }
+                  { label: 'การเคลื่อนไหว ล่าสุด', val: formatDateTime(userData?.updatedAt), icon: History, color: 'text-orange-400' }
                 ].map((item, i) => (
                   <div key={i} className="p-4 rounded-2xl bg-white/5 border border-white/5 flex items-center gap-4">
                     <div className={`p-3 rounded-xl bg-slate-950/50 ${item.color}`}>
