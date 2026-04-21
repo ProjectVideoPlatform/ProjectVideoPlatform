@@ -1,6 +1,13 @@
-CREATE TABLE "app_db".video_watch_events
+-- ─────────────────────────────────────────────────────────────────────────────
+--  video_watch_events
+-- ─────────────────────────────────────────────────────────────────────────────
+-- FIX #1: chunk_* columns ย้ายเข้าใน CREATE TABLE + เปลี่ยน ; → ,
+-- FIX #2: ORDER BY ใช้ toDate(event_time) แทน event_time
+--         เพื่อให้ ReplacingMergeTree dedup ได้ถูก และยัง time-prune ได้
+-- FIX #3: เพิ่ม comma หลัง _inserted_at (เดิมหาย)
+
+CREATE TABLE IF NOT EXISTS app_db.video_watch_events
 (
-    -- ✅ เพิ่ม event_id สำหรับ dedup
     event_id               String,
     video_id               String,
     user_id                String,
@@ -9,50 +16,93 @@ CREATE TABLE "app_db".video_watch_events
     watch_duration_seconds UInt32,
     total_watch_seconds    UInt32,
     current_time_seconds   UInt32,
+    chunk_start_seconds    UInt32 DEFAULT 0,
+    chunk_end_seconds      UInt32 DEFAULT 0,
+    max_progress_seconds   UInt32 DEFAULT 0,
     device_type            LowCardinality(String),
     country_code           LowCardinality(String),
     event_time             DateTime,
     _inserted_at           DateTime DEFAULT now()
- chunk_start_seconds  UInt32 DEFAULT 0,
-     chunk_end_seconds    UInt32 DEFAULT 0,
-     max_progress_seconds UInt32 DEFAULT 0;
 )
 ENGINE = ReplacingMergeTree(_inserted_at)
 PARTITION BY toYYYYMM(event_time)
--- ✅ เพิ่ม event_id ใน ORDER BY เพื่อ dedup ระดับ ClickHouse
-ORDER BY (video_id, event_time, event_id)
+ORDER BY (video_id, toDate(event_time), event_id)
 SETTINGS index_granularity = 8192;
 
+
+-- ─────────────────────────────────────────────────────────────────────────────
+--  video_retention_mv  (target table)
+-- ─────────────────────────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS app_db.video_retention_mv
 (
     video_id       String,
-    bucket_seconds UInt32,   -- 0, 10, 20, 30, ... (ทุก 10 วิ)
-    viewers        AggregateFunction(uniq, String),  -- unique session_id
+    bucket_seconds UInt32,
+    viewers        AggregateFunction(uniq, String),
     event_date     Date
 )
 ENGINE = AggregatingMergeTree()
 PARTITION BY event_date
 ORDER BY (video_id, bucket_seconds, event_date);
 
+
+-- ─────────────────────────────────────────────────────────────────────────────
+--  mv_video_retention  (materialized view)
+-- ─────────────────────────────────────────────────────────────────────────────
+-- FIX #4: range() ต้องการ UInt64 ไม่ใช่ UInt32 — cast ก่อนเข้า range()
+-- FIX #5: ลบ + 1 ออก เพราะ range() เป็น exclusive upper bound อยู่แล้ว
+--         chunk 0→30 ควรได้ bucket 0,10,20 เท่านั้น ไม่ใช่ 0,10,20,30
+
 CREATE MATERIALIZED VIEW IF NOT EXISTS app_db.mv_video_retention
 TO app_db.video_retention_mv
 AS
 SELECT
     video_id,
-    -- explode chunk range เป็น bucket ทุก 10 วิ
-    -- intDiv(n, 10) * 10 → snap to 10s grid
-    arrayJoin(
-        arrayMap(
-            i -> toUInt32(i * 10),
+    toUInt32(
+        arrayJoin(
             range(
-                toUInt32(intDiv(chunk_start_seconds, 10)),
-                toUInt32(intDiv(chunk_end_seconds,   10) + 1)
+                toUInt64(intDiv(chunk_start_seconds, 10)),
+                toUInt64(intDiv(chunk_end_seconds,   10))
             )
-        )
+        ) * 10
     ) AS bucket_seconds,
     uniqState(session_id) AS viewers,
-    toDate(event_time) AS event_date
+    toDate(event_time)    AS event_date
 FROM app_db.video_watch_events
 WHERE event_type = 'watch_chunk'
-  AND chunk_end_seconds > chunk_start_seconds  -- ป้องกัน chunk ที่ invalid
+  AND chunk_end_seconds > chunk_start_seconds
 GROUP BY video_id, bucket_seconds, event_date;
+
+
+-- ─────────────────────────────────────────────────────────────────────────────
+--  backfill — รันครั้งเดียวหลัง deploy เพื่อ populate data เก่า
+-- ─────────────────────────────────────────────────────────────────────────────
+INSERT INTO app_db.video_retention_mv
+SELECT
+    video_id,
+    toUInt32(
+        arrayJoin(
+            range(
+                toUInt64(intDiv(chunk_start_seconds, 10)),
+                toUInt64(intDiv(chunk_end_seconds,   10))
+            )
+        ) * 10
+    ) AS bucket_seconds,
+    uniqState(session_id) AS viewers,
+    toDate(event_time)    AS event_date
+FROM app_db.video_watch_events
+WHERE event_type = 'watch_chunk'
+  AND chunk_end_seconds > chunk_start_seconds
+GROUP BY video_id, bucket_seconds, event_date;
+
+
+-- ─────────────────────────────────────────────────────────────────────────────
+--  ตัวอย่าง retention query
+-- ─────────────────────────────────────────────────────────────────────────────
+-- SELECT
+--     bucket_seconds,
+--     uniqMerge(viewers) AS unique_viewers
+-- FROM app_db.video_retention_mv
+-- WHERE video_id = 'xxx'
+--   AND event_date BETWEEN '2026-01-01' AND '2026-04-30'
+-- GROUP BY bucket_seconds
+-- ORDER BY bucket_seconds;

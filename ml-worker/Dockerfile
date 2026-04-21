@@ -1,0 +1,19 @@
+# ใช้ Python 3.9 แบบ slim เพื่อลดขนาด Image
+FROM python:3.9-slim
+
+WORKDIR /app
+
+# Install system dependencies (จำเป็นสำหรับการ build บาง library เช่น confluent-kafka)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy และ Install requirements
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy โค้ด Python เข้าไป
+COPY worker.py .
+
+# สั่งรัน script
+CMD ["python", "worker.py"]

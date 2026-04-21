@@ -55,7 +55,26 @@ router.post('/analytics/video', async (req, res) => {
 
       await kafkaService.sendBatch(TOPICS.VIDEO_LOGS, kafkaMessages);
     }
+const mlRelevantEvents = valid.filter(event => 
+  event.eventType === 'completed' || event.eventType === 'watch_chunk'
+);
 
+if (mlRelevantEvents.length > 0) {
+  const mlMessages = mlRelevantEvents.map(event => ({
+    key: event.userId || 'anonymous',
+    value: JSON.stringify({
+      userId: event.userId,
+      videoId: event.videoId,
+      eventType: event.eventType,
+      // สมมติว่า frontend ส่ง category มาด้วย (ถ้าไม่มี อาจต้องให้ Python ไปดึงจาก DB เอง)
+      category: event.category || 'unknown', 
+      timestamp: event.receivedAt
+    })
+  }));
+
+  // ส่งเข้า topic 'user-activities' ให้ Python Worker เอาไปกินต่อ
+  // await kafkaService.sendBatch('user-activities', mlMessages);
+}
     return res.status(202).json({
       queued: valid.length,
       rejected: invalid.length,
@@ -66,6 +85,7 @@ router.post('/analytics/video', async (req, res) => {
     console.error('[analytics] route error:', error);
     return res.status(500).json({ error: 'Internal server error' });
   }
-});
+}
+);
 
 module.exports = router;
