@@ -202,77 +202,71 @@ const handlePause = () => {
   }));
 };
     // ─── seeking ──────────────────────────────────────────────────────────────
-   const handleSeeking = () => {
+ const handleSeeking = () => {
   isSeekingRef.current = true;
 
   if (!hasSeeked.current) {
-    // ✅ ครั้งแรกของ seek session — flush และ lock lastTracked
     hasSeeked.current = true;
+  console.log('[SEEKING] first seek detected, flushing watch time. CurrentTime:', video.currentTime);
+    // 1. ปิดยอดการนับ Watch Time ณ จุดปัจจุบันก่อนจะย้าย
+    const finalDelta = video.currentTime - lastTrackedVideoTime.current;
+    if (finalDelta > 0.5 && finalDelta < 5) { // ป้องกันเลขโดดเกินจริง
+      videoAnalytics.trackVideoEvent(makePayload({
+        eventType: 'watch',
+        duration: Math.round(finalDelta),
+        currentTime: video.currentTime,
+      }));
+    }
+console.log('[SEEKING] flushed watch time for current segment. finalDelta:', finalDelta);
+    // 2. ล็อกตำแหน่ง "ก่อน Seek" เอาไว้ส่ง Event Seek
+    prevTimeRef.current = video.currentTime;
+    lastTrackedVideoTime.current = video.currentTime; 
+    console.log('[SEEKING] updated lastTrackedVideoTime to:', lastTrackedVideoTime.current);
     pausePlayWindow();
     videoAnalytics.forceFlushChunk();
-
-    const safePreSeek = prevTimeRef.current > 0
-      ? prevTimeRef.current
-      : lastTrackedVideoTime.current;
-
-    console.log('[SEEKING] safePreSeek =', safePreSeek);
-    lastTrackedVideoTime.current = safePreSeek;
   }
-
-  // ✅ prevTime อัปเดตทุกครั้งที่ seeking fire ไม่ขึ้นกับ hasSeeked
-  // เพราะต้องการรู้ตำแหน่ง "ล่าสุดก่อน seek settle"
-  prevTimeRef.current = video.currentTime;
 
   seekCountRef.current += 1;
   clearTimeout(seekTimerRef.current);
   seekTimerRef.current = setTimeout(() => {
     seekCountRef.current = 0;
-  }, 1_000);
+  }, 1000);
 };
-
     // ─── seeked ───────────────────────────────────────────────────────────────
-    const handleSeeked = debounce(() => {
-      hasSeeked.current = false;
+   const handleSeeked = debounce(() => {
+  const video = videoRef.current;
+  if (!video) return;
 
-      // เก็บ destination ก่อนทำอะไร
-      seekDestinationTime.current = video.currentTime;
+  hasSeeked.current = false;
+  isSeekingRef.current = false;
+ console.log('[SEEKED]', {
+    currentTime: video.currentTime,
+    prevTime: prevTimeRef.current,
+    seekCount: seekCountRef.current,
+  });
+  const seekDestination = video.currentTime;
+  const seekFrom = lastTrackedVideoTime.current; // ค่าที่ลอคไว้จาก handleSeeking
 
-      console.log('[SEEKED] destination saved:', {
-        destination:  seekDestinationTime.current,
-        lastTracked:  lastTrackedVideoTime.current,
-        prevTime:     prevTimeRef.current,
-      });
+  // อัปเดตจุดเริ่มนับใหม่ให้เป็นจุดที่ Seek ไปลงจอด
+  lastTrackedVideoTime.current = seekDestination;
+  prevTimeRef.current = seekDestination;
+  console.log('[SEEKED] updated prevTimeRef to:', prevTimeRef.current);
+  // ล้างเวลาใน Wall clock ให้เริ่มนับใหม่จากวินาทีนี้
+  lastWatchTrackedAt.current = Date.now();
+  if (segmentStartTime.current) segmentStartTime.current = Date.now();
+ console.log('[SEEKED] updated lastTrackedVideoTime to:', lastTrackedVideoTime.current);
+  const isScrubNoise = seekCountRef.current > 3;
+  if (!isScrubNoise) {
+    videoAnalytics.trackVideoEvent(makePayload({
+      eventType: 'seek',
+      fromTime: seekFrom,
+      currentTime: seekDestination,
+      duration: 0,
+    }));
+  }
 
-      // flush chunk ที่อาจค้างอยู่
-      videoAnalytics.forceFlushChunk();
-
-      // เก็บ fromTime ก่อน overwrite
-      const seekFromTime = lastTrackedVideoTime.current;
-
-      // หลัง flush ค่อยอัปเดตด้วย destination
-      lastTrackedVideoTime.current = seekDestinationTime.current;
-      prevTimeRef.current          = seekDestinationTime.current;
-      isSeekingRef.current         = false;
-
-      // reset interval ให้นับใหม่จาก destination
-      lastWatchTrackedAt.current   = Date.now();
-
-      const isScrubNoise = seekCountRef.current > 3;
-      if (!isScrubNoise) {
-        videoAnalytics.trackVideoEvent(makePayload({
-          eventType:   'seek',
-          fromTime:    seekFromTime,
-          currentTime: seekDestinationTime.current,
-          duration:    0,
-        }));
-      }
-
-      if (!video.paused) {
-        startPlayWindow();
-        setIsPlaying(true);
-      }
-    }, 300);
-
+  videoAnalytics.forceFlushChunk();
+}, 300);
     // ─── ended ────────────────────────────────────────────────────────────────
     const handleEnded = () => {
       isEndedRef.current = true;
