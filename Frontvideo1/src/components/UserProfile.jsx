@@ -1,13 +1,16 @@
-import React, { useState, useEffect } from 'react';
-import { User, Mail, Shield, Calendar, History, LogOut, Edit2, Save, X, Eye, EyeOff, ChevronRight, Loader, CreditCard, MapPin, Video, Clock, TrendingUp, Award, Lock } from 'lucide-react';
-import { useNotif } from '../NotifContext'; // ✅ ใช้ context
+import React, { useState, useEffect, useCallback } from 'react';
+import { 
+  User, Mail, Shield, Calendar, History, LogOut, Lock, 
+  Eye, EyeOff, ChevronRight, Loader, CreditCard, 
+  MapPin, Video, Clock, TrendingUp, Award 
+} from 'lucide-react';
+import { useNotif } from '../NotifContext';
 
 const UserProfile = () => {
-  const { notifications, videoNotifications, addNotification } = useNotif(); // ✅ เพิ่ม addNotification
+  const { notifications, videoNotifications, addNotification } = useNotif();
   
   const apiBaseUrl = 'http://localhost:3000';
   const [activeTab, setActiveTab] = useState('overview');
-  const [isEditing, setIsEditing] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [pageLoading, setPageLoading] = useState(true);
@@ -22,6 +25,7 @@ const UserProfile = () => {
     confirmPassword: ''
   });
 
+  // Mock sessions - ในอนาคตควรดึงจาก API
   const [sessions] = useState([
     {
       id: '1',
@@ -32,93 +36,73 @@ const UserProfile = () => {
     }
   ]);
 
-  const fetchProfile = async () => {
+  // --- เพิ่มฟังก์ชัน Logout ---
+  const handleLogout = () => {
+    localStorage.removeItem('authToken'); // ลบ token ออก
+    addNotification({
+      title: 'ออกจากระบบสำเร็จ',
+      message: 'แล้วเจอกันใหม่นะ!',
+      type: 'info'
+    });
+    // ดีเลย์เล็กน้อยเพื่อให้แจ้งเตือนแสดงก่อนเปลี่ยนหน้า
+    setTimeout(() => {
+      window.location.href = '/login'; 
+    }, 1000);
+  };
+
+  const fetchData = useCallback(async () => {
+    setPageLoading(true);
+    const token = localStorage.getItem('authToken');
+    const headers = { 'Authorization': `Bearer ${token}` };
+
     try {
-      const token = localStorage.getItem('authToken');
-      const response = await fetch(`${apiBaseUrl}/api/user/profile`, {
-        headers: { 'Authorization': `Bearer ${token}` },
-        credentials: 'include'
-      });
-      
-      if (!response.ok) throw new Error('Failed to fetch profile');
-      const data = await response.json();
-      setUserData(data);
+      const [profileRes, historyRes, statsRes] = await Promise.all([
+        fetch(`${apiBaseUrl}/api/user/profile`, { headers, credentials: 'include' }),
+        fetch(`${apiBaseUrl}/api/purchase/purchased/list?limit=100`, { headers, credentials: 'include' }),
+        fetch(`${apiBaseUrl}/api/purchase/stats`, { headers, credentials: 'include' })
+      ]);
+
+      if (profileRes.ok) {
+        const profileData = await profileRes.json();
+        setUserData(profileData);
+      }
+
+      if (historyRes.ok) {
+        const historyData = await historyRes.json();
+        setPurchaseHistory(historyData.videos || []);
+      }
+
+      if (statsRes.ok) {
+        const statsData = await statsRes.json();
+        setStats(statsData);
+      }
     } catch (error) {
-      console.error('Error fetching profile:', error);
+      console.error('Fetch error:', error);
       addNotification({
-        title: 'โหลดข้อมูลไม่สำเร็จ',
-        message: 'ไม่สามารถโหลดข้อมูลโปรไฟล์ได้',
+        title: 'เกิดข้อผิดพลาด',
+        message: 'ไม่สามารถเชื่อมต่อกับเซิร์ฟเวอร์ได้',
         type: 'error'
       });
+    } finally {
+      setPageLoading(false);
     }
-  };
-
-  const fetchPurchaseHistory = async () => {
-    try {
-      const token = localStorage.getItem('authToken');
-      const response = await fetch(`${apiBaseUrl}/api/purchase/purchased/list?limit=100`, {
-        headers: { 'Authorization': `Bearer ${token}` },
-        credentials: 'include'
-      });
-      
-      if (!response.ok) throw new Error('Failed to fetch purchases');
-      const data = await response.json();
-      setPurchaseHistory(data.videos || []);
-    } catch (error) {
-      console.error('Error fetching purchases:', error);
-    }
-  };
-
-  const fetchStats = async () => {
-    try {
-      const token = localStorage.getItem('authToken');
-      const response = await fetch(`${apiBaseUrl}/api/purchase/stats`, {
-        headers: { 'Authorization': `Bearer ${token}` },
-        credentials: 'include'
-      });
-      
-      if (!response.ok) throw new Error('Failed to fetch stats');
-      const data = await response.json();
-      setStats(data);
-    } catch (error) {
-      console.error('Error fetching stats:', error);
-    }
-  };
+  }, [addNotification]);
 
   useEffect(() => {
-    const loadData = async () => {
-      setPageLoading(true);
-      await Promise.all([fetchProfile(), fetchPurchaseHistory(), fetchStats()]);
-      setPageLoading(false);
-    };
-    loadData();
-  }, []);
+    fetchData();
+  }, [fetchData]);
 
   const handlePasswordChange = async () => {
-    // ✅ เปลี่ยนจาก alert → addNotification
-    if (passwordForm.newPassword !== passwordForm.confirmPassword) {
-      addNotification({
-        title: 'รหัสผ่านไม่ตรงกัน',
-        message: 'กรุณากรอกรหัสผ่านใหม่ให้ตรงกัน',
-        type: 'error'
-      });
-      return;
+    const { currentPassword, newPassword, confirmPassword } = passwordForm;
+
+    if (!currentPassword || !newPassword || !confirmPassword) {
+      return addNotification({ title: 'ข้อมูลไม่ครบ', message: 'กรุณากรอกข้อมูลให้ครบถ้วน', type: 'error' });
     }
-    if (!passwordForm.currentPassword || !passwordForm.newPassword) {
-      addNotification({
-        title: 'ข้อมูลไม่ครบ',
-        message: 'กรุณากรอกข้อมูลให้ครบถ้วน',
-        type: 'error'
-      });
-      return;
+    if (newPassword !== confirmPassword) {
+      return addNotification({ title: 'รหัสผ่านไม่ตรงกัน', message: 'รหัสผ่านใหม่และยืนยันรหัสผ่านไม่ตรงกัน', type: 'error' });
     }
-    if (passwordForm.newPassword.length < 6) {
-      addNotification({
-        title: 'รหัสผ่านสั้นเกินไป',
-        message: 'รหัสผ่านใหม่ต้องมีอย่างน้อย 6 ตัวอักษร',
-        type: 'error'
-      });
-      return;
+    if (newPassword.length < 6) {
+      return addNotification({ title: 'รหัสผ่านสั้นเกินไป', message: 'รหัสผ่านใหม่ต้องมีอย่างน้อย 6 ตัวอักษร', type: 'error' });
     }
 
     setLoading(true);
@@ -130,531 +114,282 @@ const UserProfile = () => {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`
         },
-        body: JSON.stringify({
-          oldPassword: passwordForm.currentPassword,
-          newPassword: passwordForm.newPassword
-        })
+        body: JSON.stringify({ oldPassword: currentPassword, newPassword })
       });
 
       const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'เปลี่ยนรหัสผ่านไม่สำเร็จ');
 
-      if (!response.ok) {
-        throw new Error(data.error || 'การเปลี่ยนรหัสผ่านล้มเหลว');
-      }
-
-      // ✅ แจ้งเตือนสำเร็จ
       addNotification({
-        title: 'เปลี่ยนรหัสผ่านสำเร็จ',
-        message: 'รหัสผ่านของคุณถูกเปลี่ยนเรียบร้อยแล้ว',
+        title: 'สำเร็จ',
+        message: 'เปลี่ยนรหัสผ่านเรียบร้อยแล้ว',
         type: 'success'
       });
       
       setPasswordForm({ currentPassword: '', newPassword: '', confirmPassword: '' });
-
+      setShowPassword(false);
     } catch (error) {
-      // ✅ แจ้งเตือน error
-      addNotification({
-        title: 'เกิดข้อผิดพลาด',
-        message: error.message,
-        type: 'error'
-      });
+      addNotification({ title: 'เกิดข้อผิดพลาด', message: error.message, type: 'error' });
     } finally {
       setLoading(false);
     }
   };
 
-  const handleLogoutDevice = (sessionId) => {
-    // ✅ เปลี่ยนจาก alert → addNotification
-    addNotification({
-      title: 'ออกจากระบบอุปกรณ์',
-      message: `ออกจากระบบอุปกรณ์: ${sessionId} เรียบร้อย`,
-      type: 'info'
-    });
-  };
-
   const formatDate = (dateString) => {
     if (!dateString) return 'N/A';
     return new Date(dateString).toLocaleDateString('th-TH', {
-      year: 'numeric',
-      month: 'long',
-      day: 'numeric'
+      year: 'numeric', month: 'long', day: 'numeric'
     });
   };
 
   const formatDateTime = (dateString) => {
     if (!dateString) return 'N/A';
     return new Date(dateString).toLocaleString('th-TH', {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit'
+      year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
     });
   };
 
   if (pageLoading) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-950 via-blue-950 to-slate-950 flex items-center justify-center">
+      <div className="min-h-screen bg-slate-950 flex items-center justify-center">
         <div className="text-center">
           <Loader className="w-12 h-12 animate-spin text-blue-500 mx-auto mb-4" />
-          <p className="text-gray-400">กำลังโหลดข้อมูล...</p>
+          <p className="text-gray-400 animate-pulse">กำลังเตรียมข้อมูลส่วนตัวของคุณ...</p>
         </div>
-      </div>
-    );
-  }
-
-  if (!userData) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-950 via-blue-950 to-slate-950 flex items-center justify-center">
-        <p className="text-white">ไม่สามารถโหลดข้อมูลได้</p>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-950 via-blue-950 to-slate-950">
+    <div className="min-h-screen bg-gradient-to-br from-slate-950 via-blue-950 to-slate-950 text-slate-200 pb-12">
       {/* Header */}
       <header className="bg-slate-900/80 backdrop-blur-xl border-b border-slate-800/50 sticky top-0 z-50">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex items-center justify-between h-16">
-            <h1 className="text-2xl font-bold bg-gradient-to-r from-blue-400 via-purple-400 to-pink-400 bg-clip-text text-transparent">
-              VideoStream
-            </h1>
-            <div className="flex items-center gap-4">
-              {/* ✅ แสดงจำนวนการแจ้งเตือน */}
-              {(notifications.length + Object.keys(videoNotifications).length) > 0 && (
-                <div className="relative">
-                  <div className="bg-red-500 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center animate-pulse">
-                    {notifications.length + Object.keys(videoNotifications).length}
-                  </div>
-                </div>
-              )}
-              <button 
-                onClick={() => window.history.back()}
-                className="flex items-center gap-2 px-4 py-2 bg-slate-800/50 hover:bg-slate-700/50 text-white rounded-xl transition-all border border-slate-700/50"
-              >
-                <ChevronRight className="w-4 h-4 rotate-180" />
-                <span>ย้อนกลับ</span>
-              </button>
-            </div>
+        <div className="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between">
+          <h1 className="text-2xl font-bold bg-gradient-to-r from-blue-400 to-purple-400 bg-clip-text text-transparent">
+            VideoStream
+          </h1>
+          <div className="flex items-center gap-2 sm:gap-4">
+            {(notifications.length + Object.keys(videoNotifications).length) > 0 && (
+              <div className="bg-red-500 text-white text-[10px] font-bold rounded-full w-5 h-5 flex items-center justify-center animate-bounce">
+                {notifications.length + Object.keys(videoNotifications).length}
+              </div>
+            )}
+            <button 
+              onClick={() => window.history.back()}
+              className="flex items-center gap-2 px-3 py-2 bg-slate-800/50 hover:bg-slate-700 text-white rounded-xl transition-all border border-slate-700/50 group text-sm"
+            >
+              <ChevronRight className="w-4 h-4 rotate-180 group-hover:-translate-x-1 transition-transform" />
+              <span className="hidden xs:inline">ย้อนกลับ</span>
+            </button>
+            
+            {/* เพิ่มปุ่ม Logout ใน Header */}
+            <button 
+              onClick={handleLogout}
+              className="flex items-center gap-2 px-3 py-2 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded-xl transition-all border border-red-500/20 font-bold text-sm"
+            >
+              <LogOut className="w-4 h-4" />
+              <span className="hidden sm:inline">ออกจากระบบ</span>
+            </button>
           </div>
         </div>
       </header>
 
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {/* Profile Header Card - (เหมือนเดิม) */}
-        <div className="bg-gradient-to-br from-blue-600/20 via-purple-600/20 to-pink-600/20 backdrop-blur-xl rounded-2xl border border-slate-700/50 p-8 mb-6 relative overflow-hidden">
-          {/* ... existing profile header ... */}
-          <div className="absolute inset-0 bg-gradient-to-br from-blue-500/5 to-purple-500/5" />
-          <div className="relative flex flex-col md:flex-row items-center md:items-start gap-6">
+      <main className="max-w-7xl mx-auto px-4 py-8">
+        {/* Profile Card */}
+        <section className="bg-gradient-to-br from-blue-600/10 via-purple-600/10 to-transparent backdrop-blur-xl rounded-3xl border border-white/10 p-8 mb-8 relative overflow-hidden">
+          <div className="relative z-10 flex flex-col md:flex-row items-center gap-8">
             <div className="relative">
-              <div className="w-24 h-24 rounded-2xl bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center ring-4 ring-slate-900/50">
-                <User className="w-12 h-12 text-white" />
+              <div className="w-28 h-28 rounded-2xl bg-gradient-to-tr from-blue-500 to-purple-600 flex items-center justify-center shadow-2xl shadow-blue-500/20">
+                <User className="w-14 h-14 text-white" />
               </div>
-              <div className="absolute -bottom-2 -right-2 w-8 h-8 bg-green-500 rounded-full border-4 border-slate-900" />
+              <div className="absolute -bottom-2 -right-2 w-8 h-8 bg-green-500 rounded-full border-4 border-slate-950" />
             </div>
             
             <div className="flex-1 text-center md:text-left">
-              <h2 className="text-3xl font-bold text-white mb-2">{userData.email?.split('@')[0]}</h2>
-              <p className="text-gray-400 mb-3">{userData.email}</p>
-              <div className="flex flex-wrap gap-2 justify-center md:justify-start">
-                <span className="px-4 py-1.5 bg-blue-500/20 text-blue-400 rounded-full text-sm font-medium border border-blue-500/30">
-                  {userData.role === 'admin' ? '👑 Administrator' : '🎬 Member'}
+              <h2 className="text-3xl font-bold text-white mb-2">{userData?.email?.split('@')[0]}</h2>
+              <p className="text-blue-300/80 mb-4 flex items-center justify-center md:justify-start gap-2">
+                <Mail className="w-4 h-4" /> {userData?.email}
+              </p>
+              <div className="flex flex-wrap gap-3 justify-center md:justify-start">
+                <span className="px-4 py-1.5 bg-blue-500/20 text-blue-400 rounded-full text-xs font-bold border border-blue-500/30">
+                  {userData?.role === 'admin' ? '👑 ADMINISTRATOR' : '🎬 MEMBER'}
                 </span>
-                <span className="px-4 py-1.5 bg-purple-500/20 text-purple-400 rounded-full text-sm font-medium border border-purple-500/30 flex items-center gap-1">
-                  <Calendar className="w-3.5 h-3.5" />
-                  สมาชิกตั้งแต่ {new Date(userData.createdAt).getFullYear()}
+                <span className="px-4 py-1.5 bg-slate-800/50 text-slate-300 rounded-full text-xs font-medium border border-white/10 flex items-center gap-2">
+                  <Calendar className="w-3.5 h-3.5" /> เป็นสมาชิกเมื่อ {formatDate(userData?.createdAt)}
                 </span>
               </div>
             </div>
 
-            {/* Quick Stats */}
-            <div className="grid grid-cols-3 gap-4 text-center">
-              <div className="bg-slate-900/50 backdrop-blur-sm rounded-xl p-4 border border-slate-700/50">
-                <Video className="w-6 h-6 text-blue-400 mx-auto mb-2" />
-                <div className="text-2xl font-bold text-white">{stats?.totalPurchases || 0}</div>
-                <div className="text-xs text-gray-400">วิดีโอ</div>
-              </div>
-              <div className="bg-slate-900/50 backdrop-blur-sm rounded-xl p-4 border border-slate-700/50">
-                <TrendingUp className="w-6 h-6 text-green-400 mx-auto mb-2" />
-                <div className="text-2xl font-bold text-white">฿{stats?.totalSpent || 0}</div>
-                <div className="text-xs text-gray-400">ใช้จ่าย</div>
-              </div>
-              <div className="bg-slate-900/50 backdrop-blur-sm rounded-xl p-4 border border-slate-700/50">
-                <Award className="w-6 h-6 text-purple-400 mx-auto mb-2" />
-                <div className="text-2xl font-bold text-white">{stats?.activeAccess || 0}</div>
-                <div className="text-xs text-gray-400">กำลังใช้งาน</div>
-              </div>
+            <div className="grid grid-cols-3 gap-3 w-full md:w-auto">
+              {[
+                { icon: Video, label: 'วิดีโอ', val: stats?.totalPurchases || 0, color: 'text-blue-400' },
+                { icon: TrendingUp, label: 'ยอดซื้อ', val: `฿${stats?.totalSpent || 0}`, color: 'text-green-400' },
+                { icon: Award, label: 'เข้าดู', val: stats?.totalAccessCount || 0, color: 'text-purple-400' }
+              ].map((s, i) => (
+                <div key={i} className="bg-slate-900/60 backdrop-blur-md rounded-2xl p-4 border border-white/5 text-center min-w-[100px]">
+                  <s.icon className={`w-5 h-5 ${s.color} mx-auto mb-1`} />
+                  <div className="text-xl font-bold text-white">{s.val}</div>
+                  <div className="text-[10px] uppercase tracking-wider text-slate-500 font-bold">{s.label}</div>
+                </div>
+              ))}
             </div>
           </div>
-        </div>
+        </section>
 
-        {/* Tabs Navigation */}
-        <div className="bg-slate-900/50 backdrop-blur-xl rounded-2xl border border-slate-700/50 p-2 mb-6">
-          <div className="flex flex-wrap gap-2">
-            {[
-              { id: 'overview', label: 'ภาพรวม', icon: User },
-              { id: 'purchases', label: 'ประวัติการซื้อ', icon: CreditCard },
-              { id: 'security', label: 'ความปลอดภัย', icon: Shield }
-            ].map((tab) => (
-              <button
-                key={tab.id}
-                onClick={() => setActiveTab(tab.id)}
-                className={`flex-1 min-w-[120px] flex items-center justify-center gap-2 px-6 py-3 rounded-xl font-medium transition-all ${
-                  activeTab === tab.id
-                    ? 'bg-gradient-to-r from-blue-600 to-purple-600 text-white shadow-lg shadow-blue-500/20'
-                    : 'text-gray-400 hover:text-white hover:bg-slate-800/50'
-                }`}
-              >
-                <tab.icon className="w-4 h-4" />
-                <span className="hidden sm:inline">{tab.label}</span>
-              </button>
-            ))}
-          </div>
-        </div>
+        {/* Tabs */}
+        <nav className="flex p-1.5 bg-slate-900/50 backdrop-blur-md rounded-2xl border border-white/5 mb-8">
+          {[
+            { id: 'overview', label: 'ภาพรวม', icon: User },
+            { id: 'purchases', label: 'ประวัติการซื้อ', icon: CreditCard },
+            { id: 'security', label: 'ความปลอดภัย', icon: Shield }
+          ].map((t) => (
+            <button
+              key={t.id}
+              onClick={() => setActiveTab(t.id)}
+              className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl transition-all font-semibold text-sm ${
+                activeTab === t.id 
+                ? 'bg-blue-600 text-white shadow-lg' 
+                : 'text-slate-400 hover:text-white hover:bg-white/5'
+              }`}
+            >
+              <t.icon className="w-4 h-4" />
+              {t.label}
+            </button>
+          ))}
+        </nav>
 
         {/* Tab Content */}
-        <div className="bg-slate-900/50 backdrop-blur-xl rounded-2xl border border-slate-700/50 p-6">
-          {/* Overview Tab - (เหมือนเดิม) */}
+        <div className="bg-slate-900/40 backdrop-blur-xl rounded-3xl border border-white/5 p-8">
           {activeTab === 'overview' && (
-            <div className="space-y-6">
-              <h3 className="text-2xl font-bold text-white mb-6 flex items-center gap-3">
-                <div className="w-1 h-8 bg-gradient-to-b from-blue-500 to-purple-500 rounded-full" />
-                ข้อมูลส่วนตัว
+            <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
+              <h3 className="text-xl font-bold mb-8 flex items-center gap-3">
+                <span className="w-1.5 h-6 bg-blue-500 rounded-full" /> รายละเอียดบัญชี
               </h3>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div className="group">
-                  <label className="block text-sm font-medium text-gray-400 mb-3">อีเมล</label>
-                  <div className="flex items-center gap-3 p-4 bg-slate-800/50 rounded-xl border border-slate-700/50 group-hover:border-blue-500/30 transition-all">
-                    <Mail className="w-5 h-5 text-blue-400" />
-                    <span className="text-white text-lg">{userData.email}</span>
-                  </div>
-                </div>
-
-                <div className="group">
-                  <label className="block text-sm font-medium text-gray-400 mb-3">ประเภทบัญชี</label>
-                  <div className="flex items-center gap-3 p-4 bg-slate-800/50 rounded-xl border border-slate-700/50 group-hover:border-purple-500/30 transition-all">
-                    <Shield className="w-5 h-5 text-purple-400" />
-                    <span className="text-white text-lg">
-                      {userData.role === 'admin' ? 'ผู้ดูแลระบบ' : 'ผู้ใช้งานทั่วไป'}
-                    </span>
-                  </div>
-                </div>
-
-                <div className="group">
-                  <label className="block text-sm font-medium text-gray-400 mb-3">สมาชิกตั้งแต่</label>
-                  <div className="flex items-center gap-3 p-4 bg-slate-800/50 rounded-xl border border-slate-700/50 group-hover:border-green-500/30 transition-all">
-                    <Calendar className="w-5 h-5 text-green-400" />
-                    <span className="text-white text-lg">{formatDate(userData.createdAt)}</span>
-                  </div>
-                </div>
-
-                <div className="group">
-                  <label className="block text-sm font-medium text-gray-400 mb-3">อัพเดทล่าสุด</label>
-                  <div className="flex items-center gap-3 p-4 bg-slate-800/50 rounded-xl border border-slate-700/50 group-hover:border-orange-500/30 transition-all">
-                    <History className="w-5 h-5 text-orange-400" />
-                    <span className="text-white text-lg">{formatDateTime(userData.updatedAt)}</span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Activity Stats */}
-              <div className="mt-8">
-                <h4 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
-                  <TrendingUp className="w-5 h-5 text-blue-400" />
-                  สถิติการใช้งาน
-                </h4>
-                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                  <div className="bg-gradient-to-br from-blue-600/10 to-blue-600/5 p-6 rounded-xl border border-blue-500/20">
-                    <div className="flex items-center justify-between mb-2">
-                      <Video className="w-8 h-8 text-blue-400" />
-                      <span className="text-3xl font-bold text-white">{stats?.totalPurchases || 0}</span>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-12">
+                {[
+                  { label: 'อีเมลที่ลงทะเบียน', val: userData?.email, icon: Mail, color: 'text-blue-400' },
+                  { label: 'ประเภทผู้ใช้งาน', val: userData?.role === 'admin' ? 'ผู้ดูแลระบบ' : 'สมาชิกทั่วไป', icon: Shield, color: 'text-purple-400' },
+                  { label: 'วันที่เริ่มใช้งาน', val: formatDate(userData?.createdAt), icon: Calendar, color: 'text-green-400' },
+                  { label: 'การเคลื่อนไหวล่าสุด', val: formatDateTime(userData?.updatedAt), icon: History, color: 'text-orange-400' }
+                ].map((item, i) => (
+                  <div key={i} className="p-4 rounded-2xl bg-white/5 border border-white/5 flex items-center gap-4">
+                    <div className={`p-3 rounded-xl bg-slate-950/50 ${item.color}`}>
+                      <item.icon className="w-6 h-6" />
                     </div>
-                    <p className="text-gray-400 text-sm">วิดีโอที่ซื้อทั้งหมด</p>
-                  </div>
-
-                  <div className="bg-gradient-to-br from-green-600/10 to-green-600/5 p-6 rounded-xl border border-green-500/20">
-                    <div className="flex items-center justify-between mb-2">
-                      <CreditCard className="w-8 h-8 text-green-400" />
-                      <span className="text-3xl font-bold text-white">฿{stats?.totalSpent || 0}</span>
-                    </div>
-                    <p className="text-gray-400 text-sm">ยอดใช้จ่ายทั้งหมด</p>
-                  </div>
-
-                  <div className="bg-gradient-to-br from-purple-600/10 to-purple-600/5 p-6 rounded-xl border border-purple-500/20">
-                    <div className="flex items-center justify-between mb-2">
-                      <Eye className="w-8 h-8 text-purple-400" />
-                      <span className="text-3xl font-bold text-white">{stats?.totalAccessCount || 0}</span>
-                    </div>
-                    <p className="text-gray-400 text-sm">จำนวนครั้งที่ดู</p>
-                  </div>
-
-                  <div className="bg-gradient-to-br from-pink-600/10 to-pink-600/5 p-6 rounded-xl border border-pink-500/20">
-                    <div className="flex items-center justify-between mb-2">
-                      <Award className="w-8 h-8 text-pink-400" />
-                      <span className="text-3xl font-bold text-white">{Math.round(stats?.avgAccessPerVideo || 0)}</span>
-                    </div>
-                    <p className="text-gray-400 text-sm">เฉลี่ยต่อวิดีโอ</p>
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Purchases Tab - (เหมือนเดิม) */}
-          {activeTab === 'purchases' && (
-            <div>
-              <h3 className="text-2xl font-bold text-white mb-6 flex items-center gap-3">
-                <div className="w-1 h-8 bg-gradient-to-b from-blue-500 to-purple-500 rounded-full" />
-                ประวัติการซื้อ
-              </h3>
-
-              <div className="space-y-4">
-                {purchaseHistory.map((item) => (
-                  <div key={item._id} className="group bg-slate-800/30 hover:bg-slate-800/50 rounded-xl p-5 border border-slate-700/50 hover:border-blue-500/30 transition-all">
-                    <div className="flex items-start justify-between gap-4">
-                      <div className="flex-1">
-                        <h4 className="text-white font-semibold mb-2 text-lg group-hover:text-blue-400 transition-colors">
-                          {item.title || 'Unknown Video'}
-                        </h4>
-                        
-                        <div className="flex flex-wrap items-center gap-4 text-sm text-gray-400 mb-3">
-                          <span className="flex items-center gap-1.5">
-                            <Calendar className="w-4 h-4" />
-                            {formatDate(item.purchaseInfo?.purchaseDate)}
-                          </span>
-                          {item.duration && (
-                            <span className="flex items-center gap-1.5">
-                              <Clock className="w-4 h-4" />
-                              {Math.floor(item.duration / 60)} นาที
-                            </span>
-                          )}
-                          {item.purchaseInfo?.accessCount > 0 && (
-                            <span className="flex items-center gap-1.5">
-                              <Eye className="w-4 h-4" />
-                              ดูแล้ว {item.purchaseInfo.accessCount} ครั้ง
-                            </span>
-                          )}
-                        </div>
-
-                        {item.purchaseInfo?.lastTime > 0 && (
-                          <div className="flex items-center gap-2 mb-2">
-                            <div className="flex-1 bg-slate-700/50 rounded-full h-2 overflow-hidden">
-                              <div 
-                                className="bg-gradient-to-r from-blue-500 to-purple-500 h-full rounded-full transition-all"
-                                style={{ width: `${(item.purchaseInfo.lastTime / item.duration) * 100}%` }}
-                              />
-                            </div>
-                            <span className="text-xs text-gray-400">
-                              {Math.floor((item.purchaseInfo.lastTime / item.duration) * 100)}%
-                            </span>
-                          </div>
-                        )}
-
-                        {item.description && (
-                          <p className="text-gray-500 text-sm line-clamp-2">{item.description}</p>
-                        )}
-                      </div>
-
-                      <div className="text-right">
-                        <div className="text-2xl font-bold bg-gradient-to-r from-blue-400 to-purple-400 bg-clip-text text-transparent mb-2">
-                          ฿{item.purchaseInfo?.amount || item.price}
-                        </div>
-                        {item.purchaseInfo?.isExpired !== undefined && (
-                          <span className={`inline-block px-3 py-1 rounded-full text-xs font-medium border ${
-                            !item.purchaseInfo.isExpired
-                              ? 'bg-green-500/20 text-green-400 border-green-500/30'
-                              : 'bg-red-500/20 text-red-400 border-red-500/30'
-                          }`}>
-                            {item.purchaseInfo.isExpired ? 'หมดอายุ' : 'ใช้งานได้'}
-                          </span>
-                        )}
-                      </div>
+                    <div>
+                      <p className="text-xs font-bold text-slate-500 uppercase">{item.label}</p>
+                      <p className="text-lg text-white font-medium">{item.val}</p>
                     </div>
                   </div>
                 ))}
               </div>
 
-              {purchaseHistory.length === 0 && (
-                <div className="text-center py-16">
-                  <div className="w-20 h-20 bg-slate-800/50 rounded-full flex items-center justify-center mx-auto mb-4">
-                    <CreditCard className="w-10 h-10 text-gray-600" />
+              {/* เพิ่มส่วน Logout ในหน้านี้ด้วย */}
+              <div className="pt-8 border-t border-white/5">
+                <button 
+                  onClick={handleLogout}
+                  className="w-full md:w-auto px-8 py-4 bg-red-500/10 hover:bg-red-500 text-red-500 hover:text-white rounded-2xl transition-all border border-red-500/30 flex items-center justify-center gap-3 font-bold"
+                >
+                  <LogOut className="w-5 h-5" />
+                  ออกจากระบบจากอุปกรณ์นี้
+                </button>
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'purchases' && (
+            <div className="space-y-4 animate-in fade-in slide-in-from-bottom-4 duration-500">
+               <h3 className="text-xl font-bold mb-6 flex items-center gap-3">
+                <span className="w-1.5 h-6 bg-green-500 rounded-full" /> รายการสั่งซื้อของคุณ
+              </h3>
+              {purchaseHistory.length > 0 ? (
+                purchaseHistory.map((item) => (
+                  <div key={item._id} className="group p-5 rounded-2xl bg-white/5 border border-white/5 hover:border-blue-500/50 transition-all flex flex-col md:flex-row justify-between gap-4">
+                    <div>
+                      <h4 className="text-lg font-bold text-white group-hover:text-blue-400 transition-colors">{item.title}</h4>
+                      <div className="flex gap-4 mt-2 text-sm text-slate-400">
+                        <span className="flex items-center gap-1"><Calendar className="w-4 h-4"/> {formatDate(item.purchaseInfo?.purchaseDate)}</span>
+                        <span className="flex items-center gap-1"><Eye className="w-4 h-4"/> ดูไปแล้ว {item.purchaseInfo?.accessCount || 0} ครั้ง</span>
+                      </div>
+                    </div>
+                    <div className="text-right flex flex-col justify-center">
+                      <div className="text-2xl font-black text-white">฿{item.purchaseInfo?.amount || item.price}</div>
+                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md uppercase mt-1 ${item.purchaseInfo?.isExpired ? 'bg-red-500/20 text-red-400' : 'bg-green-500/20 text-green-400'}`}>
+                        {item.purchaseInfo?.isExpired ? 'Expired' : 'Active'}
+                      </span>
+                    </div>
                   </div>
-                  <p className="text-gray-400 text-lg font-medium mb-2">ยังไม่มีประวัติการซื้อ</p>
-                  <p className="text-gray-500 text-sm">เริ่มซื้อวิดีโอเพื่อดูประวัติการซื้อของคุณ</p>
+                ))
+              ) : (
+                <div className="py-20 text-center text-slate-500">
+                  <CreditCard className="w-16 h-16 mx-auto mb-4 opacity-20" />
+                  <p>ยังไม่มีรายการสั่งซื้อในขณะนี้</p>
                 </div>
               )}
             </div>
           )}
 
-          {/* Security Tab */}
           {activeTab === 'security' && (
-            <div className="space-y-8">
-              <div>
-                <h3 className="text-2xl font-bold text-white mb-6 flex items-center gap-3">
-                  <div className="w-1 h-8 bg-gradient-to-b from-blue-500 to-purple-500 rounded-full" />
-                  เปลี่ยนรหัสผ่าน
-                </h3>
-
-                <div className="space-y-4 max-w-2xl">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-400 mb-2">รหัสผ่านปัจจุบัน</label>
+            <div className="max-w-2xl animate-in fade-in slide-in-from-bottom-4 duration-500">
+              <h3 className="text-xl font-bold mb-8 flex items-center gap-3">
+                <span className="w-1.5 h-6 bg-red-500 rounded-full" /> การจัดการความปลอดภัย
+              </h3>
+              <div className="space-y-5">
+                {[
+                  { label: 'รหัสผ่านปัจจุบัน', key: 'currentPassword' },
+                  { label: 'รหัสผ่านใหม่', key: 'newPassword' },
+                  { label: 'ยืนยันรหัสผ่านใหม่', key: 'confirmPassword' }
+                ].map((f) => (
+                  <div key={f.key}>
+                    <label className="block text-xs font-bold text-slate-500 uppercase mb-2 ml-1">{f.label}</label>
                     <div className="relative">
                       <input
                         type={showPassword ? "text" : "password"}
-                        value={passwordForm.currentPassword}
-                        onChange={(e) => setPasswordForm({...passwordForm, currentPassword: e.target.value})}
-                        className="w-full px-4 py-3 bg-slate-800/50 border border-slate-700/50 rounded-xl text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all pr-12"
-                        placeholder="กรอกรหัสผ่านปัจจุบัน"
+                        value={passwordForm[f.key]}
+                        onChange={(e) => setPasswordForm({...passwordForm, [f.key]: e.target.value})}
+                        className="w-full bg-slate-950/50 border border-white/10 rounded-2xl px-5 py-3.5 text-white focus:ring-2 focus:ring-blue-500 outline-none transition-all"
+                        placeholder={`••••••••`}
                       />
-                      <button
-                        type="button"
-                        onClick={() => setShowPassword(!showPassword)}
-                        className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white transition-colors"
-                      >
-                        {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
-                      </button>
+                      {f.key === 'currentPassword' && (
+                        <button 
+                          onClick={() => setShowPassword(!showPassword)}
+                          className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-500 hover:text-white"
+                        >
+                          {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+                        </button>
+                      )}
                     </div>
                   </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-400 mb-2">รหัสผ่านใหม่</label>
-                    <input
-                      type={showPassword ? "text" : "password"}
-                      value={passwordForm.newPassword}
-                      onChange={(e) => setPasswordForm({...passwordForm, newPassword: e.target.value})}
-                      className="w-full px-4 py-3 bg-slate-800/50 border border-slate-700/50 rounded-xl text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
-                      placeholder="กรอกรหัสผ่านใหม่ (อย่างน้อย 6 ตัวอักษร)"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-400 mb-2">ยืนยันรหัสผ่านใหม่</label>
-                    <input
-                      type={showPassword ? "text" : "password"}
-                      value={passwordForm.confirmPassword}
-                      onChange={(e) => setPasswordForm({...passwordForm, confirmPassword: e.target.value})}
-                      className="w-full px-4 py-3 bg-slate-800/50 border border-slate-700/50 rounded-xl text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
-                      placeholder="กรอกรหัสผ่านใหม่อีกครั้ง"
-                    />
-                  </div>
-
-                  <button
-                    onClick={handlePasswordChange}
-                    disabled={loading}
-                    className="px-8 py-3 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white rounded-xl font-medium transition-all disabled:opacity-50 flex items-center gap-2 shadow-lg shadow-blue-500/20"
-                  >
-                    {loading ? <Loader className="w-5 h-5 animate-spin" /> : <Lock className="w-5 h-5" />}
-                    {loading ? 'กำลังอัพเดท...' : 'อัพเดทรหัสผ่าน'}
-                  </button>
-                </div>
+                ))}
+                <button
+                  onClick={handlePasswordChange}
+                  disabled={loading}
+                  className="w-full bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-bold py-4 rounded-2xl mt-4 transition-all shadow-lg shadow-blue-600/20 flex items-center justify-center gap-2"
+                >
+                  {loading ? <Loader className="w-5 h-5 animate-spin" /> : <Lock className="w-5 h-5" />}
+                  บันทึกการเปลี่ยนแปลงรหัสผ่าน
+                </button>
               </div>
 
-              <div className="pt-8 border-t border-slate-700/50">
-                <h4 className="text-xl font-semibold text-white mb-4 flex items-center gap-2">
-                  <MapPin className="w-5 h-5 text-blue-400" />
-                  เซสชันที่ใช้งานอยู่
-                </h4>
-                <div className="space-y-4">
-                  {sessions.map((session) => (
-                    <div key={session.id} className="bg-slate-800/30 rounded-xl p-5 border border-slate-700/50">
-                      <div className="flex items-start justify-between gap-4">
-                        <div className="flex-1">
-                          <div className="flex items-center gap-3 mb-3">
-                            <h5 className="text-white font-medium text-lg">{session.device}</h5>
-                            {session.current && (
-                              <span className="px-3 py-1 bg-green-500/20 text-green-400 rounded-full text-xs font-medium border border-green-500/30">
-                                ⚡ กำลังใช้งาน
-                              </span>
-                            )}
-                          </div>
-                          <div className="space-y-2 text-sm text-gray-400">
-                            <p className="flex items-center gap-2">
-                              <MapPin className="w-4 h-4 text-blue-400" />
-                              {session.location}
-                            </p>
-                            <p className="flex items-center gap-2">
-                              <Clock className="w-4 h-4 text-purple-400" />
-                              ใช้งานล่าสุด: {formatDateTime(session.lastActive)}
-                            </p>
-                          </div>
-                        </div>
-                        {!session.current && (
-                          <button
-                            onClick={() => handleLogoutDevice(session.id)}
-                            className="flex items-center gap-2 px-4 py-2 bg-red-500/20 hover:bg-red-500/30 text-red-400 rounded-xl transition-all text-sm border border-red-500/30"
-                          >
-                            <LogOut className="w-4 h-4" />
-                            ออกจากระบบ
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {/* Security Tips */}
-              <div className="pt-8 border-t border-slate-700/50">
-                <h4 className="text-xl font-semibold text-white mb-4 flex items-center gap-2">
-                  <Shield className="w-5 h-5 text-blue-400" />
-                  คำแนะนำด้านความปลอดภัย
-                </h4>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div className="bg-gradient-to-br from-blue-600/10 to-blue-600/5 p-4 rounded-xl border border-blue-500/20">
-                    <div className="flex items-start gap-3">
-                      <div className="w-10 h-10 bg-blue-500/20 rounded-lg flex items-center justify-center flex-shrink-0">
-                        <Lock className="w-5 h-5 text-blue-400" />
-                      </div>
+              {/* Sessions */}
+              <div className="mt-12 pt-12 border-t border-white/5">
+                <h4 className="font-bold mb-6 flex items-center gap-2"><MapPin className="w-4 h-4 text-red-400"/> อุปกรณ์ที่กำลังใช้งาน</h4>
+                {sessions.map(s => (
+                  <div key={s.id} className="p-5 rounded-2xl bg-white/5 border border-white/5 flex justify-between items-center">
+                    <div className="flex gap-4 items-center">
+                      <div className="p-3 bg-green-500/10 rounded-xl"><Clock className="text-green-500 w-5 h-5"/></div>
                       <div>
-                        <h5 className="text-white font-medium mb-1">ใช้รหัสผ่านที่แข็งแรง</h5>
-                        <p className="text-gray-400 text-sm">ควรมีอย่างน้อย 8 ตัวอักษร ประกอบด้วยตัวพิมพ์ใหญ่-เล็ก ตัวเลข และสัญลักษณ์</p>
+                        <p className="font-bold text-white">{s.device} <span className="text-[10px] bg-green-500 text-white px-2 py-0.5 rounded ml-2">Current</span></p>
+                        <p className="text-xs text-slate-500">{s.location} • ใช้งานเมื่อ {formatDateTime(s.lastActive)}</p>
                       </div>
                     </div>
                   </div>
-
-                  <div className="bg-gradient-to-br from-purple-600/10 to-purple-600/5 p-4 rounded-xl border border-purple-500/20">
-                    <div className="flex items-start gap-3">
-                      <div className="w-10 h-10 bg-purple-500/20 rounded-lg flex items-center justify-center flex-shrink-0">
-                        <Eye className="w-5 h-5 text-purple-400" />
-                      </div>
-                      <div>
-                        <h5 className="text-white font-medium mb-1">ตรวจสอบกิจกรรม</h5>
-                        <p className="text-gray-400 text-sm">ตรวจสอบเซสชันที่ใช้งานอยู่เป็นประจำ และออกจากอุปกรณ์ที่ไม่รู้จัก</p>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="bg-gradient-to-br from-green-600/10 to-green-600/5 p-4 rounded-xl border border-green-500/20">
-                    <div className="flex items-start gap-3">
-                      <div className="w-10 h-10 bg-green-500/20 rounded-lg flex items-center justify-center flex-shrink-0">
-                        <Shield className="w-5 h-5 text-green-400" />
-                      </div>
-                      <div>
-                        <h5 className="text-white font-medium mb-1">อย่าแชร์รหัสผ่าน</h5>
-                        <p className="text-gray-400 text-sm">ไม่ควรแชร์รหัสผ่านกับผู้อื่น หรือใช้รหัสผ่านเดียวกันหลายเว็บไซต์</p>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="bg-gradient-to-br from-orange-600/10 to-orange-600/5 p-4 rounded-xl border border-orange-500/20">
-                    <div className="flex items-start gap-3">
-                      <div className="w-10 h-10 bg-orange-500/20 rounded-lg flex items-center justify-center flex-shrink-0">
-                        <History className="w-5 h-5 text-orange-400" />
-                      </div>
-                      <div>
-                        <h5 className="text-white font-medium mb-1">เปลี่ยนรหัสผ่านเป็นประจำ</h5>
-                        <p className="text-gray-400 text-sm">แนะนำให้เปลี่ยนรหัสผ่านทุก 3-6 เดือน เพื่อความปลอดภัยสูงสุด</p>
-                      </div>
-                    </div>
-                  </div>
-                </div>
+                ))}
               </div>
             </div>
           )}
         </div>
-      </div>
+      </main>
     </div>
   );
 };

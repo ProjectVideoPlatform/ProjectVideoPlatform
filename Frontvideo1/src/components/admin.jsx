@@ -1,671 +1,406 @@
+// admin.jsx — Dark Cinema Theme · CineStream Design System
 import React, { useState, useEffect } from 'react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line } from 'recharts';
-import { Search, Users, Video, DollarSign, Activity, Edit, Trash2, Eye, PlayCircle, CheckCircle, AlertCircle, XCircle, Filter, RefreshCw, Loader } from 'lucide-react';
+import {
+  Search, Users, Video, DollarSign, Activity, Edit, Trash2,
+  PlayCircle, CheckCircle, AlertCircle, XCircle, RefreshCw, Loader,
+  LayoutDashboard, ShoppingBag, X, Film, TrendingUp, Clapperboard
+} from 'lucide-react';
 
-// API Base URL - adjust as needed
 const API_BASE = 'http://localhost:3000/api/admin';
 
-const UploadModal = ({ isOpen, onClose, onUpload, Videoja }) => {
-  const [formData, setFormData] = useState({
-    title: '',
-    description: '',
-    price: 0,
-    tags: ''
-  });
-  const [uploading, setUploading] = useState(false);
-
-  const handleSubmit = async () => {
-    if (!(formData.title || formData.tags || formData.description || formData.price)) return;
-    setUploading(true);
-    try {
-      const uploadData = new FormData();
-      uploadData.append('title', formData.title);
-      if(formData.description != ''){
-        uploadData.append('description', formData.description);
-      }
-      if (formData.price != 0){
-        uploadData.append('price', formData.price);
-      }
-      if (formData.tags != ''){
-        uploadData.append('tags', formData.tags);
-      }
-      const jsonData = Object.fromEntries(uploadData.entries());
-      await api.put(`/videos/${Videoja.id}`, jsonData);
-      onUpload();
-      onClose();
-      setFormData({ title: '', description: '', price: 0, tags: '' });
-    } catch (error) {
-      console.error('Upload failed:', error);
-    } finally {
-      setUploading(false);
-    }
-  };
-
-  if (!isOpen) return null;
-
-  return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center">
-      <div className="bg-white rounded-lg p-6 w-full max-w-md mx-4">
-        <div className="flex justify-between items-center mb-4">
-          <h2 className="text-xl font-bold">Upload Video</h2>
-          <button onClick={onClose} className="text-gray-500 hover:text-gray-700">✕</button>
-        </div>
-        
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium mb-1">Title</label>
-            <input 
-              type="text"
-              value={formData.title}
-              placeholder={Videoja.title}
-              onChange={(e) => setFormData({...formData, title: e.target.value})}
-              className="w-full px-3 py-2 border rounded-lg"
-            />
-          </div>
-          
-          <div>
-            <label className="block text-sm font-medium mb-1">Description</label>
-            <textarea 
-              value={formData.description}
-              placeholder={Videoja.description}
-              onChange={(e) => setFormData({...formData, description: e.target.value})}
-              className="w-full px-3 py-2 border rounded-lg h-24 resize-none"
-            />
-          </div>
-          
-          <div>
-            <label className="block text-sm font-medium mb-1">Price ($)</label>
-            <input 
-              type="number"
-              step="1"
-              value={formData.price}
-              onChange={(e) => setFormData({...formData, price: parseFloat(e.target.value) || 0})}
-              placeholder={Videoja.price}
-              className="w-full px-3 py-2 border rounded-lg"
-            />
-          </div>
-          
-          <div>
-            <label className="block text-sm font-medium mb-1">Tags (comma separated)</label>
-            <input 
-              type="text"
-              value={formData.tags}
-              onChange={(e) => setFormData({...formData, tags: e.target.value})}
-              placeholder={Videoja.tags}
-              className="w-full px-3 py-2 border rounded-lg"
-            />
-          </div>
-          
-          <div className="flex gap-2 pt-4">
-            <button 
-              type="button" 
-              onClick={onClose}
-              className="flex-1 px-4 py-2 border rounded-lg hover:bg-gray-50"
-            >
-              Cancel
-            </button>
-            <button 
-              type="submit" 
-              onClick={handleSubmit}
-              disabled={uploading || !(formData.title||formData.price||formData.tags||formData.description)}
-              className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
-            >
-              {uploading ? <Loader className="w-4 h-4 animate-spin mx-auto" /> : 'Upload'}
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
-  );
-};
-
-const api = {
-  get: async (endpoint) => {
-    const AUTH_TOKEN = localStorage.getItem("authToken");
-    const response = await fetch(`${API_BASE}${endpoint}`, {
-      headers: { 'Authorization': `Bearer ${AUTH_TOKEN}` },     credentials: 'include'
-    });
-    if (!response.ok) throw new Error('API call failed');
-    return response.json();
-  },
-  put: async (endpoint, data = {}) => {
-    const AUTH_TOKEN = localStorage.getItem("authToken");
-    const response = await fetch(`${API_BASE}${endpoint}`, {
-      method: 'PUT',
-      headers: {
-        'Authorization': `Bearer ${AUTH_TOKEN}`,
-        'Content-Type': 'application/json'
-      },
-           credentials: 'include',
-      body: JSON.stringify(data)
-    });
-    if (!response.ok) throw new Error('API call failed');
-    return response.json();
-  },
-  delete: async (endpoint) => {
-    const AUTH_TOKEN = localStorage.getItem("authToken");
-    const response = await fetch(`${API_BASE}${endpoint}`, {
-      method: 'DELETE',
-      headers: { 'Authorization': `Bearer ${AUTH_TOKEN}`
-       },
-            credentials: 'include'
-    });
-    if (!response.ok) throw new Error('API call failed');
-    return response.json();
-  },
-  post: async (endpoint, data = {}) => {
-    const AUTH_TOKEN = localStorage.getItem("authToken");
-    const response = await fetch(`${API_BASE}${endpoint}`, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${AUTH_TOKEN}`,
-        'Content-Type': 'application/json',
-        
-      },
-           credentials: 'include',
-      body: JSON.stringify(data)
-    });
-    if (!response.ok) throw new Error('API call failed');
-    return response.json();
+const styles = `
+  @import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@300;400;500;600&display=swap');
+  :root {
+    --bg:#0a0a0f; --surface:#111118; --card:#16161f;
+    --border:rgba(255,255,255,0.07); --accent:#e8445a; --accent2:#ff8c42;
+    --gold:#f5c842; --text:#f0eff5; --muted:#6b6a7a;
+    --success:#2ecc71; --warn:#f5c842; --nav-h:60px;
   }
+  .adm-root { min-height:100vh; background:var(--bg); color:var(--text); font-family:'DM Sans',sans-serif; -webkit-font-smoothing:antialiased; }
+
+  /* Nav */
+  .adm-nav {
+    position:sticky; top:0; height:var(--nav-h);
+    background:rgba(10,10,15,0.9); backdrop-filter:blur(18px);
+    border-bottom:1px solid var(--border); z-index:50;
+    display:flex; align-items:center; padding:0 20px; gap:10px;
+  }
+  .adm-logo { font-family:'Bebas Neue',sans-serif; font-size:20px; letter-spacing:2px; background:linear-gradient(135deg,var(--accent),var(--accent2)); -webkit-background-clip:text; -webkit-text-fill-color:transparent; background-clip:text; flex-shrink:0; }
+  .adm-sep { width:1px; height:20px; background:var(--border); flex-shrink:0; }
+  .adm-admin-pill { font-size:10px; font-weight:700; letter-spacing:.7px; text-transform:uppercase; padding:3px 9px; border-radius:6px; background:rgba(232,68,90,.12); color:var(--accent); border:1px solid rgba(232,68,90,.25); flex-shrink:0; }
+  .adm-tabs { display:flex; gap:2px; flex:1; }
+  @media(max-width:640px){.adm-tabs{display:none;}}
+  .adm-tab { display:flex; align-items:center; gap:6px; padding:7px 13px; border-radius:8px; font-size:13px; font-weight:500; color:var(--muted); background:transparent; border:none; cursor:pointer; transition:all .2s; white-space:nowrap; font-family:'DM Sans',sans-serif; }
+  .adm-tab:hover { color:var(--text); background:rgba(255,255,255,.04); }
+  .adm-tab.active { color:var(--accent); background:rgba(232,68,90,.1); }
+
+  /* Bottom nav mobile */
+  .adm-bot { display:none; position:fixed; bottom:0; left:0; right:0; height:62px; background:rgba(10,10,15,.96); backdrop-filter:blur(16px); border-top:1px solid var(--border); z-index:100; align-items:center; justify-content:space-around; }
+  @media(max-width:640px){.adm-bot{display:flex;}}
+  .adm-bitem { display:flex; flex-direction:column; align-items:center; gap:2px; padding:5px 8px; border:none; background:transparent; color:var(--muted); cursor:pointer; font-size:9px; font-weight:600; letter-spacing:.3px; text-transform:uppercase; font-family:'DM Sans',sans-serif; transition:color .2s; flex:1; }
+  .adm-bitem.active { color:var(--accent); }
+  .adm-bitem svg { width:20px; height:20px; }
+
+  /* Page */
+  .adm-page { max-width:1280px; margin:0 auto; padding:26px 20px; }
+  @media(max-width:640px){.adm-page{padding:18px 14px 80px;}}
+
+  .adm-head { display:flex; align-items:center; justify-content:space-between; margin-bottom:20px; flex-wrap:wrap; gap:10px; }
+  .adm-title { font-family:'Bebas Neue',sans-serif; font-size:26px; letter-spacing:1.5px; }
+
+  /* Stat cards */
+  .adm-stats { display:grid; grid-template-columns:repeat(4,1fr); gap:14px; margin-bottom:22px; }
+  @media(max-width:900px){.adm-stats{grid-template-columns:repeat(2,1fr);}}
+  @media(max-width:480px){.adm-stats{grid-template-columns:1fr 1fr; gap:10px;}}
+  .adm-stat { background:var(--card); border:1px solid var(--border); border-radius:14px; padding:16px 18px; display:flex; align-items:center; gap:12px; transition:border-color .2s; }
+  .adm-stat:hover { border-color:rgba(255,255,255,.12); }
+  .adm-stat-icon { width:42px; height:42px; border-radius:12px; display:flex; align-items:center; justify-content:center; flex-shrink:0; }
+  .adm-stat-lbl { font-size:11px; color:var(--muted); font-weight:500; letter-spacing:.3px; margin-bottom:3px; }
+  .adm-stat-val { font-size:22px; font-weight:700; line-height:1; }
+
+  /* Chart */
+  .adm-chart { background:var(--card); border:1px solid var(--border); border-radius:14px; padding:18px 20px; margin-bottom:22px; }
+  .adm-chart-lbl { font-size:11px; font-weight:600; color:var(--muted); letter-spacing:.5px; text-transform:uppercase; margin-bottom:14px; }
+
+  /* Toolbar */
+  .adm-bar { display:flex; gap:10px; margin-bottom:14px; flex-wrap:wrap; }
+  .adm-sw { flex:1; min-width:140px; position:relative; }
+  .adm-sw svg { position:absolute; left:10px; top:50%; transform:translateY(-50%); color:var(--muted); width:14px; height:14px; pointer-events:none; }
+  .adm-si { width:100%; padding:9px 12px 9px 32px; background:var(--surface); border:1px solid var(--border); border-radius:10px; color:var(--text); font-family:'DM Sans',sans-serif; font-size:13px; outline:none; transition:border-color .2s; }
+  .adm-si::placeholder { color:var(--muted); }
+  .adm-si:focus { border-color:var(--accent); }
+  .adm-sel { padding:9px 13px; background:var(--surface); border:1px solid var(--border); border-radius:10px; color:var(--text); font-family:'DM Sans',sans-serif; font-size:13px; outline:none; cursor:pointer; min-width:120px; }
+  .adm-sel option { background:var(--surface); }
+  .adm-ref { display:flex; align-items:center; gap:6px; padding:9px 14px; border-radius:10px; background:var(--surface); border:1px solid var(--border); color:var(--text); font-size:13px; font-weight:500; cursor:pointer; transition:border-color .2s; font-family:'DM Sans',sans-serif; white-space:nowrap; }
+  .adm-ref:hover { border-color:var(--accent); color:var(--accent); }
+
+  /* Table */
+  .adm-tbl { background:var(--card); border:1px solid var(--border); border-radius:14px; overflow:hidden; }
+  .adm-row { display:flex; align-items:center; justify-content:space-between; padding:13px 16px; gap:12px; border-bottom:1px solid var(--border); transition:background .15s; }
+  .adm-row:last-child { border-bottom:none; }
+  .adm-row:hover { background:rgba(255,255,255,.025); }
+  .adm-ico { width:38px; height:38px; border-radius:10px; background:var(--surface); border:1px solid var(--border); display:flex; align-items:center; justify-content:center; flex-shrink:0; color:var(--muted); }
+  .adm-rtitle { font-size:13px; font-weight:600; color:var(--text); margin-bottom:3px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .adm-rsub { font-size:11px; color:var(--muted); line-height:1.5; }
+  .adm-actions { display:flex; gap:5px; flex-shrink:0; }
+  .adm-ibtn { width:30px; height:30px; border-radius:8px; background:var(--surface); border:1px solid var(--border); color:var(--muted); cursor:pointer; display:flex; align-items:center; justify-content:center; transition:all .2s; }
+  .adm-ibtn:hover { border-color:var(--accent); color:var(--accent); }
+  .adm-ibtn.del:hover { background:rgba(232,68,90,.1); }
+
+  /* Badge */
+  .adm-bdg { display:inline-flex; align-items:center; gap:4px; padding:2px 8px; border-radius:6px; font-size:10px; font-weight:700; letter-spacing:.4px; text-transform:uppercase; }
+  .adm-bdg-completed { background:rgba(46,204,113,.12); color:var(--success); border:1px solid rgba(46,204,113,.25); }
+  .adm-bdg-processing { background:rgba(245,200,66,.12); color:var(--warn); border:1px solid rgba(245,200,66,.25); }
+  .adm-bdg-failed { background:rgba(232,68,90,.12); color:var(--accent); border:1px solid rgba(232,68,90,.25); }
+  .adm-bdg-pending { background:rgba(99,102,241,.12); color:#a5b4fc; border:1px solid rgba(99,102,241,.25); }
+  .adm-bdg-admin { background:rgba(232,68,90,.12); color:var(--accent); border:1px solid rgba(232,68,90,.25); }
+  .adm-bdg-user  { background:rgba(99,102,241,.12); color:#a5b4fc; border:1px solid rgba(99,102,241,.25); }
+
+  /* Empty/Loading */
+  .adm-loading { display:flex; flex-direction:column; align-items:center; padding:52px; gap:10px; color:var(--muted); font-size:13px; }
+  .adm-empty   { display:flex; flex-direction:column; align-items:center; padding:52px; gap:8px; color:var(--muted); font-size:13px; }
+
+  /* Error */
+  .adm-err { background:rgba(232,68,90,.1); border:1px solid rgba(232,68,90,.25); border-radius:10px; padding:12px 14px; margin-bottom:16px; font-size:13px; color:#fca5a5; display:flex; align-items:center; gap:8px; }
+
+  /* Modal */
+  .adm-mbk { position:fixed; inset:0; background:rgba(0,0,0,.7); backdrop-filter:blur(6px); z-index:200; display:flex; align-items:center; justify-content:center; padding:20px; }
+  .adm-mdl { background:var(--card); border:1px solid var(--border); border-radius:22px; width:100%; max-width:450px; box-shadow:0 24px 60px rgba(0,0,0,.7); overflow:hidden; }
+  .adm-mhd { padding:17px 20px; border-bottom:1px solid var(--border); display:flex; align-items:center; justify-content:space-between; }
+  .adm-mbd { padding:20px; }
+  .adm-fld { margin-bottom:14px; }
+  .adm-lbl { display:block; font-size:11px; font-weight:600; letter-spacing:.6px; text-transform:uppercase; color:var(--muted); margin-bottom:5px; }
+  .adm-in,.adm-ta { width:100%; padding:9px 12px; background:var(--surface); border:1px solid var(--border); border-radius:10px; color:var(--text); font-family:'DM Sans',sans-serif; font-size:13px; outline:none; transition:border-color .2s; }
+  .adm-in:focus,.adm-ta:focus { border-color:var(--accent); }
+  .adm-in::placeholder,.adm-ta::placeholder { color:var(--muted); }
+  .adm-ta { height:76px; resize:none; }
+  .adm-mact { display:flex; gap:10px; margin-top:16px; }
+  .adm-bcnl { flex:1; padding:10px; border-radius:10px; background:var(--surface); border:1px solid var(--border); color:var(--text); font-family:'DM Sans',sans-serif; font-size:13px; font-weight:500; cursor:pointer; transition:border-color .2s; }
+  .adm-bcnl:hover { border-color:var(--accent); }
+  .adm-bsav { flex:1; padding:10px; border-radius:10px; background:linear-gradient(135deg,var(--accent),var(--accent2)); border:none; color:#fff; font-family:'DM Sans',sans-serif; font-size:13px; font-weight:600; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:6px; transition:opacity .2s; }
+  .adm-bsav:hover { opacity:.9; }
+  .adm-bsav:disabled { opacity:.4; cursor:not-allowed; }
+
+  /* Recharts override */
+  .recharts-cartesian-grid-horizontal line,.recharts-cartesian-grid-vertical line{stroke:rgba(255,255,255,.06);}
+  .recharts-text{fill:var(--muted)!important;font-size:11px!important;}
+  .recharts-tooltip-wrapper .recharts-default-tooltip{background:var(--card)!important;border:1px solid var(--border)!important;border-radius:10px!important;font-family:'DM Sans',sans-serif!important;font-size:12px!important;}
+  .recharts-default-tooltip .recharts-tooltip-label{color:var(--text)!important;}
+  .recharts-default-tooltip .recharts-tooltip-item{color:var(--accent)!important;}
+  @keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}
+  .spin{animation:spin 1s linear infinite;}
+`;
+
+/* ── API ── */
+const api = {
+  get: async (ep) => {
+    const r = await fetch(`${API_BASE}${ep}`, { headers: { Authorization: `Bearer ${localStorage.getItem('authToken')}` }, credentials: 'include' });
+    if (!r.ok) throw new Error('failed'); return r.json();
+  },
+  put: async (ep, data) => {
+    const r = await fetch(`${API_BASE}${ep}`, { method: 'PUT', headers: { Authorization: `Bearer ${localStorage.getItem('authToken')}`, 'Content-Type': 'application/json' }, credentials: 'include', body: JSON.stringify(data) });
+    if (!r.ok) throw new Error('failed'); return r.json();
+  },
+  delete: async (ep) => {
+    const r = await fetch(`${API_BASE}${ep}`, { method: 'DELETE', headers: { Authorization: `Bearer ${localStorage.getItem('authToken')}` }, credentials: 'include' });
+    if (!r.ok) throw new Error('failed'); return r.json();
+  },
 };
 
+/* ── Status badge ── */
+const Bdg = ({ status }) => {
+  const m = { completed: ['completed', <CheckCircle size={9}/>], processing: ['processing', <Activity size={9}/>], failed: ['failed', <XCircle size={9}/>], pending: ['pending', <AlertCircle size={9}/>] };
+  const [cls, icon] = m[status] || m.pending;
+  return <span className={`adm-bdg adm-bdg-${cls}`}>{icon}{status}</span>;
+};
+
+/* ── Edit Modal ── */
+const EditModal = ({ isOpen, onClose, onSave, video }) => {
+  const [form, setForm]     = useState({ title:'', description:'', price:0, tags:'' });
+  const [saving, setSaving] = useState(false);
+  useEffect(() => { if (video) setForm({ title: video.title||'', description: video.description||'', price: video.price||0, tags: Array.isArray(video.tags) ? video.tags.join(', ') : (video.tags||'') }); }, [video]);
+  const save = async () => {
+    setSaving(true);
+    try {
+      const p = {};
+      if (form.title)       p.title       = form.title;
+      if (form.description) p.description = form.description;
+      if (form.price)       p.price       = form.price;
+      if (form.tags)        p.tags        = form.tags;
+      await api.put(`/videos/${video.id}`, p); onSave(); onClose();
+    } catch(e){console.error(e);} finally{setSaving(false);}
+  };
+  if (!isOpen) return null;
+  return (
+    <div className="adm-mbk">
+      <div className="adm-mdl">
+        <div className="adm-mhd">
+          <div>
+            <div style={{fontFamily:"'Bebas Neue',sans-serif",fontSize:20,letterSpacing:1.5}}>แก้ไขวิดีโอ</div>
+            <div style={{fontSize:11,color:'var(--muted)',marginTop:2,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',maxWidth:280}}>{video?.title}</div>
+          </div>
+          <button className="adm-ibtn" onClick={onClose}><X size={14}/></button>
+        </div>
+        <div className="adm-mbd">
+          <div className="adm-fld"><label className="adm-lbl">Title</label><input className="adm-in" value={form.title} placeholder={video?.title} onChange={e=>setForm(p=>({...p,title:e.target.value}))}/></div>
+          <div className="adm-fld"><label className="adm-lbl">Description</label><textarea className="adm-ta" value={form.description} placeholder={video?.description||'รายละเอียด...'} onChange={e=>setForm(p=>({...p,description:e.target.value}))}/></div>
+          <div className="adm-fld"><label className="adm-lbl">Price (฿)</label><input type="number" step="1" className="adm-in" value={form.price} onChange={e=>setForm(p=>({...p,price:parseFloat(e.target.value)||0}))}/></div>
+          <div className="adm-fld"><label className="adm-lbl">Tags</label><input className="adm-in" value={form.tags} placeholder="action, comedy..." onChange={e=>setForm(p=>({...p,tags:e.target.value}))}/></div>
+          <div className="adm-mact">
+            <button className="adm-bcnl" onClick={onClose}>ยกเลิก</button>
+            <button className="adm-bsav" onClick={save} disabled={saving}>
+              {saving ? <Loader size={13} className="spin"/> : <><CheckCircle size={13}/>บันทึก</>}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+/* ── Admin Dashboard ── */
 const AdminDashboard = () => {
-  const [showUploadModal, setShowUploadModal] = useState(false);
-  const [activeTab, setActiveTab] = useState('dashboard');
-  const [dashboardStats, setDashboardStats] = useState(null);
-  const [videos, setVideos] = useState([]);
-  const [users, setUsers] = useState([]);
-  const [purchases, setPurchases] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [videosLoading, setVideosLoading] = useState(false);
-  const [usersLoading, setUsersLoading] = useState(false);
-  const [purchasesLoading, setPurchasesLoading] = useState(false);
-  const [error, setError] = useState('');
-  const [searchTerm, setSearchTerm] = useState('');
-  const [filters, setFilters] = useState({
-    status: '',
-    role: '',
-    page: 1,
-    limit: 20
-  });
-  const [Videoja, setVideo] = useState({});
+  const [tab, setTab]           = useState('dashboard');
+  const [dashStats, setDash]    = useState(null);
+  const [videos, setVideos]     = useState([]);
+  const [users, setUsers]       = useState([]);
+  const [purchases, setPurch]   = useState([]);
+  const [loading, setLoading]   = useState(false);
+  const [vLoad, setVLoad]       = useState(false);
+  const [uLoad, setULoad]       = useState(false);
+  const [pLoad, setPLoad]       = useState(false);
+  const [error, setError]       = useState('');
+  const [search, setSearch]     = useState('');
+  const [filters, setFilters]   = useState({ status:'', role:'', page:1, limit:20 });
+  const [editVid, setEditVid]   = useState(null);
+  const [showEdit, setShowEdit] = useState(false);
 
-  // Fetch dashboard stats
-  const fetchDashboardStats = async () => {
-    try {
-      setLoading(true);
-      const data = await api.get('/dashboard/stats');
-      setDashboardStats(data);
-    } catch (err) {
-      setError('Failed to fetch dashboard stats');
-    } finally {
-      setLoading(false);
-    }
+  const fetchDash = async () => { try { setLoading(true); const d = await api.get('/dashboard/stats'); setDash(d); setError(''); } catch { setError('Failed to load stats'); } finally { setLoading(false); } };
+  const fetchVids = async () => {
+    try { setVLoad(true); const q = new URLSearchParams({ page:filters.page, limit:filters.limit, ...(filters.status&&{status:filters.status}), ...(search&&{search}) }); const d = await api.get(`/videos?${q}`); setVideos(d.videos||[]); setError(''); } catch { setError('Failed to load videos'); } finally { setVLoad(false); }
   };
-
-  // Fetch videos
-  const fetchVideos = async () => {
-    try {
-      setVideosLoading(true);
-      const queryParams = new URLSearchParams({
-        page: filters.page,
-        limit: filters.limit,
-        ...(filters.status && { status: filters.status }),
-        ...(searchTerm && { search: searchTerm })
-      });
-      const data = await api.get(`/videos?${queryParams}`);
-      setVideos(data.videos || []);
-    } catch (err) {
-      setError('Failed to fetch videos');
-    } finally {
-      setVideosLoading(false);
-    }
-  };
-
-  // Fetch users
   const fetchUsers = async () => {
-    try {
-      setUsersLoading(true);
-      const queryParams = new URLSearchParams({
-        page: filters.page,
-        limit: filters.limit,
-        ...(filters.role && { role: filters.role }),
-        ...(searchTerm && { search: searchTerm })
-      });
-      const data = await api.get(`/users?${queryParams}`);
-      setUsers(data.users || []);
-    } catch (err) {
-      setError('Failed to fetch users');
-    } finally {
-      setUsersLoading(false);
-    }
+    try { setULoad(true); const q = new URLSearchParams({ page:filters.page, limit:filters.limit, ...(filters.role&&{role:filters.role}), ...(search&&{search}) }); const d = await api.get(`/users?${q}`); setUsers(d.users||[]); setError(''); } catch { setError('Failed to load users'); } finally { setULoad(false); }
   };
-
-  // Fetch purchases
-  const fetchPurchases = async () => {
-    try {
-      setPurchasesLoading(true);
-      const data = await api.get('/purchases');
-      setPurchases(data.purchases || []);
-    } catch (err) {
-      setError('Failed to fetch purchases');
-    } finally {
-      setPurchasesLoading(false);
-    }
-  };
+  const fetchPurch = async () => { try { setPLoad(true); const d = await api.get('/purchases'); setPurch(d.purchases||[]); setError(''); } catch { setError('Failed to load purchases'); } finally { setPLoad(false); } };
 
   useEffect(() => {
-    if (activeTab === 'dashboard') fetchDashboardStats();
-    else if (activeTab === 'videos') fetchVideos();
-    else if (activeTab === 'users') fetchUsers();
-    else if (activeTab === 'purchases') fetchPurchases();
-  }, [activeTab, filters]);
-
-  // Debounce search
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      if (activeTab === 'videos') fetchVideos();
-      else if (activeTab === 'users') fetchUsers();
-    }, 500);
-    return () => clearTimeout(timer);
-  }, [searchTerm]);
-
-  // Status badge component
-  const StatusBadge = ({ status }) => {
-    const statusConfig = {
-      completed: { color: 'bg-green-100 text-green-800', icon: CheckCircle },
-      processing: { color: 'bg-yellow-100 text-yellow-800', icon: Activity },
-      failed: { color: 'bg-red-100 text-red-800', icon: XCircle },
-      pending: { color: 'bg-blue-100 text-blue-800', icon: AlertCircle }
-    };
-
-    const config = statusConfig[status] || statusConfig.pending;
-    const Icon = config.icon;
-
-    return (
-      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${config.color}`}>
-        <Icon className="w-3 h-3 mr-1" />
-        {status}
-      </span>
-    );
-  };
-
-  // Dashboard component
-  const Dashboard = () => (
-    <div className="space-y-6">
-      <h1 className="text-3xl font-bold text-gray-900">Dashboard</h1>
-      
-      {dashboardStats && (
-        <>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-            <div className="bg-white overflow-hidden shadow rounded-lg">
-              <div className="p-5">
-                <div className="flex items-center">
-                  <div className="flex-shrink-0">
-                    <Video className="h-6 w-6 text-gray-400" />
-                  </div>
-                  <div className="ml-5 w-0 flex-1">
-                    <dl>
-                      <dt className="text-sm font-medium text-gray-500 truncate">Total Videos</dt>
-                      <dd className="text-lg font-medium text-gray-900">{dashboardStats.stats.totalVideos}</dd>
-                    </dl>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div className="bg-white overflow-hidden shadow rounded-lg">
-              <div className="p-5">
-                <div className="flex items-center">
-                  <div className="flex-shrink-0">
-                    <Users className="h-6 w-6 text-gray-400" />
-                  </div>
-                  <div className="ml-5 w-0 flex-1">
-                    <dl>
-                      <dt className="text-sm font-medium text-gray-500 truncate">Total Users</dt>
-                      <dd className="text-lg font-medium text-gray-900">{dashboardStats.stats.totalUsers}</dd>
-                    </dl>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div className="bg-white overflow-hidden shadow rounded-lg">
-              <div className="p-5">
-                <div className="flex items-center">
-                  <div className="flex-shrink-0">
-                    <DollarSign className="h-6 w-6 text-gray-400" />
-                  </div>
-                  <div className="ml-5 w-0 flex-1">
-                    <dl>
-                      <dt className="text-sm font-medium text-gray-500 truncate">Total Revenue</dt>
-                      <dd className="text-lg font-medium text-gray-900">${dashboardStats.stats.totalRevenue.toFixed(2)}</dd>
-                    </dl>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div className="bg-white overflow-hidden shadow rounded-lg">
-              <div className="p-5">
-                <div className="flex items-center">
-                  <div className="flex-shrink-0">
-                    <Activity className="h-6 w-6 text-gray-400" />
-                  </div>
-                  <div className="ml-5 w-0 flex-1">
-                    <dl>
-                      <dt className="text-sm font-medium text-gray-500 truncate">Total Purchases</dt>
-                      <dd className="text-lg font-medium text-gray-900">{dashboardStats.stats.totalPurchases}</dd>
-                    </dl>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {dashboardStats.trends.revenue && (
-            <div className="bg-white shadow rounded-lg p-6">
-              <h3 className="text-lg font-medium text-gray-900 mb-4">Revenue Trend (Last 30 Days)</h3>
-              <ResponsiveContainer width="100%" height={300}>
-                <LineChart data={dashboardStats.trends.revenue}>
-                  <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis dataKey="_id.day" />
-                  <YAxis />
-                  <Tooltip />
-                  <Line type="monotone" dataKey="revenue" stroke="#3B82F6" />
-                </LineChart>
-              </ResponsiveContainer>
-            </div>
-          )}
-        </>
-      )}
-    </div>
-  );
-
-  // Videos component
-  const Videos = () => (
-    <div className="space-y-6">
-      <div className="flex justify-between items-center">
-        <h1 className="text-3xl font-bold text-gray-900">Videos</h1>
-        <button
-          onClick={fetchVideos}
-          className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700"
-        >
-          <RefreshCw className="w-4 h-4 mr-2" />
-          Refresh
-        </button>
-      </div>
-
-      <div className="flex flex-col sm:flex-row gap-4">
-        <div className="flex-1">
-          <input
-            type="text"
-            placeholder="Search videos..."
-            value={searchTerm}
-            autoFocus
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
-          />
-        </div>
-        <select
-          value={filters.status}
-          onChange={(e) => setFilters(prev => ({ ...prev, status: e.target.value }))}
-          className="px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
-        >
-          <option value="">All Status</option>
-          <option value="completed">Completed</option>
-          <option value="processing">Processing</option>
-          <option value="failed">Failed</option>
-        </select>
-      </div>
-
-      <div className="bg-white shadow overflow-hidden sm:rounded-md">
-        {videosLoading ? (
-          <div className="px-4 py-12 text-center">
-            <Loader className="w-8 h-8 animate-spin mx-auto text-indigo-600" />
-            <p className="mt-2 text-sm text-gray-500">Loading videos...</p>
-          </div>
-        ) : (
-          <ul className="divide-y divide-gray-200">
-            {videos.map((video) => (
-              <li key={video._id}>
-                <div className="px-4 py-4 flex items-center justify-between">
-                  <div className="flex items-center">
-                    <div className="flex-shrink-0 h-10 w-10">
-                      <PlayCircle className="h-10 w-10 text-gray-400" />
-                    </div>
-                    <div className="ml-4">
-                      <div className="flex items-center gap-2">
-                        <p className="text-sm font-medium text-gray-900">{video.title}</p>
-                        <StatusBadge status={video.uploadStatus} />
-                      </div>
-                      <p className="text-sm text-gray-500">ID: {video.id}</p>
-                      <p className="text-sm text-gray-500">${video.price} • {video.purchaseCount} purchases</p>
-                    </div>
-                  </div>
-                  <div className="flex items-center space-x-2">
-                    <button className="text-indigo-600 hover:text-indigo-900">
-                      <Eye className="h-4 w-4" />
-                    </button>
-                    <button 
-                      className="text-indigo-600 hover:text-indigo-900"
-                      onClick={() => {
-                        setVideo(video);
-                        setShowUploadModal(true);
-                      }}
-                    >
-                      <Edit className="h-4 w-4" />
-                    </button>
-                    <button 
-                      className="text-red-600 hover:text-red-900"
-                      onClick={async () => {
-                        if (confirm("คุณแน่ใจว่าจะลบวิดีโอนี้?")) {
-                          await api.delete(`/videos/${video.id}`);
-                          setVideos(videos.filter(v => v.id !== video.id));
-                        }
-                      }}
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </button>
-                  </div>
-                </div>
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
-    </div>
-  );
-
-  // Users component
-  const Usersja = () => (
-    <div className="space-y-6">
-      <div className="flex justify-between items-center">
-        <h1 className="text-3xl font-bold text-gray-900">Users</h1>
-        <button
-          onClick={fetchUsers}
-          className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700"
-        >
-          <RefreshCw className="w-4 h-4 mr-2" />
-          Refresh
-        </button>
-      </div>
-
-      <div className="flex flex-col sm:flex-row gap-4">
-        <div className="flex-1">
-          <input
-            type="text"
-            placeholder="Search users by email..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
-          />
-        </div>
-        <select
-          value={filters.role}
-          onChange={(e) => setFilters(prev => ({ ...prev, role: e.target.value }))}
-          className="px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
-        >
-          <option value="">All Roles</option>
-          <option value="user">User</option>
-          <option value="admin">Admin</option>
-        </select>
-      </div>
-
-      <div className="bg-white shadow overflow-hidden sm:rounded-md">
-        {usersLoading ? (
-          <div className="px-4 py-12 text-center">
-            <Loader className="w-8 h-8 animate-spin mx-auto text-indigo-600" />
-            <p className="mt-2 text-sm text-gray-500">Loading users...</p>
-          </div>
-        ) : (
-          <ul className="divide-y divide-gray-200">
-            {users.map((user) => (
-              <li key={user._id}>
-                <div className="px-4 py-4 flex items-center justify-between">
-                  <div className="flex items-center">
-                    <div className="flex-shrink-0 h-10 w-10">
-                      <div className="h-10 w-10 rounded-full bg-gray-300 flex items-center justify-center">
-                        <Users className="h-6 w-6 text-gray-600" />
-                      </div>
-                    </div>
-                    <div className="ml-4">
-                      <p className="text-sm font-medium text-gray-900">{user.email}</p>
-                      <p className="text-sm text-gray-500">Role: {user.role}</p>
-                      <p className="text-sm text-gray-500">
-                        ${user.stats.totalSpent.toFixed(2)} spent • {user.stats.totalPurchases} purchases
-                      </p>
-                    </div>
-                  </div>
-                  <div className="text-sm text-gray-500">
-                    {new Date(user.createdAt).toLocaleDateString()}
-                  </div>
-                </div>
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
-    </div>
-  );
-
-  // Purchases component
-  const Purchases = () => (
-    <div className="space-y-6">
-      <div className="flex justify-between items-center">
-        <h1 className="text-3xl font-bold text-gray-900">Purchases</h1>
-        <button
-          onClick={fetchPurchases}
-          className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700"
-        >
-          <RefreshCw className="w-4 h-4 mr-2" />
-          Refresh
-        </button>
-      </div>
-
-      <div className="bg-white shadow overflow-hidden sm:rounded-md">
-        {purchasesLoading ? (
-          <div className="px-4 py-12 text-center">
-            <Loader className="w-8 h-8 animate-spin mx-auto text-indigo-600" />
-            <p className="mt-2 text-sm text-gray-500">Loading purchases...</p>
-          </div>
-        ) : (
-          <ul className="divide-y divide-gray-200">
-            {purchases.map((purchase) => (
-              <li key={purchase._id}>
-                <div className="px-4 py-4 flex items-center justify-between">
-                  <div className="flex items-center">
-                    <div className="flex-shrink-0 h-10 w-10">
-                      <DollarSign className="h-10 w-10 text-green-600" />
-                    </div>
-                    <div className="ml-4">
-                      <p className="text-sm font-medium text-gray-900">
-                        {purchase.videoId?.title || 'Unknown Video'}
-                      </p>
-                      <p className="text-sm text-gray-500">
-                        {purchase.userId?.email || 'Unknown User'}
-                      </p>
-                      <p className="text-sm text-gray-500">${purchase.amount}</p>
-                    </div>
-                  </div>
-                  <div className="text-right">
-                    <StatusBadge status={purchase.status} />
-                    <p className="text-sm text-gray-500 mt-1">
-                      {new Date(purchase.purchaseDate).toLocaleDateString()}
-                    </p>
-                  </div>
-                </div>
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
-    </div>
-  );
+    if (tab==='dashboard') fetchDash(); else if (tab==='videos') fetchVids(); else if (tab==='users') fetchUsers(); else fetchPurch();
+    setSearch('');
+  }, [tab, filters]);
+  useEffect(() => { const t = setTimeout(() => { if(tab==='videos') fetchVids(); else if(tab==='users') fetchUsers(); }, 400); return()=>clearTimeout(t); }, [search]);
 
   const tabs = [
-    { id: 'dashboard', label: 'Dashboard', icon: BarChart },
-    { id: 'videos', label: 'Videos', icon: Video },
-    { id: 'users', label: 'Users', icon: Users },
-    { id: 'purchases', label: 'Purchases', icon: DollarSign }
+    {id:'dashboard', label:'Dashboard', icon:LayoutDashboard},
+    {id:'videos',    label:'Videos',    icon:Film},
+    {id:'users',     label:'Users',     icon:Users},
+    {id:'purchases', label:'Purchases', icon:ShoppingBag},
   ];
 
   return (
-    <div className="min-h-screen bg-gray-100 pt-18">
-      <nav className="bg-white shadow">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between h-16">
-            <div className="flex">
-              <div className="flex-shrink-0 flex items-center">
-                <h1 className="text-xl font-bold text-gray-900">Admin Panel</h1>
-              </div>
-              <div className="hidden sm:ml-6 sm:flex sm:space-x-8">
-                {tabs.map((tab) => {
-                  const Icon = tab.icon;
-                  return (
-                    <button
-                      key={tab.id}
-                      onClick={() => setActiveTab(tab.id)}
-                      className={`${
-                        activeTab === tab.id
-                          ? 'border-indigo-500 text-gray-900'
-                          : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-                      } whitespace-nowrap py-2 px-1 border-b-2 font-medium text-sm inline-flex items-center`}
-                    >
-                      <Icon className="w-4 h-4 mr-2" />
-                      {tab.label}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          </div>
-        </div>
-      </nav>
+    <>
+      <style>{styles}</style>
+      <div className="adm-root">
 
-      <main className="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8">
-        <div className="px-4 py-6 sm:px-0">
-          {error && (
-            <div className="mb-4 bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded">
-              {error}
-            </div>
+        {/* Top Nav */}
+        <nav className="adm-nav">
+          <span className="adm-logo">🎬 CineStream</span>
+          <div className="adm-sep"/>
+          <span className="adm-admin-pill">Admin</span>
+          <div className="adm-tabs">
+            {tabs.map(t=>(
+              <button key={t.id} className={`adm-tab ${tab===t.id?'active':''}`} onClick={()=>setTab(t.id)}>
+                <t.icon size={13}/>{t.label}
+              </button>
+            ))}
+          </div>
+        </nav>
+
+        {/* Main */}
+        <main className="adm-page">
+          {error && <div className="adm-err"><AlertCircle size={14}/>{error}</div>}
+
+          <div className="adm-head">
+            <span className="adm-title">{{dashboard:'Dashboard',videos:'Videos',users:'Users',purchases:'Purchases'}[tab]}</span>
+          </div>
+
+          {/* ── Dashboard ── */}
+          {tab==='dashboard' && (
+            <>
+              {loading && <div className="adm-loading"><Loader size={26} className="spin"/><span>Loading...</span></div>}
+              {dashStats && (
+                <>
+                  <div className="adm-stats">
+                    {[
+                      {lbl:'Total Videos',   val:dashStats.stats.totalVideos,                    icon:<Film size={17}/>,        bg:'rgba(232,68,90,.15)',   c:'var(--accent)'},
+                      {lbl:'Total Users',    val:dashStats.stats.totalUsers,                     icon:<Users size={17}/>,       bg:'rgba(99,102,241,.15)',  c:'#a5b4fc'},
+                      {lbl:'Revenue',        val:`฿${dashStats.stats.totalRevenue.toFixed(2)}`,  icon:<TrendingUp size={17}/>,  bg:'rgba(245,200,66,.15)',  c:'var(--gold)'},
+                      {lbl:'Purchases',      val:dashStats.stats.totalPurchases,                 icon:<ShoppingBag size={17}/>, bg:'rgba(46,204,113,.15)', c:'var(--success)'},
+                    ].map((s,i)=>(
+                      <div key={i} className="adm-stat">
+                        <div className="adm-stat-icon" style={{background:s.bg,color:s.c}}>{s.icon}</div>
+                        <div><div className="adm-stat-lbl">{s.lbl}</div><div className="adm-stat-val">{s.val}</div></div>
+                      </div>
+                    ))}
+                  </div>
+                  {dashStats.trends?.revenue && (
+                    <div className="adm-chart">
+                      <div className="adm-chart-lbl">Revenue — Last 30 Days</div>
+                      <ResponsiveContainer width="100%" height={220}>
+                        <LineChart data={dashStats.trends.revenue}>
+                          <CartesianGrid strokeDasharray="3 3"/>
+                          <XAxis dataKey="_id.day"/><YAxis/>
+                          <Tooltip/>
+                          <Line type="monotone" dataKey="revenue" stroke="var(--accent)" strokeWidth={2} dot={false}/>
+                        </LineChart>
+                      </ResponsiveContainer>
+                    </div>
+                  )}
+                </>
+              )}
+            </>
           )}
 
-          {activeTab === 'dashboard' && <Dashboard />}
-          {activeTab === 'videos' && <Videos />}
-          {activeTab === 'users' && <Usersja />}
-          {activeTab === 'purchases' && <Purchases />}
-          
-          <UploadModal 
-            isOpen={showUploadModal}
-            onClose={() => setShowUploadModal(false)}
-            onUpload={fetchVideos}
-            Videoja={Videoja}
-          />
-        </div>
-      </main>
-    </div>
+          {/* ── Videos ── */}
+          {tab==='videos' && (
+            <>
+              <div className="adm-bar">
+                <div className="adm-sw"><Search/><input className="adm-si" placeholder="ค้นหาวิดีโอ..." value={search} onChange={e=>setSearch(e.target.value)} autoFocus/></div>
+                <select className="adm-sel" value={filters.status} onChange={e=>setFilters(p=>({...p,status:e.target.value}))}>
+                  <option value="">All Status</option>
+                  <option value="completed">Completed</option>
+                  <option value="processing">Processing</option>
+                  <option value="failed">Failed</option>
+                </select>
+                <button className="adm-ref" onClick={fetchVids}><RefreshCw size={12}/>รีเฟรช</button>
+              </div>
+              <div className="adm-tbl">
+                {vLoad ? <div className="adm-loading"><Loader size={22} className="spin"/><span>Loading...</span></div>
+                : videos.length===0 ? <div className="adm-empty"><Film size={30} color="var(--muted)"/><span>ไม่พบวิดีโอ</span></div>
+                : videos.map(v=>(
+                  <div key={v._id} className="adm-row">
+                    <div className="adm-ico"><PlayCircle size={16}/></div>
+                    <div style={{flex:1,minWidth:0}}>
+                      <div className="adm-rtitle">{v.title}</div>
+                      <div className="adm-rsub"><Bdg status={v.uploadStatus}/> ฿{v.price} · {v.purchaseCount} purchases</div>
+                    </div>
+                    <div className="adm-actions">
+                      <button className="adm-ibtn" title="Edit" onClick={()=>{setEditVid(v);setShowEdit(true);}}><Edit size={13}/></button>
+                      <button className="adm-ibtn del" title="Delete" onClick={async()=>{ if(window.confirm('ลบวิดีโอนี้?')){ await api.delete(`/videos/${v.id}`); setVideos(p=>p.filter(x=>x.id!==v.id)); } }}><Trash2 size={13}/></button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+
+          {/* ── Users ── */}
+          {tab==='users' && (
+            <>
+              <div className="adm-bar">
+                <div className="adm-sw"><Search/><input className="adm-si" placeholder="ค้นหาผู้ใช้..." value={search} onChange={e=>setSearch(e.target.value)}/></div>
+                <select className="adm-sel" value={filters.role} onChange={e=>setFilters(p=>({...p,role:e.target.value}))}>
+                  <option value="">All Roles</option>
+                  <option value="user">User</option>
+                  <option value="admin">Admin</option>
+                </select>
+                <button className="adm-ref" onClick={fetchUsers}><RefreshCw size={12}/>รีเฟรช</button>
+              </div>
+              <div className="adm-tbl">
+                {uLoad ? <div className="adm-loading"><Loader size={22} className="spin"/><span>Loading...</span></div>
+                : users.length===0 ? <div className="adm-empty"><Users size={30} color="var(--muted)"/><span>ไม่พบผู้ใช้</span></div>
+                : users.map(u=>(
+                  <div key={u._id} className="adm-row">
+                    <div className="adm-ico" style={{background:'rgba(99,102,241,.1)',color:'#a5b4fc',fontWeight:700,fontSize:15}}>{u.email?.[0]?.toUpperCase()}</div>
+                    <div style={{flex:1,minWidth:0}}>
+                      <div className="adm-rtitle">{u.email}</div>
+                      <div className="adm-rsub"><span className={`adm-bdg adm-bdg-${u.role==='admin'?'admin':'user'}`}>{u.role}</span> ฿{u.stats?.totalSpent?.toFixed(2)} · {u.stats?.totalPurchases} purchases</div>
+                    </div>
+                    <div style={{fontSize:11,color:'var(--muted)',whiteSpace:'nowrap',flexShrink:0}}>{new Date(u.createdAt).toLocaleDateString('th-TH')}</div>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+
+          {/* ── Purchases ── */}
+          {tab==='purchases' && (
+            <>
+              <div className="adm-bar"><button className="adm-ref" onClick={fetchPurch}><RefreshCw size={12}/>รีเฟรช</button></div>
+              <div className="adm-tbl">
+                {pLoad ? <div className="adm-loading"><Loader size={22} className="spin"/><span>Loading...</span></div>
+                : purchases.length===0 ? <div className="adm-empty"><ShoppingBag size={30} color="var(--muted)"/><span>ไม่พบรายการ</span></div>
+                : purchases.map(p=>(
+                  <div key={p._id} className="adm-row">
+                    <div className="adm-ico" style={{background:'rgba(46,204,113,.1)',color:'var(--success)'}}><DollarSign size={16}/></div>
+                    <div style={{flex:1,minWidth:0}}>
+                      <div className="adm-rtitle">{p.videoId?.title||'Unknown Video'}</div>
+                      <div className="adm-rsub">{p.userId?.email||'Unknown'} · ฿{p.amount}</div>
+                    </div>
+                    <div style={{textAlign:'right',flexShrink:0}}>
+                      <Bdg status={p.status}/>
+                      <div style={{fontSize:11,color:'var(--muted)',marginTop:4}}>{new Date(p.purchaseDate).toLocaleDateString('th-TH')}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+        </main>
+
+        {/* Bottom Nav mobile */}
+        <nav className="adm-bot">
+          {tabs.map(t=>(
+            <button key={t.id} className={`adm-bitem ${tab===t.id?'active':''}`} onClick={()=>setTab(t.id)}>
+              <t.icon/>{t.label}
+            </button>
+          ))}
+        </nav>
+      </div>
+
+      <EditModal isOpen={showEdit} onClose={()=>setShowEdit(false)} onSave={fetchVids} video={editVid}/>
+    </>
   );
 };
 

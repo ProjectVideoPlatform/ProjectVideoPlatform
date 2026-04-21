@@ -1,419 +1,224 @@
+// VideoPlayer.jsx — Fixed close button (above bottom nav) + Dark Cinema Theme
 import React, { useRef, useEffect, useState, useCallback } from 'react';
 import Hls from 'hls.js';
 import { X, Play } from 'lucide-react';
 import videoAnalytics from './VideoTracker';
 
-const getAdaptiveInterval = (currentTime) => {
-  if (currentTime < 60)  return 5;
-  if (currentTime < 300) return 10;
-  return 30;
-};
+const getAdaptiveInterval = (t) => t < 60 ? 5 : t < 300 ? 10 : 30;
+function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; }
 
-function debounce(fn, ms) {
-  let timer;
-  return (...args) => {
-    clearTimeout(timer);
-    timer = setTimeout(() => fn(...args), ms);
-  };
-}
+const playerStyles = `
+  .vp-backdrop {
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,.93);
+    z-index: 300;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    font-family: 'DM Sans', sans-serif;
+  }
+  .vp-topbar {
+    width: 100%; max-width: 1100px;
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 10px 16px 8px; flex-shrink: 0;
+  }
+  .vp-label { font-size: 12px; font-weight: 500; letter-spacing: .5px; text-transform: uppercase; color: rgba(255,255,255,.4); }
+  .vp-close {
+    width: 40px; height: 40px; border-radius: 50%;
+    background: rgba(255,255,255,.1); border: 1px solid rgba(255,255,255,.15);
+    color: #fff; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    transition: background .2s, transform .15s;
+  }
+  .vp-close:hover { background: rgba(232,68,90,.75); transform: scale(1.08); }
+  .vp-body {
+    width: 100%; max-width: 1100px;
+    padding: 0 12px; flex: 1;
+    display: flex; align-items: center;
+    max-height: calc(100vh - 140px);
+  }
+  @media (max-width: 640px) { .vp-body { max-height: calc(100vh - 180px); } }
+  .vp-box {
+    width: 100%; aspect-ratio: 16/9;
+    background: #000; border-radius: 14px; overflow: hidden;
+    position: relative;
+    box-shadow: 0 28px 70px rgba(0,0,0,.85);
+    border: 1px solid rgba(255,255,255,.06);
+  }
+  .vp-box video { width: 100%; height: 100%; display: block; }
+  .vp-idle {
+    position: absolute; inset: 0;
+    display: flex; align-items: center; justify-content: center;
+    pointer-events: none; transition: opacity .25s;
+  }
+  .vp-idle.gone { opacity: 0; }
+  .vp-play-circle {
+    width: 68px; height: 68px; border-radius: 50%;
+    background: rgba(232,68,90,.85);
+    display: flex; align-items: center; justify-content: center;
+    box-shadow: 0 6px 28px rgba(232,68,90,.55);
+  }
+  .vp-spacer { height: 10px; flex-shrink: 0; }
+  @media (max-width: 640px) { .vp-spacer { height: 76px; } }
+`;
 
 const VideoPlayer = ({ manifestUrl, onClose, videoId, userIdRef }) => {
-  const videoRef = useRef(null);
-  const hlsRef   = useRef(null);
+  const videoRef = useRef(null); const hlsRef = useRef(null);
   const [isPlaying, setIsPlaying] = useState(false);
+  const segmentStartTime = useRef(null); const totalWatchTime = useRef(0);
+  const lastTrackedVideoTime = useRef(0); const hasSeeked = useRef(false);
+  const isSeekingRef = useRef(false); const isBufferingRef = useRef(false);
+  const isHiddenRef = useRef(false); const isEndedRef = useRef(false);
+  const seekCountRef = useRef(0); const seekTimerRef = useRef(null);
+  const prevTimeRef = useRef(0); const lastWatchTrackedAt = useRef(0);
 
-  const seekDestinationTime  = useRef(null);
-  const segmentStartTime     = useRef(null);
-  const totalWatchTime       = useRef(0);
-  const lastTrackedVideoTime = useRef(0);
-  const hasSeeked            = useRef(false);
-  const isSeekingRef         = useRef(false);
-  const isBufferingRef       = useRef(false);
-  const isHiddenRef          = useRef(false);
-  const isEndedRef           = useRef(false);
-
-  const seekCountRef       = useRef(0);
-  const seekTimerRef       = useRef(null);
-  const prevTimeRef        = useRef(0);
-  const lastWatchTrackedAt = useRef(0);
-
-  // ─── flushWatchTime ────────────────────────────────────────────────────────
-  // cap elapsed ด้วย video duration เพื่อกัน wall-clock drift ตอน tab hidden
   const flushWatchTime = useCallback(() => {
     if (segmentStartTime.current === null) return 0;
-    const video   = videoRef.current;
-    const maxSecs = video?.duration > 0 ? video.duration : Infinity;
-    const elapsed = Math.min(
-      Math.round((Date.now() - segmentStartTime.current) / 1000),
-      maxSecs
-    );
-    totalWatchTime.current  += elapsed;
-    segmentStartTime.current = null;
-    return elapsed;
+    const v = videoRef.current; const maxSecs = v?.duration > 0 ? v.duration : Infinity;
+    const elapsed = Math.min(Math.round((Date.now() - segmentStartTime.current) / 1000), maxSecs);
+    totalWatchTime.current += elapsed; segmentStartTime.current = null; return elapsed;
   }, []);
 
-  // ─── makePayload ───────────────────────────────────────────────────────────
   const makePayloadRef = useRef(null);
-  makePayloadRef.current = (overrides = {}) => ({
-    videoId,
-    userId:         userIdRef.current,
-    manifestUrl,
-    timestamp:      new Date().toISOString(),
-    totalWatchTime: totalWatchTime.current,
-    ...overrides,
-  });
-  const makePayload = useCallback(
-    (overrides) => makePayloadRef.current(overrides),
-    []
-  );
+  makePayloadRef.current = (o = {}) => ({ videoId, userId: userIdRef.current, manifestUrl, timestamp: new Date().toISOString(), totalWatchTime: totalWatchTime.current, ...o });
+  const makePayload = useCallback((o) => makePayloadRef.current(o), []);
 
   useEffect(() => {
     if (!manifestUrl || !videoRef.current) return;
     const video = videoRef.current;
-
-    // ─── play window helpers ──────────────────────────────────────────────────
-    const startPlayWindow = () => {
-      segmentStartTime.current   = Date.now();
-      lastWatchTrackedAt.current = Date.now();
-    };
-
-    const pausePlayWindow = () => {
-      flushWatchTime();
-      lastWatchTrackedAt.current = 0;
-    };
-
-    // ─── buffering helpers ────────────────────────────────────────────────────
+    const startPlayWindow = () => { segmentStartTime.current = Date.now(); lastWatchTrackedAt.current = Date.now(); };
+    const pausePlayWindow = () => { flushWatchTime(); lastWatchTrackedAt.current = 0; };
     const enterBuffering = () => {
-      if (isBufferingRef.current) return;
-      isBufferingRef.current = true;
+      if (isBufferingRef.current) return; isBufferingRef.current = true;
       if (segmentStartTime.current !== null) {
-        const video   = videoRef.current;
         const maxSecs = video?.duration > 0 ? video.duration : Infinity;
-        const elapsed = Math.min(
-          Math.round((Date.now() - segmentStartTime.current) / 1000),
-          maxSecs
-        );
-        totalWatchTime.current  += elapsed;
+        totalWatchTime.current += Math.min(Math.round((Date.now() - segmentStartTime.current) / 1000), maxSecs);
         segmentStartTime.current = null;
       }
-      videoAnalytics.forceFlushChunk();
-      lastWatchTrackedAt.current = 0;
+      videoAnalytics.forceFlushChunk(); lastWatchTrackedAt.current = 0;
     };
+    const exitBuffering = () => { if (!isBufferingRef.current) return; isBufferingRef.current = false; if (!video.paused) startPlayWindow(); };
 
-    const exitBuffering = () => {
-      if (!isBufferingRef.current) return;
-      isBufferingRef.current = false;
-      if (!video.paused) startPlayWindow();
-    };
-
-    // ─── HLS setup ────────────────────────────────────────────────────────────
-    if (hlsRef.current) {
-      hlsRef.current.destroy();
-      hlsRef.current = null;
-    }
-
-    if (video.canPlayType('application/vnd.apple.mpegurl')) {
-      video.src = manifestUrl;
-    } else if (Hls.isSupported()) {
+    if (hlsRef.current) { hlsRef.current.destroy(); hlsRef.current = null; }
+    if (video.canPlayType('application/vnd.apple.mpegurl')) { video.src = manifestUrl; }
+    else if (Hls.isSupported()) {
       const hls = new Hls({ xhrSetup: (xhr) => { xhr.withCredentials = true; } });
-      hlsRef.current = hls;
-      hls.loadSource(manifestUrl);
-      hls.attachMedia(video);
+      hlsRef.current = hls; hls.loadSource(manifestUrl); hls.attachMedia(video);
       hls.on(Hls.Events.BUFFER_STALLED, enterBuffering);
-      hls.on(Hls.Events.FRAG_BUFFERED, () => { exitBuffering(); });
+      hls.on(Hls.Events.FRAG_BUFFERED, () => exitBuffering());
     }
 
-    // ─── visibilitychange ─────────────────────────────────────────────────────
-    // ใช้ sendBeacon ตอน tab hidden เพื่อกันข้อมูลหาย
     const handleVisibility = () => {
       if (document.visibilityState === 'hidden') {
         isHiddenRef.current = true;
         if (!video.paused) {
-          const finalDelta = video.currentTime - lastTrackedVideoTime.current;
-          if (finalDelta > 0.5) {
-            videoAnalytics.trackVideoEvent(makePayload({
-              eventType:   'watch',
-              duration:    Math.round(finalDelta),
-              currentTime: video.currentTime,
-            }));
-          }
-          lastTrackedVideoTime.current = video.currentTime;
-          pausePlayWindow();
-          videoAnalytics.trackVideoEvent(makePayload({
-            eventType:   'pause',
-            currentTime: video.currentTime,
-            reason:      'tab_hidden',
-          }));
-          // flushAndBeacon = push watchChunk เข้า buffer + sendBeacon ทันที
-          // กัน race กับ Tracker's own visibilitychange listener
+          const d = video.currentTime - lastTrackedVideoTime.current;
+          if (d > 0.5) videoAnalytics.trackVideoEvent(makePayload({ eventType: 'watch', duration: Math.round(d), currentTime: video.currentTime }));
+          lastTrackedVideoTime.current = video.currentTime; pausePlayWindow();
+          videoAnalytics.trackVideoEvent(makePayload({ eventType: 'pause', currentTime: video.currentTime, reason: 'tab_hidden' }));
           videoAnalytics.flushAndBeacon();
-        } else {
-          videoAnalytics.flushAndBeacon();
-        }
-      } else {
-        isHiddenRef.current = false;
-        if (!video.paused && !isBufferingRef.current) {
-          // ✅ ไม่แตะ lastTrackedVideoTime ตรงนี้
-          // lastTracked จัดการโดย timeupdate และ seeked เท่านั้น
-          startPlayWindow();
-        }
-      }
+        } else videoAnalytics.flushAndBeacon();
+      } else { isHiddenRef.current = false; if (!video.paused && !isBufferingRef.current) startPlayWindow(); }
     };
     document.addEventListener('visibilitychange', handleVisibility);
 
-    // ─── play ─────────────────────────────────────────────────────────────────
     const handlePlay = () => {
       if (isSeekingRef.current || document.hidden) return;
-      isEndedRef.current  = false;
-      isHiddenRef.current = false;
-      startPlayWindow();
-      setIsPlaying(true);
-      videoAnalytics.trackVideoEvent(makePayload({
-        eventType:   'play',
-        currentTime: video.currentTime,
-        duration:    0,
-      }));
+      isEndedRef.current = false; isHiddenRef.current = false; startPlayWindow(); setIsPlaying(true);
+      videoAnalytics.trackVideoEvent(makePayload({ eventType: 'play', currentTime: video.currentTime, duration: 0 }));
     };
-
-    // ─── pause ────────────────────────────────────────────────────────────────
-const handlePause = () => {
-  // ✅ block ถ้ายังอยู่ใน seek session (debounce ยังไม่ settle)
-  if (isSeekingRef.current || hasSeeked.current) return;
-  
-  setIsPlaying(false);
-  if (isEndedRef.current) {
-    isEndedRef.current = false;
-    return;
-  }
-  const finalDelta = video.currentTime - lastTrackedVideoTime.current;
-  if (finalDelta > 0.5 && finalDelta < (video.duration ?? Infinity)) {
-    videoAnalytics.trackVideoEvent(makePayload({
-      eventType:   'watch',
-      duration:    Math.round(finalDelta),
-      currentTime: video.currentTime,
-    }));
-  }
-  lastTrackedVideoTime.current = video.currentTime;
-  pausePlayWindow();
-  videoAnalytics.forceFlushChunk();
-  videoAnalytics.trackVideoEvent(makePayload({
-    eventType:   'pause',
-    currentTime: video.currentTime,
-  }));
-};
-    // ─── seeking ──────────────────────────────────────────────────────────────
- const handleSeeking = () => {
-  isSeekingRef.current = true;
-
-  if (!hasSeeked.current) {
-    hasSeeked.current = true;
-  console.log('[SEEKING] first seek detected, flushing watch time. CurrentTime:', video.currentTime);
-    // 1. ปิดยอดการนับ Watch Time ณ จุดปัจจุบันก่อนจะย้าย
-    const finalDelta = video.currentTime - lastTrackedVideoTime.current;
-    if (finalDelta > 0.5 && finalDelta < 5) { // ป้องกันเลขโดดเกินจริง
-      videoAnalytics.trackVideoEvent(makePayload({
-        eventType: 'watch',
-        duration: Math.round(finalDelta),
-        currentTime: video.currentTime,
-      }));
-    }
-console.log('[SEEKING] flushed watch time for current segment. finalDelta:', finalDelta);
-    // 2. ล็อกตำแหน่ง "ก่อน Seek" เอาไว้ส่ง Event Seek
-    prevTimeRef.current = video.currentTime;
-    lastTrackedVideoTime.current = video.currentTime; 
-    console.log('[SEEKING] updated lastTrackedVideoTime to:', lastTrackedVideoTime.current);
-    pausePlayWindow();
-    videoAnalytics.forceFlushChunk();
-  }
-
-  seekCountRef.current += 1;
-  clearTimeout(seekTimerRef.current);
-  seekTimerRef.current = setTimeout(() => {
-    seekCountRef.current = 0;
-  }, 1000);
-};
-    // ─── seeked ───────────────────────────────────────────────────────────────
-   const handleSeeked = debounce(() => {
-  const video = videoRef.current;
-  if (!video) return;
-
-  hasSeeked.current = false;
-  isSeekingRef.current = false;
- console.log('[SEEKED]', {
-    currentTime: video.currentTime,
-    prevTime: prevTimeRef.current,
-    seekCount: seekCountRef.current,
-  });
-  const seekDestination = video.currentTime;
-  const seekFrom = lastTrackedVideoTime.current; // ค่าที่ลอคไว้จาก handleSeeking
-
-  // อัปเดตจุดเริ่มนับใหม่ให้เป็นจุดที่ Seek ไปลงจอด
-  lastTrackedVideoTime.current = seekDestination;
-  prevTimeRef.current = seekDestination;
-  console.log('[SEEKED] updated prevTimeRef to:', prevTimeRef.current);
-  // ล้างเวลาใน Wall clock ให้เริ่มนับใหม่จากวินาทีนี้
-  lastWatchTrackedAt.current = Date.now();
-  if (segmentStartTime.current) segmentStartTime.current = Date.now();
- console.log('[SEEKED] updated lastTrackedVideoTime to:', lastTrackedVideoTime.current);
-  const isScrubNoise = seekCountRef.current > 3;
-  if (!isScrubNoise) {
-    videoAnalytics.trackVideoEvent(makePayload({
-      eventType: 'seek',
-      fromTime: seekFrom,
-      currentTime: seekDestination,
-      duration: 0,
-    }));
-  }
-
-  videoAnalytics.forceFlushChunk();
-}, 300);
-    // ─── ended ────────────────────────────────────────────────────────────────
-    const handleEnded = () => {
-      isEndedRef.current = true;
+    const handlePause = () => {
+      if (isSeekingRef.current || hasSeeked.current) return;
       setIsPlaying(false);
-      pausePlayWindow();
+      if (isEndedRef.current) { isEndedRef.current = false; return; }
+      const d = video.currentTime - lastTrackedVideoTime.current;
+      if (d > 0.5 && d < (video.duration ?? Infinity)) videoAnalytics.trackVideoEvent(makePayload({ eventType: 'watch', duration: Math.round(d), currentTime: video.currentTime }));
+      lastTrackedVideoTime.current = video.currentTime; pausePlayWindow(); videoAnalytics.forceFlushChunk();
+      videoAnalytics.trackVideoEvent(makePayload({ eventType: 'pause', currentTime: video.currentTime }));
+    };
+    const handleSeeking = () => {
+      isSeekingRef.current = true;
+      if (!hasSeeked.current) {
+        hasSeeked.current = true;
+        const d = video.currentTime - lastTrackedVideoTime.current;
+        if (d > 0.5 && d < 5) videoAnalytics.trackVideoEvent(makePayload({ eventType: 'watch', duration: Math.round(d), currentTime: video.currentTime }));
+        prevTimeRef.current = video.currentTime; lastTrackedVideoTime.current = video.currentTime;
+        pausePlayWindow(); videoAnalytics.forceFlushChunk();
+      }
+      seekCountRef.current += 1; clearTimeout(seekTimerRef.current);
+      seekTimerRef.current = setTimeout(() => { seekCountRef.current = 0; }, 1000);
+    };
+    const handleSeeked = debounce(() => {
+      if (!videoRef.current) return;
+      hasSeeked.current = false; isSeekingRef.current = false;
+      const dest = video.currentTime, from = lastTrackedVideoTime.current;
+      lastTrackedVideoTime.current = dest; prevTimeRef.current = dest;
+      lastWatchTrackedAt.current = Date.now();
+      if (segmentStartTime.current) segmentStartTime.current = Date.now();
+      if (seekCountRef.current <= 3) videoAnalytics.trackVideoEvent(makePayload({ eventType: 'seek', fromTime: from, currentTime: dest, duration: 0 }));
       videoAnalytics.forceFlushChunk();
-      videoAnalytics.trackVideoEvent(makePayload({
-        eventType:     'completed',
-        videoDuration: video.duration,
-        currentTime:   video.currentTime,
-      }));
+    }, 300);
+    const handleEnded = () => {
+      isEndedRef.current = true; setIsPlaying(false); pausePlayWindow(); videoAnalytics.forceFlushChunk();
+      videoAnalytics.trackVideoEvent(makePayload({ eventType: 'completed', videoDuration: video.duration, currentTime: video.currentTime }));
     };
-
-    // ─── timeupdate ───────────────────────────────────────────────────────────
     const handleTimeUpdate = () => {
-      if (video.paused || video.ended)            return;
-      if (isSeekingRef.current)                   return;
-      if (isHiddenRef.current || document.hidden) return;
-
-      const currentTime = video.currentTime;
-      const timeDiff    = Math.abs(currentTime - prevTimeRef.current);
-
-      // กระโดดเกิน 2s = seeking ที่ยังไม่ถูก flag → set flag แล้ว return
-      // ไม่แตะ lastTrackedVideoTime เลย
-      if (timeDiff > 2 && prevTimeRef.current > 0) {
-        isSeekingRef.current = true;
-        prevTimeRef.current  = currentTime;
-        return;
-      }
-
-      // prevTime อัปเดตได้ปกติ (ใช้โดย handleSeeking เพื่อหา safePreSeek)
-      prevTimeRef.current = currentTime;
-
-      if (video.readyState < HTMLMediaElement.HAVE_FUTURE_DATA) {
-        enterBuffering();
-        return;
-      }
+      if (video.paused || video.ended || isSeekingRef.current || isHiddenRef.current || document.hidden) return;
+      const ct = video.currentTime; const diff = Math.abs(ct - prevTimeRef.current);
+      if (diff > 2 && prevTimeRef.current > 0) { isSeekingRef.current = true; prevTimeRef.current = ct; return; }
+      prevTimeRef.current = ct;
+      if (video.readyState < HTMLMediaElement.HAVE_FUTURE_DATA) { enterBuffering(); return; }
       exitBuffering();
-
-      if (segmentStartTime.current === null) {
-        segmentStartTime.current = Date.now();
-      }
+      if (segmentStartTime.current === null) segmentStartTime.current = Date.now();
       if (lastWatchTrackedAt.current === 0) return;
-
-      const wallElapsed     = Date.now() - lastWatchTrackedAt.current;
-      const currentInterval = getAdaptiveInterval(currentTime);
-
-      if (wallElapsed >= currentInterval * 1_000) {
-        const videoDelta = currentTime - lastTrackedVideoTime.current;
-
-        // delta ต้องเป็นบวก และไม่เกิน duration (กัน drift)
-        if (videoDelta <= 0 || videoDelta > (video.duration ?? Infinity)) return;
-
-        console.log('[TIMEUPDATE watch]', {
-          currentTime,
-          lastTracked: lastTrackedVideoTime.current,
-          videoDelta,
-        });
-
-        lastWatchTrackedAt.current = Date.now();
-
-        // อัปเดต lastTracked เฉพาะตอน track จริงๆ เท่านั้น
-        lastTrackedVideoTime.current = currentTime;
-
-        videoAnalytics.trackVideoEvent(makePayload({
-          eventType:   'watch',
-          duration:    Math.round(videoDelta),
-          currentTime,
-        }));
+      const wallElapsed = Date.now() - lastWatchTrackedAt.current;
+      if (wallElapsed >= getAdaptiveInterval(ct) * 1000) {
+        const vd = ct - lastTrackedVideoTime.current;
+        if (vd <= 0 || vd > (video.duration ?? Infinity)) return;
+        lastWatchTrackedAt.current = Date.now(); lastTrackedVideoTime.current = ct;
+        videoAnalytics.trackVideoEvent(makePayload({ eventType: 'watch', duration: Math.round(vd), currentTime: ct }));
       }
     };
-
-    // ─── error ────────────────────────────────────────────────────────────────
     const handleError = () => {
       const err = video.error;
-      videoAnalytics.trackVideoEvent(makePayload({
-        eventType:    'error',
-        errorCode:    err?.code,
-        errorMessage: err?.message ?? 'Unknown error',
-        currentTime:  video.currentTime,
-      }));
+      videoAnalytics.trackVideoEvent(makePayload({ eventType: 'error', errorCode: err?.code, errorMessage: err?.message ?? 'Unknown error', currentTime: video.currentTime }));
     };
 
-    // ─── attach listeners ─────────────────────────────────────────────────────
-    video.addEventListener('play',       handlePlay);
-    video.addEventListener('pause',      handlePause);
-    video.addEventListener('seeking',    handleSeeking);
-    video.addEventListener('seeked',     handleSeeked);
-    video.addEventListener('ended',      handleEnded);
-    video.addEventListener('timeupdate', handleTimeUpdate);
-    video.addEventListener('error',      handleError);
+    video.addEventListener('play', handlePlay); video.addEventListener('pause', handlePause);
+    video.addEventListener('seeking', handleSeeking); video.addEventListener('seeked', handleSeeked);
+    video.addEventListener('ended', handleEnded); video.addEventListener('timeupdate', handleTimeUpdate);
+    video.addEventListener('error', handleError); video.play().catch(() => {});
 
-    video.play().catch(() => {});
-
-    // ─── cleanup ──────────────────────────────────────────────────────────────
     return () => {
-      video.removeEventListener('play',       handlePlay);
-      video.removeEventListener('pause',      handlePause);
-      video.removeEventListener('seeking',    handleSeeking);
-      video.removeEventListener('seeked',     handleSeeked);
-      video.removeEventListener('ended',      handleEnded);
-      video.removeEventListener('timeupdate', handleTimeUpdate);
-      video.removeEventListener('error',      handleError);
+      video.removeEventListener('play', handlePlay); video.removeEventListener('pause', handlePause);
+      video.removeEventListener('seeking', handleSeeking); video.removeEventListener('seeked', handleSeeked);
+      video.removeEventListener('ended', handleEnded); video.removeEventListener('timeupdate', handleTimeUpdate);
+      video.removeEventListener('error', handleError);
       document.removeEventListener('visibilitychange', handleVisibility);
-      clearTimeout(seekTimerRef.current);
-
-      pausePlayWindow();
-      // forceFlushChunk → push watchChunk เข้า buffer
-      // Tracker จะ sendBeacon buffer ทั้งหมดเองใน beforeunload
-      videoAnalytics.forceFlushChunk();
-      videoAnalytics.trackVideoEvent(makePayload({
-        eventType:   'close',
-        currentTime: video.currentTime,
-      }));
-
-      if (hlsRef.current) {
-        hlsRef.current.destroy();
-        hlsRef.current = null;
-      }
+      clearTimeout(seekTimerRef.current); pausePlayWindow(); videoAnalytics.forceFlushChunk();
+      videoAnalytics.trackVideoEvent(makePayload({ eventType: 'close', currentTime: video.currentTime }));
+      if (hlsRef.current) { hlsRef.current.destroy(); hlsRef.current = null; }
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [manifestUrl, videoId, flushWatchTime, makePayload]);
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-90 z-50 flex items-center justify-center">
-      <div className="relative w-full max-w-6xl mx-4">
-        <button
-          onClick={onClose}
-          className="absolute -top-12 right-0 text-white hover:text-gray-300"
-        >
-          <X className="w-6 h-6" />
-        </button>
-        <div className="aspect-video bg-black rounded-lg overflow-hidden relative">
-          <video ref={videoRef} controls className="w-full h-full">
-            Your browser does not support HTML5 video.
-          </video>
-          {!isPlaying && (
-            <div className="absolute inset-0 flex items-center justify-center text-white pointer-events-none">
-              <div className="text-center">
-                <Play className="w-16 h-16 mx-auto mb-4 opacity-50" />
-                <p className="opacity-50 text-sm mt-2">HLS Player</p>
-              </div>
-            </div>
-          )}
+    <>
+      <style>{playerStyles}</style>
+      <div className="vp-backdrop">
+        <div className="vp-topbar">
+          <span className="vp-label">🎬 Now Playing</span>
+          <button className="vp-close" onClick={onClose} aria-label="ปิดวิดีโอ"><X size={18} /></button>
         </div>
+        <div className="vp-body">
+          <div className="vp-box">
+            <video ref={videoRef} controls playsInline>Your browser does not support HTML5 video.</video>
+            <div className={`vp-idle ${isPlaying ? 'gone' : ''}`}>
+              <div className="vp-play-circle"><Play size={28} color="#fff" fill="#fff" /></div>
+            </div>
+          </div>
+        </div>
+        <div className="vp-spacer" />
       </div>
-    </div>
+    </>
   );
 };
 
