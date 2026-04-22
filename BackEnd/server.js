@@ -11,12 +11,13 @@ const UserRoute = require('./routes/user');
 const paymentRoutes = require('./routes/payment');
 const purchaseRoutes = require('./routes/Purchase');
 const { startRedisSubscriber } = require('./services/redisSubscriber');
+const cookieParser = require('cookie-parser'); // ✅ 1. เพิ่มตัวนี้
 const { initWebSocket } = require('./websocket'); // ✅ import ตรงๆ เลย
 const client = require('prom-client');
 
 const app = express();
 const server = http.createServer(app); // ✅ สร้าง http server ก่อน
-
+app.use(cookieParser());
 client.collectDefaultMetrics();
 
 app.get("/metrics", async (req, res) => {

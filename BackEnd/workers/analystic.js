@@ -43,10 +43,22 @@ function toClickhouseTimestamp(raw) {
 }
 
 function mapToRow(data) {
+  // ✅ เพิ่ม Types ให้ครบตามที่ VideoPlayer.jsx ใช้งานจริง
   const VALID_TYPES = new Set([
-    'play', 'watch', 'watch_chunk', 'pause', 'seek', 'completed', 'close', 'error',
+    'play', 
+    'watch', 
+    'watch_chunk', 
+    'pause', 
+    'seek', 
+    'completed', 
+    'close', 
+    'error',
+    'buffer_start', // 🆕 เพิ่ม
+    'buffer_end',   // 🆕 เพิ่ม
+    'resume',       // 🆕 เพิ่ม (จาก Progress Restore)
+    'tab_hide',     // 🆕 เพิ่ม
+    'tab_show'      // 🆕 เพิ่ม
   ]);
-
   const eventType = String(data.eventType || data.event_type || 'unknown');
   if (!VALID_TYPES.has(eventType)) {
     throw new Error(`Invalid eventType: "${eventType}"`);
