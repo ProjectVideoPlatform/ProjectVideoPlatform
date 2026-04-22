@@ -36,7 +36,7 @@ app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // ====== ROUTES ======
-app.use('/api/purchases', purchaseRoutes);
+app.use('/api/purchase', purchaseRoutes);
 app.use('/api/auth', authRoutes);
 app.use('/api/videos', videoRoutes);
 app.use('/api/admin', adminRoutes);
