@@ -1,4 +1,4 @@
-// Auth.jsx — Dark Cinema Theme · Matches CineStream Design System
+// Auth.jsx — Dark Cinema Theme · CineStream Design System · Cookie Auth
 import React, { useState, useEffect, memo, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../AuthProvider';
@@ -7,7 +7,7 @@ import { Loader, Eye, EyeOff, Film, Mail, Lock, User, Shield, ChevronRight, Refr
 
 const API_BASE_URL = 'http://localhost:3000/api';
 
-/* ─── Styles ──────────────────────────────────────────────── */
+/* ─── Styles (unchanged — design system intact) ──────────── */
 const styles = `
   @import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;1,9..40,300&display=swap');
 
@@ -39,366 +39,128 @@ const styles = `
     overflow: hidden;
   }
 
-  /* Ambient background orbs */
-  .auth-orb {
-    position: absolute;
-    border-radius: 50%;
-    filter: blur(80px);
-    pointer-events: none;
-    opacity: .18;
-  }
-  .auth-orb-1 {
-    width: 420px; height: 420px;
-    background: var(--accent);
-    top: -120px; left: -120px;
-  }
-  .auth-orb-2 {
-    width: 320px; height: 320px;
-    background: #6366f1;
-    bottom: -80px; right: -80px;
-  }
-  .auth-orb-3 {
-    width: 200px; height: 200px;
-    background: var(--accent2);
-    top: 50%; left: 50%;
-    transform: translate(-50%, -50%);
-    opacity: .08;
-  }
+  .auth-orb { position: absolute; border-radius: 50%; filter: blur(80px); pointer-events: none; opacity: .18; }
+  .auth-orb-1 { width: 420px; height: 420px; background: var(--accent); top: -120px; left: -120px; }
+  .auth-orb-2 { width: 320px; height: 320px; background: #6366f1; bottom: -80px; right: -80px; }
+  .auth-orb-3 { width: 200px; height: 200px; background: var(--accent2); top: 50%; left: 50%; transform: translate(-50%, -50%); opacity: .08; }
 
-  /* Film strip decoration */
-  .auth-filmstrip {
-    position: absolute;
-    top: 0; left: 0; right: 0;
-    height: 6px;
-    background: repeating-linear-gradient(
-      90deg,
-      var(--accent) 0px,
-      var(--accent) 18px,
-      transparent 18px,
-      transparent 26px
-    );
-    opacity: .5;
-  }
+  .auth-filmstrip { position: absolute; top: 0; left: 0; right: 0; height: 6px; background: repeating-linear-gradient(90deg, var(--accent) 0px, var(--accent) 18px, transparent 18px, transparent 26px); opacity: .5; }
 
-  /* Card */
   .auth-card {
-    background: var(--card);
-    border: 1px solid var(--border);
-    border-radius: 28px;
-    width: 100%;
-    max-width: 440px;
-    overflow: hidden;
+    background: var(--card); border: 1px solid var(--border); border-radius: 28px;
+    width: 100%; max-width: 440px; overflow: hidden;
     box-shadow: 0 32px 80px rgba(0,0,0,.6), 0 0 0 1px rgba(255,255,255,.04);
-    position: relative;
-    z-index: 1;
+    position: relative; z-index: 1;
     animation: cardIn .4s cubic-bezier(.16,1,.3,1) both;
   }
-  @keyframes cardIn {
-    from { opacity: 0; transform: translateY(24px) scale(.97); }
-    to   { opacity: 1; transform: none; }
-  }
+  @keyframes cardIn { from { opacity: 0; transform: translateY(24px) scale(.97); } to { opacity: 1; transform: none; } }
 
-  /* Card header */
-  .auth-header {
-    padding: 36px 36px 28px;
-    border-bottom: 1px solid var(--border);
-    position: relative;
-    overflow: hidden;
-    text-align: center;
-  }
-  .auth-header::before {
-    content: '';
-    position: absolute; inset: 0;
-    background: radial-gradient(ellipse at 50% 0%, rgba(232,68,90,.12) 0%, transparent 70%);
-  }
+  .auth-header { padding: 36px 36px 28px; border-bottom: 1px solid var(--border); position: relative; overflow: hidden; text-align: center; }
+  .auth-header::before { content: ''; position: absolute; inset: 0; background: radial-gradient(ellipse at 50% 0%, rgba(232,68,90,.12) 0%, transparent 70%); }
 
-  .auth-logo {
-    display: inline-flex; align-items: center; justify-content: center;
-    gap: 10px;
-    margin-bottom: 20px;
-    position: relative;
-  }
-  .auth-logo-icon {
-    width: 52px; height: 52px; border-radius: 16px;
-    background: linear-gradient(135deg, var(--accent), var(--accent2));
-    display: flex; align-items: center; justify-content: center;
-    box-shadow: 0 8px 24px rgba(232,68,90,.4);
-  }
-  .auth-logo-text {
-    font-family: 'Bebas Neue', sans-serif;
-    font-size: 28px;
-    letter-spacing: 3px;
-    background: linear-gradient(135deg, var(--accent), var(--accent2));
-    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
-    background-clip: text;
-  }
+  .auth-logo { display: inline-flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 20px; position: relative; }
+  .auth-logo-icon { width: 52px; height: 52px; border-radius: 16px; background: linear-gradient(135deg, var(--accent), var(--accent2)); display: flex; align-items: center; justify-content: center; box-shadow: 0 8px 24px rgba(232,68,90,.4); }
+  .auth-logo-text { font-family: 'Bebas Neue', sans-serif; font-size: 28px; letter-spacing: 3px; background: linear-gradient(135deg, var(--accent), var(--accent2)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
 
-  .auth-title {
-    font-family: 'Bebas Neue', sans-serif;
-    font-size: 32px;
-    letter-spacing: 2px;
-    color: var(--text);
-    margin-bottom: 6px;
-    position: relative;
-  }
-  .auth-subtitle {
-    font-size: 13px;
-    color: var(--muted);
-    position: relative;
-  }
+  .auth-title { font-family: 'Bebas Neue', sans-serif; font-size: 32px; letter-spacing: 2px; color: var(--text); margin-bottom: 6px; position: relative; }
+  .auth-subtitle { font-size: 13px; color: var(--muted); position: relative; }
 
-  /* Tabs */
-  .auth-tabs {
-    display: flex;
-    background: var(--surface);
-    border-bottom: 1px solid var(--border);
-  }
-  .auth-tab {
-    flex: 1; padding: 14px;
-    font-size: 13px; font-weight: 600; letter-spacing: .3px;
-    color: var(--muted); background: transparent; border: none;
-    cursor: pointer; transition: color .2s; position: relative;
-    font-family: 'DM Sans', sans-serif;
-  }
-  .auth-tab::after {
-    content: '';
-    position: absolute; bottom: 0; left: 20%; right: 20%;
-    height: 2px; border-radius: 2px;
-    background: linear-gradient(90deg, var(--accent), var(--accent2));
-    transform: scaleX(0); transition: transform .25s;
-  }
+  .auth-tabs { display: flex; background: var(--surface); border-bottom: 1px solid var(--border); }
+  .auth-tab { flex: 1; padding: 14px; font-size: 13px; font-weight: 600; letter-spacing: .3px; color: var(--muted); background: transparent; border: none; cursor: pointer; transition: color .2s; position: relative; font-family: 'DM Sans', sans-serif; }
+  .auth-tab::after { content: ''; position: absolute; bottom: 0; left: 20%; right: 20%; height: 2px; border-radius: 2px; background: linear-gradient(90deg, var(--accent), var(--accent2)); transform: scaleX(0); transition: transform .25s; }
   .auth-tab.active { color: var(--text); }
   .auth-tab.active::after { transform: scaleX(1); }
 
-  /* Body */
   .auth-body { padding: 28px 32px 32px; }
-  @media (max-width: 480px) {
-    .auth-body { padding: 24px 20px 28px; }
-    .auth-header { padding: 28px 20px 24px; }
-  }
+  @media (max-width: 480px) { .auth-body { padding: 24px 20px 28px; } .auth-header { padding: 28px 20px 24px; } }
 
-  /* Alert */
-  .auth-alert {
-    display: flex; align-items: flex-start; gap: 10px;
-    padding: 12px 14px;
-    border-radius: 12px;
-    font-size: 13px;
-    margin-bottom: 20px;
-    animation: alertIn .2s ease both;
-  }
+  .auth-alert { display: flex; align-items: flex-start; gap: 10px; padding: 12px 14px; border-radius: 12px; font-size: 13px; margin-bottom: 20px; animation: alertIn .2s ease both; }
   @keyframes alertIn { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: none; } }
   .auth-alert-error   { background: rgba(232,68,90,.1);  border: 1px solid rgba(232,68,90,.25); color: #fca5a5; }
   .auth-alert-success { background: rgba(46,204,113,.1); border: 1px solid rgba(46,204,113,.25); color: #86efac; }
-  .auth-alert-dot {
-    width: 6px; height: 6px; border-radius: 50%;
-    flex-shrink: 0; margin-top: 5px;
-  }
-  .auth-alert-error   .auth-alert-dot { background: var(--accent); }
+  .auth-alert-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; margin-top: 5px; }
+  .auth-alert-error .auth-alert-dot { background: var(--accent); }
   .auth-alert-success .auth-alert-dot { background: var(--success); }
 
-  /* Field */
   .auth-field { margin-bottom: 18px; }
-  .auth-label {
-    display: flex; align-items: center; gap: 6px;
-    font-size: 11px; font-weight: 600; letter-spacing: .7px;
-    text-transform: uppercase; color: var(--muted);
-    margin-bottom: 8px;
-  }
+  .auth-label { display: flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 600; letter-spacing: .7px; text-transform: uppercase; color: var(--muted); margin-bottom: 8px; }
 
   .auth-input-wrap { position: relative; }
-  .auth-input-icon {
-    position: absolute; left: 13px; top: 50%;
-    transform: translateY(-50%);
-    color: var(--muted); pointer-events: none;
-    width: 16px; height: 16px;
-    transition: color .2s;
-  }
+  .auth-input-icon { position: absolute; left: 13px; top: 50%; transform: translateY(-50%); color: var(--muted); pointer-events: none; width: 16px; height: 16px; transition: color .2s; }
   .auth-input-wrap:focus-within .auth-input-icon { color: var(--accent); }
 
-  .auth-input {
-    width: 100%;
-    padding: 12px 14px 12px 40px;
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    color: var(--text);
-    font-family: 'DM Sans', sans-serif;
-    font-size: 14px;
-    outline: none;
-    transition: border-color .2s, box-shadow .2s;
-  }
+  .auth-input { width: 100%; padding: 12px 14px 12px 40px; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; color: var(--text); font-family: 'DM Sans', sans-serif; font-size: 14px; outline: none; transition: border-color .2s, box-shadow .2s; }
   .auth-input::placeholder { color: var(--muted); }
-  .auth-input:focus {
-    border-color: var(--accent);
-    box-shadow: 0 0 0 3px rgba(232,68,90,.12);
-  }
-  .auth-input.focused {
-    border-color: var(--accent);
-    box-shadow: 0 0 0 3px rgba(232,68,90,.12);
-  }
+  .auth-input:focus, .auth-input.focused { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(232,68,90,.12); }
   .auth-input:disabled { opacity: .5; cursor: not-allowed; }
 
-  .auth-pw-toggle {
-    position: absolute; right: 12px; top: 50%;
-    transform: translateY(-50%);
-    background: none; border: none;
-    color: var(--muted); cursor: pointer;
-    padding: 4px; border-radius: 6px;
-    transition: color .2s;
-    display: flex; align-items: center;
-  }
+  .auth-pw-toggle { position: absolute; right: 12px; top: 50%; transform: translateY(-50%); background: none; border: none; color: var(--muted); cursor: pointer; padding: 4px; border-radius: 6px; transition: color .2s; display: flex; align-items: center; }
   .auth-pw-toggle:hover { color: var(--text); }
 
-  .auth-select {
-    width: 100%;
-    padding: 12px 14px 12px 40px;
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    color: var(--text);
-    font-family: 'DM Sans', sans-serif;
-    font-size: 14px;
-    outline: none;
-    cursor: pointer;
-    transition: border-color .2s, box-shadow .2s;
-    appearance: none;
-    -webkit-appearance: none;
-  }
-  .auth-select:focus {
-    border-color: var(--accent);
-    box-shadow: 0 0 0 3px rgba(232,68,90,.12);
-  }
+  .auth-select { width: 100%; padding: 12px 14px 12px 40px; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; color: var(--text); font-family: 'DM Sans', sans-serif; font-size: 14px; outline: none; cursor: pointer; transition: border-color .2s, box-shadow .2s; appearance: none; -webkit-appearance: none; }
+  .auth-select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(232,68,90,.12); }
   .auth-select option { background: var(--surface); color: var(--text); }
 
-  /* Submit button */
-  .auth-submit {
-    width: 100%;
-    padding: 14px;
-    border-radius: 14px;
-    background: linear-gradient(135deg, var(--accent), var(--accent2));
-    color: #fff;
-    font-family: 'DM Sans', sans-serif;
-    font-size: 15px;
-    font-weight: 700;
-    border: none;
-    cursor: pointer;
-    margin-top: 8px;
-    display: flex; align-items: center; justify-content: center; gap: 8px;
-    transition: opacity .2s, transform .2s, box-shadow .2s;
-    box-shadow: 0 6px 24px rgba(232,68,90,.35);
-    letter-spacing: .3px;
-  }
-  .auth-submit:hover:not(:disabled) {
-    transform: translateY(-2px);
-    box-shadow: 0 10px 32px rgba(232,68,90,.5);
-  }
+  .auth-submit { width: 100%; padding: 14px; border-radius: 14px; background: linear-gradient(135deg, var(--accent), var(--accent2)); color: #fff; font-family: 'DM Sans', sans-serif; font-size: 15px; font-weight: 700; border: none; cursor: pointer; margin-top: 8px; display: flex; align-items: center; justify-content: center; gap: 8px; transition: opacity .2s, transform .2s, box-shadow .2s; box-shadow: 0 6px 24px rgba(232,68,90,.35); letter-spacing: .3px; }
+  .auth-submit:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 10px 32px rgba(232,68,90,.5); }
   .auth-submit:active:not(:disabled) { transform: translateY(0); }
   .auth-submit:disabled { opacity: .45; cursor: not-allowed; }
 
   @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
 
-  /* Divider */
-  .auth-divider {
-    display: flex; align-items: center; gap: 12px;
-    margin: 22px 0 18px;
-    color: var(--muted); font-size: 11px; letter-spacing: .5px; text-transform: uppercase;
-  }
-  .auth-divider::before, .auth-divider::after {
-    content: ''; flex: 1; height: 1px; background: var(--border);
-  }
+  .auth-divider { display: flex; align-items: center; gap: 12px; margin: 22px 0 18px; color: var(--muted); font-size: 11px; letter-spacing: .5px; text-transform: uppercase; }
+  .auth-divider::before, .auth-divider::after { content: ''; flex: 1; height: 1px; background: var(--border); }
 
-  /* Switch link */
   .auth-switch { text-align: center; font-size: 13px; color: var(--muted); }
-  .auth-link {
-    color: var(--accent); font-weight: 600;
-    background: none; border: none; cursor: pointer;
-    font-family: 'DM Sans', sans-serif; font-size: 13px;
-    padding: 2px 6px; border-radius: 4px;
-    transition: opacity .2s;
-    text-decoration: none;
-  }
+  .auth-link { color: var(--accent); font-weight: 600; background: none; border: none; cursor: pointer; font-family: 'DM Sans', sans-serif; font-size: 13px; padding: 2px 6px; border-radius: 4px; transition: opacity .2s; text-decoration: none; }
   .auth-link:hover { opacity: .8; }
 
-  /* Profile card */
-  .auth-profile-avatar {
-    width: 72px; height: 72px; border-radius: 50%;
-    background: linear-gradient(135deg, var(--accent), var(--accent2));
-    display: flex; align-items: center; justify-content: center;
-    margin: 0 auto 16px;
-    font-size: 28px;
-    box-shadow: 0 8px 24px rgba(232,68,90,.4);
-  }
-  .auth-profile-email {
-    font-size: 17px; font-weight: 600; color: var(--text);
-    margin-bottom: 12px; word-break: break-all;
-  }
-  .auth-role-badge {
-    display: inline-flex; align-items: center; gap: 5px;
-    padding: 4px 14px; border-radius: 20px;
-    font-size: 11px; font-weight: 700; letter-spacing: .8px; text-transform: uppercase;
-    margin-bottom: 8px;
-  }
+  .auth-profile-avatar { width: 72px; height: 72px; border-radius: 50%; background: linear-gradient(135deg, var(--accent), var(--accent2)); display: flex; align-items: center; justify-content: center; margin: 0 auto 16px; font-size: 28px; box-shadow: 0 8px 24px rgba(232,68,90,.4); }
+  .auth-profile-email { font-size: 17px; font-weight: 600; color: var(--text); margin-bottom: 12px; word-break: break-all; }
+  .auth-role-badge { display: inline-flex; align-items: center; gap: 5px; padding: 4px 14px; border-radius: 20px; font-size: 11px; font-weight: 700; letter-spacing: .8px; text-transform: uppercase; margin-bottom: 8px; }
   .auth-role-admin { background: rgba(232,68,90,.15); color: var(--accent); border: 1px solid rgba(232,68,90,.3); }
   .auth-role-user  { background: rgba(99,102,241,.15); color: #a5b4fc; border: 1px solid rgba(99,102,241,.3); }
-  .auth-uid {
-    font-size: 11px; color: var(--muted);
-    font-family: 'Courier New', monospace;
-    background: var(--surface); padding: 4px 10px; border-radius: 6px;
-    border: 1px solid var(--border);
-  }
-  .auth-profile-info {
-    background: var(--surface); border: 1px solid var(--border);
-    border-radius: 16px; padding: 20px;
-    display: flex; flex-direction: column; align-items: center;
-    gap: 8px; margin-bottom: 20px;
-  }
+  .auth-uid { font-size: 11px; color: var(--muted); font-family: 'Courier New', monospace; background: var(--surface); padding: 4px 10px; border-radius: 6px; border: 1px solid var(--border); }
+  .auth-profile-info { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 20px; display: flex; flex-direction: column; align-items: center; gap: 8px; margin-bottom: 20px; }
 
-  .auth-outline-btn {
-    width: 100%; padding: 12px;
-    background: var(--surface); border: 1px solid var(--border);
-    border-radius: 12px; color: var(--text);
-    font-family: 'DM Sans', sans-serif;
-    font-size: 14px; font-weight: 500;
-    cursor: pointer; transition: border-color .2s;
-    display: flex; align-items: center; justify-content: center; gap: 8px;
-    margin-bottom: 10px;
-  }
+  .auth-outline-btn { width: 100%; padding: 12px; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; color: var(--text); font-family: 'DM Sans', sans-serif; font-size: 14px; font-weight: 500; cursor: pointer; transition: border-color .2s; display: flex; align-items: center; justify-content: center; gap: 8px; margin-bottom: 10px; }
   .auth-outline-btn:hover { border-color: var(--accent); color: var(--accent); }
 
-  .auth-nav-links {
-    display: flex; gap: 8px; margin-top: 16px;
-    padding-top: 16px; border-top: 1px solid var(--border);
-    flex-wrap: wrap;
-  }
-  .auth-nav-btn {
-    flex: 1; min-width: 120px;
-    display: flex; align-items: center; justify-content: center; gap: 6px;
-    padding: 10px 14px; border-radius: 10px;
-    background: rgba(255,255,255,.04); border: 1px solid var(--border);
-    color: var(--muted); font-size: 13px; font-weight: 500;
-    cursor: pointer; transition: all .2s;
-    font-family: 'DM Sans', sans-serif;
-    white-space: nowrap;
-  }
+  .auth-nav-links { display: flex; gap: 8px; margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--border); flex-wrap: wrap; }
+  .auth-nav-btn { flex: 1; min-width: 120px; display: flex; align-items: center; justify-content: center; gap: 6px; padding: 10px 14px; border-radius: 10px; background: rgba(255,255,255,.04); border: 1px solid var(--border); color: var(--muted); font-size: 13px; font-weight: 500; cursor: pointer; transition: all .2s; font-family: 'DM Sans', sans-serif; white-space: nowrap; }
   .auth-nav-btn:hover { border-color: var(--accent); color: var(--accent); background: rgba(232,68,90,.06); }
 `;
+
+/* ─── API helper — ใช้ credentials:'include' ทุก request ───── */
+// ✅ ไม่มี Authorization header เลย — browser ส่ง cookie ให้อัตโนมัติ
+const apiFetch = async (endpoint, options = {}) => {
+  const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+    headers: { 'Content-Type': 'application/json', ...options.headers },
+    credentials: 'include', // ✅ ส่ง httpOnly cookie ไปกับทุก request
+    ...options,
+  });
+  let data = {};
+  try { data = await response.json(); } catch (e) {
+    if (!response.ok) throw new Error(`Server error: ${response.status}`);
+    return {};
+  }
+  if (!response.ok) throw new Error(data.message || data.error || `Error ${response.status}`);
+  return data;
+};
 
 /* ─── Main Component ──────────────────────────────────────── */
 const VideoAuthSystem = () => {
   const navigate = useNavigate();
   const { setUser: setAuthUser } = useAuth();
 
-  const [currentView, setCurrentView]             = useState('login');
-  const [currentUser, setCurrentUser]             = useState(null);
-  const [authToken, setAuthToken]                 = useState(() =>
-    typeof window !== 'undefined' ? localStorage.getItem('authToken') : null
-  );
-  const [loading, setLoading]                     = useState({ login: false, register: false });
-  const [alerts, setAlerts]                       = useState({ login: null, register: null });
-  const [currentlyFocusedField, setFocused]       = useState('email');
-  const [showPw, setShowPw]                       = useState({ login: false, register: false });
-  const [loginForm, setLoginForm]                 = useState({ email: '', password: '' });
-  const [registerForm, setRegisterForm]           = useState({ email: '', password: '', role: 'user' });
+  const [currentView, setCurrentView]       = useState('login');
+  const [currentUser, setCurrentUser]       = useState(null);
+  const [loading, setLoading]               = useState({ login: false, register: false });
+  const [alerts, setAlerts]                 = useState({ login: null, register: null });
+  const [currentlyFocusedField, setFocused] = useState('email');
+  const [showPw, setShowPw]                 = useState({ login: false, register: false });
+  const [loginForm, setLoginForm]           = useState({ email: '', password: '' });
+  const [registerForm, setRegisterForm]     = useState({ email: '', password: '', role: 'user' });
 
   const showAlert = useCallback((type, message, alertType = 'error') => {
     setAlerts(prev => ({ ...prev, [type]: { message, type: alertType } }));
@@ -408,72 +170,84 @@ const VideoAuthSystem = () => {
     setAlerts({ login: null, register: null });
   }, []);
 
-  const apiCall = useCallback(async (endpoint, options = {}) => {
-    const response = await fetch(`${API_BASE_URL}${endpoint}`, {
-      headers: {
-        'Content-Type': 'application/json',
-        ...(authToken && { Authorization: `Bearer ${authToken}` }),
-        ...options.headers,
-      },
-      credentials: 'include',
-      ...options,
-    });
-    let data = {};
-    try { data = await response.json(); } catch (e) {
-      if (!response.ok) throw new Error(`Server error: ${response.status}`);
-      return {};
+  // ✅ logout: เรียก API ให้ server clear cookie — localStorage.removeItem ไม่จำเป็นแล้ว
+  const logout = useCallback(async () => {
+    try {
+      await apiFetch('/auth/logout', { method: 'POST' });
+    } catch (_) {
+      // ถ้า request ล้มเหลวก็ยังต้อง clear state ฝั่ง client
     }
-    if (!response.ok) throw new Error(data.message || data.error || `Error ${response.status}`);
-    return data;
-  }, [authToken]);
-
-  const logout = useCallback(() => {
-    setAuthToken(null); setCurrentUser(null); setAuthUser(null);
-    localStorage.removeItem('authToken');
+    setCurrentUser(null);
+    setAuthUser(null);
     setCurrentView('login');
     videoTracker.updateUserId(null);
-    clearAlerts(); setFocused('email');
+    clearAlerts();
+    setFocused('email');
   }, [setAuthUser, clearAlerts]);
 
+  // ✅ verify จาก cookie — ไม่อ่าน localStorage
   const getCurrentUser = useCallback(async () => {
     try {
-      const r = await apiCall('/auth/verify');
-      setCurrentUser(r.user); setAuthUser(r.user); setCurrentView('profile');
-    } catch { logout(); }
-  }, [apiCall, setAuthUser, logout]);
+      const r = await apiFetch('/auth/verify');
+      setCurrentUser(r.user);
+      setAuthUser(r.user);
+      setCurrentView('profile');
+    } catch {
+      // Cookie หมดอายุหรือไม่มี — แสดงหน้า login ปกติ
+      setCurrentView('login');
+    }
+  }, [setAuthUser]);
 
-  useEffect(() => { if (authToken) getCurrentUser(); }, [authToken, getCurrentUser]);
+  // ✅ ตรวจ session จาก cookie ทันทีที่โหลดหน้า — ไม่ต้องอ่าน localStorage
+  useEffect(() => { getCurrentUser(); }, [getCurrentUser]);
 
   const handleLogin = useCallback(async () => {
-    setLoading(p => ({ ...p, login: true })); clearAlerts();
+    setLoading(p => ({ ...p, login: true }));
+    clearAlerts();
     try {
-      const r = await apiCall('/auth/login', { method: 'POST', body: JSON.stringify(loginForm) });
-      setAuthToken(r.token); localStorage.setItem('authToken', r.token);
-      setCurrentUser(r.user); setAuthUser(r.user);
+      // ✅ server จะ set cookie ใน response — client ไม่ต้องเก็บ token เอง
+      const r = await apiFetch('/auth/login', {
+        method: 'POST',
+        body: JSON.stringify(loginForm),
+      });
+      setCurrentUser(r.user);
+      setAuthUser(r.user);
       showAlert('login', 'เข้าสู่ระบบสำเร็จ!', 'success');
       setTimeout(() => setCurrentView('profile'), 900);
-    } catch (e) { showAlert('login', e.message); }
-    finally { setLoading(p => ({ ...p, login: false })); }
-  }, [loginForm, apiCall, clearAlerts, setAuthUser, showAlert]);
+    } catch (e) {
+      showAlert('login', e.message);
+    } finally {
+      setLoading(p => ({ ...p, login: false }));
+    }
+  }, [loginForm, clearAlerts, setAuthUser, showAlert]);
 
   const handleRegister = useCallback(async () => {
-    setLoading(p => ({ ...p, register: true })); clearAlerts();
+    setLoading(p => ({ ...p, register: true }));
+    clearAlerts();
     try {
-      const r = await apiCall('/auth/register', { method: 'POST', body: JSON.stringify(registerForm) });
-      setAuthToken(r.token); localStorage.setItem('authToken', r.token);
-      setCurrentUser(r.user); setAuthUser(r.user);
+      const r = await apiFetch('/auth/register', {
+        method: 'POST',
+        body: JSON.stringify(registerForm),
+      });
+      setCurrentUser(r.user);
+      setAuthUser(r.user);
       showAlert('register', 'สมัครสมาชิกสำเร็จ!', 'success');
       setTimeout(() => setCurrentView('profile'), 900);
-    } catch (e) { showAlert('register', e.message); }
-    finally { setLoading(p => ({ ...p, register: false })); }
-  }, [registerForm, apiCall, clearAlerts, setAuthUser, showAlert]);
+    } catch (e) {
+      showAlert('register', e.message);
+    } finally {
+      setLoading(p => ({ ...p, register: false }));
+    }
+  }, [registerForm, clearAlerts, setAuthUser, showAlert]);
 
   const refreshToken = useCallback(async () => {
     try {
-      const r = await apiCall('/auth/refresh', { method: 'POST' });
-      setAuthToken(r.token); localStorage.setItem('authToken', r.token);
-    } catch (e) { logout(); }
-  }, [apiCall, logout]);
+      // ✅ server ออก cookie ใหม่ให้ — client ไม่ต้องทำอะไร
+      await apiFetch('/auth/refresh', { method: 'POST' });
+    } catch (e) {
+      logout();
+    }
+  }, [logout]);
 
   /* ── Alert ── */
   const AlertBox = memo(({ alert }) => {
@@ -488,14 +262,18 @@ const VideoAuthSystem = () => {
 
   /* ── Login Form ── */
   const LoginForm = memo(() => {
-    const emailRef = useRef(null);
-    const pwRef    = useRef(null);
+    const emailRef   = useRef(null);
+    const pwRef      = useRef(null);
     const hasFocused = useRef(false);
 
     useEffect(() => {
       if (hasFocused.current) return;
       const ref = currentlyFocusedField === 'email' ? emailRef : pwRef;
-      if (ref.current) { ref.current.focus(); const l = ref.current.value.length; ref.current.setSelectionRange(l, l); }
+      if (ref.current) {
+        ref.current.focus();
+        const l = ref.current.value.length;
+        ref.current.setSelectionRange(l, l);
+      }
       hasFocused.current = true;
     }, []);
 
@@ -508,7 +286,7 @@ const VideoAuthSystem = () => {
         e.preventDefault();
         setFocused(f => f === 'email' ? 'password' : 'email');
       }
-    }, [currentlyFocusedField]);
+    }, []);
 
     return (
       <>
@@ -576,8 +354,8 @@ const VideoAuthSystem = () => {
     useEffect(() => {
       const map = { email: emailRef, password: pwRef, role: roleRef };
       const ref = map[currentlyFocusedField];
-      if (ref?.current) { ref.current.focus(); }
-    }, [currentlyFocusedField]);
+      if (ref?.current) ref.current.focus();
+    }, []);
 
     const handleKeyDown = useCallback((e) => {
       if (e.key === 'Enter') {
@@ -591,7 +369,7 @@ const VideoAuthSystem = () => {
         const idx = order.indexOf(currentlyFocusedField);
         setFocused(order[(idx + 1) % order.length]);
       }
-    }, [currentlyFocusedField]);
+    }, []);
 
     return (
       <>
@@ -683,7 +461,7 @@ const VideoAuthSystem = () => {
       </div>
 
       <button className="auth-outline-btn" onClick={refreshToken}>
-        <RefreshCw size={15} />รีเฟรช Token
+        <RefreshCw size={15} />รีเฟรช Session
       </button>
       <button className="auth-submit" onClick={logout}>
         <LogOut size={16} />ออกจากระบบ
@@ -702,7 +480,6 @@ const VideoAuthSystem = () => {
     </>
   ));
 
-  /* ── Render ── */
   const isProfile = currentView === 'profile';
 
   return (
@@ -711,7 +488,6 @@ const VideoAuthSystem = () => {
       <style>{`@keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}`}</style>
 
       <div className="auth-root">
-        {/* Ambient orbs */}
         <div className="auth-orb auth-orb-1" />
         <div className="auth-orb auth-orb-2" />
         <div className="auth-orb auth-orb-3" />
@@ -719,14 +495,13 @@ const VideoAuthSystem = () => {
         <div className="auth-card">
           <div className="auth-filmstrip" />
 
-          {/* Header */}
           <div className="auth-header">
             <div className="auth-logo">
               <div className="auth-logo-icon"><Clapperboard size={26} color="#fff" /></div>
               <span className="auth-logo-text">CineStream</span>
             </div>
             <div className="auth-title">
-              {isProfile ? `ยินดีต้อนรับ` : currentView === 'login' ? 'เข้าสู่ระบบ' : 'สมัครสมาชิก'}
+              {isProfile ? 'ยินดีต้อนรับ' : currentView === 'login' ? 'เข้าสู่ระบบ' : 'สมัครสมาชิก'}
             </div>
             <div className="auth-subtitle">
               {isProfile
@@ -737,7 +512,6 @@ const VideoAuthSystem = () => {
             </div>
           </div>
 
-          {/* Tabs (login/register only) */}
           {!isProfile && (
             <div className="auth-tabs">
               <button
@@ -751,7 +525,6 @@ const VideoAuthSystem = () => {
             </div>
           )}
 
-          {/* Body */}
           <div className="auth-body">
             {currentView === 'login'    && <LoginForm />}
             {currentView === 'register' && <RegisterForm />}

@@ -9,11 +9,14 @@ const TOPICS = { VIDEO_LOGS: process.env.KAFKA_TOPIC || 'video-logs' };
 const MAX_BATCH_SIZE = 1000;
 const REQUIRED_FIELDS = ['videoId', 'eventType']; // ตามโค้ดเดิมของคุณ (eventType แบบ camelCase)
 
+// แก้เป็น
 function validateEvent(event) {
-  for (const field of REQUIRED_FIELDS) {
-    if (!event[field]) return `Missing field: ${field}`;
-  }
-  if (typeof event.videoId !== 'string') return 'videoId must be string';
+  const videoId   = event.video_id   ?? event.videoId;
+  const eventType = event.event_type ?? event.eventType;
+
+  if (!videoId)   return 'Missing field: video_id';
+  if (!eventType) return 'Missing field: event_type';
+  if (typeof videoId !== 'string') return 'video_id must be string';
   return null;
 }
 
@@ -49,31 +52,43 @@ router.post('/analytics/video', async (req, res) => {
       // ✅ แปลงเป็น Format ของ Kafka
       const kafkaMessages = valid.map(event => ({
         // ใช้ sessionId เป็นคีย์หลัก เพื่อให้ event ของ session เดียวกันลง Partition เดียวกัน (รักษาลำดับ)
-        key: event.sessionId || event.userId || event.videoId || 'unknown',
+       key: event.session_id ?? event.sessionId ?? event.user_id ?? event.userId ?? event.video_id ?? event.videoId ?? 'unknown',
         value: JSON.stringify(event)
       }));
 
       await kafkaService.sendBatch(TOPICS.VIDEO_LOGS, kafkaMessages);
     }
 const mlRelevantEvents = valid.filter(event => 
-  event.eventType === 'completed' || event.eventType === 'watch_chunk'
+ (event.event_type ?? event.eventType) === 'completed' || 
+(event.event_type ?? event.eventType) === 'watch_chunk'
 );
 
 if (mlRelevantEvents.length > 0) {
-  const mlMessages = mlRelevantEvents.map(event => ({
-    key: event.userId || 'anonymous',
-    value: JSON.stringify({
-      userId: event.userId,
-      videoId: event.videoId,
-      eventType: event.eventType,
-      // สมมติว่า frontend ส่ง category มาด้วย (ถ้าไม่มี อาจต้องให้ Python ไปดึงจาก DB เอง)
-      category: event.category || 'unknown', 
-      timestamp: event.receivedAt
-    })
-  }));
+    
+    // ดึงจาก Redis ที่เรา SET ไว้ใน Webhoo
+    
+ const mlMessages = mlRelevantEvents.map((event) => {
+    // 1. ดึงค่า category จาก event (รองรับทั้งชื่อ category และ video_category)
+    let categoryData = event.category || event.video_category || 'unknown';
+    
+    // 2. ตรวจสอบว่าเป็น Array หรือไม่ (จาก log ของคุณมันคือ ["comedy"])
+    // ถ้าเป็น Array ให้ดึงตัวแรกออกมา หรือส่งไปทั้ง Array เลยก็ได้
+    // ในที่นี้ผมแนะนำให้ส่งเป็น Array ไปเพื่อให้ Python จัดการต่อครับ
+    const finalCategory = Array.isArray(categoryData) ? categoryData : [categoryData];
 
-  // ส่งเข้า topic 'user-activities' ให้ Python Worker เอาไปกินต่อ
-  // await kafkaService.sendBatch('user-activities', mlMessages);
+    return {
+        key: event.user_id || event.userId || 'anonymous',
+        value: JSON.stringify({
+            userId: event.user_id || event.userId,
+            videoId: event.video_id || event.videoId,
+            eventType: event.event_type || event.eventType,
+            category: finalCategory, // ✅ ส่งเป็น Array [ "comedy" ]
+            timestamp: event.receivedAt
+        })
+    };
+});
+
+    await kafkaService.sendBatch('user-activities', mlMessages);
 }
     return res.status(202).json({
       queued: valid.length,

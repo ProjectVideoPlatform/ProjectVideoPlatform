@@ -128,9 +128,14 @@ class RedisClient {
 
   // ---------- PIPELINE / MULTI ----------
 
-  pipeline() {
-    return this.publisher.pipeline();
+ pipeline() {
+  if (!this.publisher) {
+    // ถ้ายังไม่ได้ connect ให้ throw error ที่อ่านง่ายขึ้น 
+    // หรือทำการสร้าง instance เฉพาะหน้า (แต่แนะนำให้เรียก connect ให้เสร็จก่อนจะดีกว่า)
+    throw new Error('Redis Publisher not initialized. Call connect() first.');
   }
+  return this.publisher.pipeline();
+}
 
   multi() {
     return this.publisher.multi();

@@ -1,5 +1,6 @@
 const express = require('express');
 const jwt = require('jsonwebtoken');
+const crypto = require('crypto');
 const User = require('../models/User');
 const jwtConfig = require('../config/auth');
 const { authenticateToken } = require('../middleware/auth');
@@ -11,7 +12,35 @@ const {
 const router = express.Router();
 const logger = require('../utils/logger');
 
+// ─────────────────────────────────────────────
+// Cookie config — ใช้ร่วมกันทุก route ที่ set/clear cookie
+// ─────────────────────────────────────────────
+const COOKIE_NAME = 'authToken';
+
+const cookieOptions = {
+  httpOnly: true,          // ✅ JS อ่านไม่ได้ — ป้องกัน XSS
+  secure: process.env.NODE_ENV === 'production', // HTTPS only ใน production
+  sameSite: 'strict',      // ✅ ป้องกัน CSRF — browser ไม่ส่ง cookie ข้าม site
+  maxAge: 7 * 24 * 60 * 60 * 1000, // 7 วัน (ms)
+  path: '/',
+};
+
+// ─────────────────────────────────────────────
+// Helper: sign JWT และ set httpOnly cookie
+// ─────────────────────────────────────────────
+const setAuthCookie = (res, userId) => {
+  const token = jwt.sign(
+    { userId },
+    jwtConfig.secret,
+    { expiresIn: jwtConfig.expiresIn }
+  );
+  res.cookie(COOKIE_NAME, token, cookieOptions);
+  return token; // คืน token เผื่อ logging แต่ไม่ส่งใน response body
+};
+
+// ─────────────────────────────────────────────
 // Register
+// ─────────────────────────────────────────────
 router.post('/register', async (req, res) => {
   try {
     const { email, password, role = 'user' } = req.body;
@@ -32,19 +61,18 @@ router.post('/register', async (req, res) => {
     const user = new User({
       email,
       password,
+      // ✅ Security: ไม่ให้ client กำหนด role เองได้ตรงๆ
+      // ถ้า project นี้ต้องการ admin registration ให้ทำผ่าน invite code แทน
       role: role === 'admin' ? 'admin' : 'user',
     });
 
     await user.save();
 
-    const token = jwt.sign(
-      { userId: user._id },
-      jwtConfig.secret,
-      { expiresIn: jwtConfig.expiresIn }
-    );
+    // ✅ set cookie แทนการส่ง token ใน body
+    setAuthCookie(res, user._id);
 
     res.status(201).json({
-      token,
+      // ไม่ส่ง token ใน body อีกต่อไป
       user: { id: user._id, email: user.email, role: user.role },
       message: 'User registered successfully',
     });
@@ -54,7 +82,9 @@ router.post('/register', async (req, res) => {
   }
 });
 
-// ✅ เพิ่ม loginRateLimiter เป็น middleware
+// ─────────────────────────────────────────────
+// Login
+// ─────────────────────────────────────────────
 router.post('/login', loginRateLimiter, async (req, res) => {
   try {
     const { email, password } = req.body;
@@ -78,14 +108,11 @@ router.post('/login', loginRateLimiter, async (req, res) => {
 
     await clearFailedAttempts(email, ip);
 
-    const token = jwt.sign(
-      { userId: user._id },
-      jwtConfig.secret,
-      { expiresIn: jwtConfig.expiresIn }
-    );
+    // ✅ set cookie แทนการส่ง token ใน body
+    setAuthCookie(res, user._id);
 
     res.json({
-      token,
+      // ไม่ส่ง token ใน body
       user: { id: user._id, email: user.email, role: user.role },
       message: 'Login successful',
     });
@@ -95,7 +122,22 @@ router.post('/login', loginRateLimiter, async (req, res) => {
   }
 });
 
+// ─────────────────────────────────────────────
+// Logout — ✅ เพิ่ม route นี้เพื่อให้ server ลบ cookie ได้
+// ─────────────────────────────────────────────
+router.post('/logout', (req, res) => {
+  res.clearCookie(COOKIE_NAME, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'strict',
+    path: '/',
+  });
+  res.json({ message: 'Logged out successfully' });
+});
+
+// ─────────────────────────────────────────────
 // Get current user profile
+// ─────────────────────────────────────────────
 router.get('/me', authenticateToken, async (req, res) => {
   try {
     const user = await User.findById(req.user._id)
@@ -109,6 +151,9 @@ router.get('/me', authenticateToken, async (req, res) => {
   }
 });
 
+// ─────────────────────────────────────────────
+// Verify token (ใช้จาก cookie อัตโนมัติ)
+// ─────────────────────────────────────────────
 router.get('/verify', authenticateToken, async (req, res) => {
   try {
     res.json({
@@ -120,21 +165,18 @@ router.get('/verify', authenticateToken, async (req, res) => {
   }
 });
 
-// Refresh token — ✅ ย้ายมาก่อน module.exports
+// ─────────────────────────────────────────────
+// Refresh token — ออก cookie ใหม่โดยไม่ต้อง login ซ้ำ
+// ─────────────────────────────────────────────
 router.post('/refresh', authenticateToken, async (req, res) => {
   try {
-    const token = jwt.sign(
-      { userId: req.user._id },
-      jwtConfig.secret,
-      { expiresIn: jwtConfig.expiresIn }
-    );
-
-    res.json({ token, message: 'Token refreshed successfully' });
+    // ✅ ออก cookie ใหม่ (rotate token)
+    setAuthCookie(res, req.user._id);
+    res.json({ message: 'Token refreshed successfully' });
   } catch (error) {
     logger.error('Token refresh error:', error);
     res.status(500).json({ error: 'Failed to refresh token' });
   }
 });
 
-// ✅ export แค่ครั้งเดียว ที่ท้ายไฟล์
 module.exports = router;

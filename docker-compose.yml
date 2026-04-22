@@ -450,6 +450,7 @@ services:
       - KAFKA_BROKERS=kafka:9092     # เชื่อมต่อ Kafka ผ่านชื่อ Service
       - REDIS_HOST=redis             # เชื่อมต่อ Redis ผ่านชื่อ Service
       # - PINECONE_API_KEY=${PINECONE_API_KEY} # เตรียมไว้ดึงจาก .env ของคุณ
+      - REDIS_PASSWORD= redispassword123 # เพิ่มรหัสผ่านสำหรับ Redis
     networks:
       - secure-video-network
     depends_on:

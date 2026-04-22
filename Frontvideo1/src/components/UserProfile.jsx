@@ -1,31 +1,37 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { 
-  User, Mail, Shield, Calendar, History, LogOut, Lock, 
-  Eye, EyeOff, ChevronRight, Loader, CreditCard, 
-  MapPin, Video, Clock, TrendingUp, Award 
+import {
+  User, Mail, Shield, Calendar, History, LogOut, Lock,
+  Eye, EyeOff, ChevronRight, Loader, CreditCard,
+  MapPin, Video, Clock, TrendingUp, Award
 } from 'lucide-react';
 import { useNotif } from '../NotifContext';
 
 const UserProfile = () => {
   const { notifications, videoNotifications, addNotification } = useNotif();
-  
+
   const apiBaseUrl = 'http://localhost:3000';
   const [activeTab, setActiveTab] = useState('overview');
-  const [showPassword, setShowPassword] = useState(false);
+
+  // ✅ fix UI: แยก showPassword ให้แต่ละ field — toggle ช่องเดียวไม่กระทบช่องอื่น
+  const [showPasswords, setShowPasswords] = useState({
+    currentPassword: false,
+    newPassword: false,
+    confirmPassword: false
+  });
+
   const [loading, setLoading] = useState(false);
   const [pageLoading, setPageLoading] = useState(true);
-  
+
   const [userData, setUserData] = useState(null);
   const [purchaseHistory, setPurchaseHistory] = useState([]);
   const [stats, setStats] = useState(null);
-  
+
   const [passwordForm, setPasswordForm] = useState({
     currentPassword: '',
     newPassword: '',
     confirmPassword: ''
   });
 
-  // Mock sessions - ในอนาคตควรดึงจาก API
   const [sessions] = useState([
     {
       id: '1',
@@ -36,30 +42,45 @@ const UserProfile = () => {
     }
   ]);
 
-  // --- เพิ่มฟังก์ชัน Logout ---
-  const handleLogout = () => {
-    localStorage.removeItem('authToken'); // ลบ token ออก
+  // ✅ fix Security: ไม่ส่ง token ผ่าน Authorization header ใน localStorage
+  //    ให้ใช้ httpOnly cookie แทน (credentials: 'include')
+  //    — ฝั่ง backend ต้องตั้ง cookie แบบ httpOnly ด้วย
+  const authHeaders = {
+    'Content-Type': 'application/json'
+    // ไม่ต้องส่ง Authorization header เมื่อใช้ cookie
+  };
+
+  const handleLogout = async () => {
+    try {
+      // ✅ fix Security: logout ผ่าน API เพื่อให้ server ลบ cookie ฝั่ง backend ด้วย
+      await fetch(`${apiBaseUrl}/api/auth/logout`, {
+        method: 'POST',
+        credentials: 'include'
+      });
+    } catch (_) {
+      // ไม่ block ถ้า request ล้มเหลว ให้ redirect ต่อได้เลย
+    }
+
     addNotification({
       title: 'ออกจากระบบสำเร็จ',
       message: 'แล้วเจอกันใหม่นะ!',
       type: 'info'
     });
-    // ดีเลย์เล็กน้อยเพื่อให้แจ้งเตือนแสดงก่อนเปลี่ยนหน้า
+
     setTimeout(() => {
-      window.location.href = '/login'; 
+      window.location.href = '/login';
     }, 1000);
   };
 
   const fetchData = useCallback(async () => {
     setPageLoading(true);
-    const token = localStorage.getItem('authToken');
-    const headers = { 'Authorization': `Bearer ${token}` };
 
     try {
+      // ✅ fix Security: ใช้แค่ credentials: 'include' โดยไม่ต้องส่ง header ซ้ำ
       const [profileRes, historyRes, statsRes] = await Promise.all([
-        fetch(`${apiBaseUrl}/api/user/profile`, { headers, credentials: 'include' }),
-        fetch(`${apiBaseUrl}/api/purchase/purchased/list?limit=100`, { headers, credentials: 'include' }),
-        fetch(`${apiBaseUrl}/api/purchase/stats`, { headers, credentials: 'include' })
+        fetch(`${apiBaseUrl}/api/user/profile`,    { credentials: 'include' }),
+        fetch(`${apiBaseUrl}/api/purchase/history`, { credentials: 'include' }),
+        fetch(`${apiBaseUrl}/api/purchase/stats`,   { credentials: 'include' })
       ]);
 
       if (profileRes.ok) {
@@ -69,7 +90,9 @@ const UserProfile = () => {
 
       if (historyRes.ok) {
         const historyData = await historyRes.json();
-        setPurchaseHistory(historyData.videos || []);
+        // ✅ fix Bug: backend ส่งกลับ { success, data: { purchases, pagination } }
+        //    ไม่ใช่ { videos } — แก้ให้ตรง schema จริง
+        setPurchaseHistory(historyData.data?.purchases || []);
       }
 
       if (statsRes.ok) {
@@ -107,27 +130,20 @@ const UserProfile = () => {
 
     setLoading(true);
     try {
-      const token = localStorage.getItem('authToken');
+      // ✅ fix Security: ใช้ credentials: 'include' แทน localStorage token
       const response = await fetch(`${apiBaseUrl}/api/user/change-password`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
+        headers: authHeaders,
+        credentials: 'include',
         body: JSON.stringify({ oldPassword: currentPassword, newPassword })
       });
 
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || 'เปลี่ยนรหัสผ่านไม่สำเร็จ');
 
-      addNotification({
-        title: 'สำเร็จ',
-        message: 'เปลี่ยนรหัสผ่านเรียบร้อยแล้ว',
-        type: 'success'
-      });
-      
+      addNotification({ title: 'สำเร็จ', message: 'เปลี่ยนรหัสผ่านเรียบร้อยแล้ว', type: 'success' });
       setPasswordForm({ currentPassword: '', newPassword: '', confirmPassword: '' });
-      setShowPassword(false);
+      setShowPasswords({ currentPassword: false, newPassword: false, confirmPassword: false });
     } catch (error) {
       addNotification({ title: 'เกิดข้อผิดพลาด', message: error.message, type: 'error' });
     } finally {
@@ -174,16 +190,14 @@ const UserProfile = () => {
                 {notifications.length + Object.keys(videoNotifications).length}
               </div>
             )}
-            <button 
+            <button
               onClick={() => window.history.back()}
               className="flex items-center gap-2 px-3 py-2 bg-slate-800/50 hover:bg-slate-700 text-white rounded-xl transition-all border border-slate-700/50 group text-sm"
             >
               <ChevronRight className="w-4 h-4 rotate-180 group-hover:-translate-x-1 transition-transform" />
               <span className="hidden xs:inline">ย้อนกลับ</span>
             </button>
-            
-            {/* เพิ่มปุ่ม Logout ใน Header */}
-            <button 
+            <button
               onClick={handleLogout}
               className="flex items-center gap-2 px-3 py-2 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded-xl transition-all border border-red-500/20 font-bold text-sm"
             >
@@ -204,7 +218,7 @@ const UserProfile = () => {
               </div>
               <div className="absolute -bottom-2 -right-2 w-8 h-8 bg-green-500 rounded-full border-4 border-slate-950" />
             </div>
-            
+
             <div className="flex-1 text-center md:text-left">
               <h2 className="text-3xl font-bold text-white mb-2">{userData?.email?.split('@')[0]}</h2>
               <p className="text-blue-300/80 mb-4 flex items-center justify-center md:justify-start gap-2">
@@ -222,9 +236,9 @@ const UserProfile = () => {
 
             <div className="grid grid-cols-3 gap-3 w-full md:w-auto">
               {[
-                { icon: Video, label: 'วิดีโอ', val: stats?.totalPurchases || 0, color: 'text-blue-400' },
-                { icon: TrendingUp, label: 'ยอดซื้อ', val: `฿${stats?.totalSpent || 0}`, color: 'text-green-400' },
-                { icon: Award, label: 'เข้าดู', val: stats?.totalAccessCount || 0, color: 'text-purple-400' }
+                { icon: Video,     label: 'วิดีโอ', val: stats?.totalPurchases  || 0,        color: 'text-blue-400'   },
+                { icon: TrendingUp, label: 'ยอดซื้อ', val: `฿${stats?.totalSpent || 0}`,     color: 'text-green-400'  },
+                { icon: Award,      label: 'เข้าดู',  val: stats?.totalAccessCount || 0,      color: 'text-purple-400' }
               ].map((s, i) => (
                 <div key={i} className="bg-slate-900/60 backdrop-blur-md rounded-2xl p-4 border border-white/5 text-center min-w-[100px]">
                   <s.icon className={`w-5 h-5 ${s.color} mx-auto mb-1`} />
@@ -239,17 +253,17 @@ const UserProfile = () => {
         {/* Tabs */}
         <nav className="flex p-1.5 bg-slate-900/50 backdrop-blur-md rounded-2xl border border-white/5 mb-8">
           {[
-            { id: 'overview', label: 'ภาพรวม', icon: User },
-            { id: 'purchases', label: 'ประวัติการซื้อ', icon: CreditCard },
-            { id: 'security', label: 'ความปลอดภัย', icon: Shield }
+            { id: 'overview',   label: 'ภาพรวม',          icon: User       },
+            { id: 'purchases',  label: 'ประวัติการซื้อ',   icon: CreditCard },
+            { id: 'security',   label: 'ความปลอดภัย',      icon: Shield     }
           ].map((t) => (
             <button
               key={t.id}
               onClick={() => setActiveTab(t.id)}
               className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl transition-all font-semibold text-sm ${
-                activeTab === t.id 
-                ? 'bg-blue-600 text-white shadow-lg' 
-                : 'text-slate-400 hover:text-white hover:bg-white/5'
+                activeTab === t.id
+                  ? 'bg-blue-600 text-white shadow-lg'
+                  : 'text-slate-400 hover:text-white hover:bg-white/5'
               }`}
             >
               <t.icon className="w-4 h-4" />
@@ -260,6 +274,8 @@ const UserProfile = () => {
 
         {/* Tab Content */}
         <div className="bg-slate-900/40 backdrop-blur-xl rounded-3xl border border-white/5 p-8">
+
+          {/* ─── Overview ─── */}
           {activeTab === 'overview' && (
             <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
               <h3 className="text-xl font-bold mb-8 flex items-center gap-3">
@@ -267,10 +283,10 @@ const UserProfile = () => {
               </h3>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-12">
                 {[
-                  { label: 'อีเมลที่ลงทะเบียน', val: userData?.email, icon: Mail, color: 'text-blue-400' },
-                  { label: 'ประเภทผู้ใช้งาน', val: userData?.role === 'admin' ? 'ผู้ดูแลระบบ' : 'สมาชิกทั่วไป', icon: Shield, color: 'text-purple-400' },
-                  { label: 'วันที่เริ่มใช้งาน', val: formatDate(userData?.createdAt), icon: Calendar, color: 'text-green-400' },
-                  { label: 'การเคลื่อนไหว ล่าสุด', val: formatDateTime(userData?.updatedAt), icon: History, color: 'text-orange-400' }
+                  { label: 'อีเมลที่ลงทะเบียน',  val: userData?.email,                                              icon: Mail,    color: 'text-blue-400'   },
+                  { label: 'ประเภทผู้ใช้งาน',     val: userData?.role === 'admin' ? 'ผู้ดูแลระบบ' : 'สมาชิกทั่วไป', icon: Shield,  color: 'text-purple-400' },
+                  { label: 'วันที่เริ่มใช้งาน',   val: formatDate(userData?.createdAt),                             icon: Calendar, color: 'text-green-400'  },
+                  { label: 'การเคลื่อนไหวล่าสุด', val: formatDateTime(userData?.updatedAt),                         icon: History, color: 'text-orange-400' }
                 ].map((item, i) => (
                   <div key={i} className="p-4 rounded-2xl bg-white/5 border border-white/5 flex items-center gap-4">
                     <div className={`p-3 rounded-xl bg-slate-950/50 ${item.color}`}>
@@ -284,9 +300,8 @@ const UserProfile = () => {
                 ))}
               </div>
 
-              {/* เพิ่มส่วน Logout ในหน้านี้ด้วย */}
               <div className="pt-8 border-t border-white/5">
-                <button 
+                <button
                   onClick={handleLogout}
                   className="w-full md:w-auto px-8 py-4 bg-red-500/10 hover:bg-red-500 text-red-500 hover:text-white rounded-2xl transition-all border border-red-500/30 flex items-center justify-center gap-3 font-bold"
                 >
@@ -297,25 +312,42 @@ const UserProfile = () => {
             </div>
           )}
 
+          {/* ─── Purchases ─── */}
           {activeTab === 'purchases' && (
             <div className="space-y-4 animate-in fade-in slide-in-from-bottom-4 duration-500">
-               <h3 className="text-xl font-bold mb-6 flex items-center gap-3">
+              <h3 className="text-xl font-bold mb-6 flex items-center gap-3">
                 <span className="w-1.5 h-6 bg-green-500 rounded-full" /> รายการสั่งซื้อของคุณ
               </h3>
               {purchaseHistory.length > 0 ? (
                 purchaseHistory.map((item) => (
                   <div key={item._id} className="group p-5 rounded-2xl bg-white/5 border border-white/5 hover:border-blue-500/50 transition-all flex flex-col md:flex-row justify-between gap-4">
                     <div>
-                      <h4 className="text-lg font-bold text-white group-hover:text-blue-400 transition-colors">{item.title}</h4>
+                      {/* ✅ fix Bug: ใช้ item.videoId?.title แทน item.title เพราะ populate แล้ว */}
+                      <h4 className="text-lg font-bold text-white group-hover:text-blue-400 transition-colors">
+                        {item.videoId?.title || item.title || 'ไม่ทราบชื่อวิดีโอ'}
+                      </h4>
                       <div className="flex gap-4 mt-2 text-sm text-slate-400">
-                        <span className="flex items-center gap-1"><Calendar className="w-4 h-4"/> {formatDate(item.purchaseInfo?.purchaseDate)}</span>
-                        <span className="flex items-center gap-1"><Eye className="w-4 h-4"/> ดูไปแล้ว {item.purchaseInfo?.accessCount || 0} ครั้ง</span>
+                        <span className="flex items-center gap-1">
+                          <Calendar className="w-4 h-4" /> {formatDate(item.purchaseDate)}
+                        </span>
+                        <span className="flex items-center gap-1">
+                          <Eye className="w-4 h-4" /> ดูไปแล้ว {item.accessCount || 0} ครั้ง
+                        </span>
                       </div>
                     </div>
                     <div className="text-right flex flex-col justify-center">
-                      <div className="text-2xl font-black text-white">฿{item.purchaseInfo?.amount || item.price}</div>
-                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md uppercase mt-1 ${item.purchaseInfo?.isExpired ? 'bg-red-500/20 text-red-400' : 'bg-green-500/20 text-green-400'}`}>
-                        {item.purchaseInfo?.isExpired ? 'Expired' : 'Active'}
+                      <div className="text-2xl font-black text-white">
+                        {/* ✅ fix Bug: ใช้ item.amount หรือ item.videoId?.price ให้ตรง schema */}
+                        ฿{item.amount ?? item.videoId?.price ?? 0}
+                      </div>
+                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md uppercase mt-1 ${
+                        item.status === 'refunded' ? 'bg-yellow-500/20 text-yellow-400' :
+                        item.expiresAt && new Date(item.expiresAt) < new Date()
+                          ? 'bg-red-500/20 text-red-400'
+                          : 'bg-green-500/20 text-green-400'
+                      }`}>
+                        {item.status === 'refunded' ? 'Refunded' :
+                         item.expiresAt && new Date(item.expiresAt) < new Date() ? 'Expired' : 'Active'}
                       </span>
                     </div>
                   </div>
@@ -329,6 +361,7 @@ const UserProfile = () => {
             </div>
           )}
 
+          {/* ─── Security ─── */}
           {activeTab === 'security' && (
             <div className="max-w-2xl animate-in fade-in slide-in-from-bottom-4 duration-500">
               <h3 className="text-xl font-bold mb-8 flex items-center gap-3">
@@ -336,28 +369,28 @@ const UserProfile = () => {
               </h3>
               <div className="space-y-5">
                 {[
-                  { label: 'รหัสผ่านปัจจุบัน', key: 'currentPassword' },
-                  { label: 'รหัสผ่านใหม่', key: 'newPassword' },
-                  { label: 'ยืนยันรหัสผ่านใหม่', key: 'confirmPassword' }
+                  { label: 'รหัสผ่านปัจจุบัน',   key: 'currentPassword'  },
+                  { label: 'รหัสผ่านใหม่',        key: 'newPassword'      },
+                  { label: 'ยืนยันรหัสผ่านใหม่', key: 'confirmPassword'  }
                 ].map((f) => (
                   <div key={f.key}>
                     <label className="block text-xs font-bold text-slate-500 uppercase mb-2 ml-1">{f.label}</label>
                     <div className="relative">
                       <input
-                        type={showPassword ? "text" : "password"}
+                        // ✅ fix UI: แต่ละช่องเปิด/ปิดแยกกัน ไม่กระทบกัน
+                        type={showPasswords[f.key] ? 'text' : 'password'}
                         value={passwordForm[f.key]}
-                        onChange={(e) => setPasswordForm({...passwordForm, [f.key]: e.target.value})}
-                        className="w-full bg-slate-950/50 border border-white/10 rounded-2xl px-5 py-3.5 text-white focus:ring-2 focus:ring-blue-500 outline-none transition-all"
-                        placeholder={`••••••••`}
+                        onChange={(e) => setPasswordForm({ ...passwordForm, [f.key]: e.target.value })}
+                        className="w-full bg-slate-950/50 border border-white/10 rounded-2xl px-5 py-3.5 pr-12 text-white focus:ring-2 focus:ring-blue-500 outline-none transition-all"
+                        placeholder="••••••••"
                       />
-                      {f.key === 'currentPassword' && (
-                        <button 
-                          onClick={() => setShowPassword(!showPassword)}
-                          className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-500 hover:text-white"
-                        >
-                          {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
-                        </button>
-                      )}
+                      <button
+                        onClick={() => setShowPasswords(prev => ({ ...prev, [f.key]: !prev[f.key] }))}
+                        className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-500 hover:text-white"
+                        type="button"
+                      >
+                        {showPasswords[f.key] ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+                      </button>
                     </div>
                   </div>
                 ))}
@@ -373,13 +406,20 @@ const UserProfile = () => {
 
               {/* Sessions */}
               <div className="mt-12 pt-12 border-t border-white/5">
-                <h4 className="font-bold mb-6 flex items-center gap-2"><MapPin className="w-4 h-4 text-red-400"/> อุปกรณ์ที่กำลังใช้งาน</h4>
+                <h4 className="font-bold mb-6 flex items-center gap-2">
+                  <MapPin className="w-4 h-4 text-red-400" /> อุปกรณ์ที่กำลังใช้งาน
+                </h4>
                 {sessions.map(s => (
                   <div key={s.id} className="p-5 rounded-2xl bg-white/5 border border-white/5 flex justify-between items-center">
                     <div className="flex gap-4 items-center">
-                      <div className="p-3 bg-green-500/10 rounded-xl"><Clock className="text-green-500 w-5 h-5"/></div>
+                      <div className="p-3 bg-green-500/10 rounded-xl">
+                        <Clock className="text-green-500 w-5 h-5" />
+                      </div>
                       <div>
-                        <p className="font-bold text-white">{s.device} <span className="text-[10px] bg-green-500 text-white px-2 py-0.5 rounded ml-2">Current</span></p>
+                        <p className="font-bold text-white">
+                          {s.device}
+                          <span className="text-[10px] bg-green-500 text-white px-2 py-0.5 rounded ml-2">Current</span>
+                        </p>
                         <p className="text-xs text-slate-500">{s.location} • ใช้งานเมื่อ {formatDateTime(s.lastActive)}</p>
                       </div>
                     </div>
@@ -388,6 +428,7 @@ const UserProfile = () => {
               </div>
             </div>
           )}
+
         </div>
       </main>
     </div>

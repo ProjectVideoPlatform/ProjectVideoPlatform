@@ -3,6 +3,8 @@
 // ── constants ──────────────────────────────────────────────────────────────────
 const VALID_EVENT_TYPES = new Set([
   'play', 'watch', 'watch_chunk', 'pause', 'seek', 'completed', 'close', 'error',
+  'tab_hide', 'tab_show',   // FIX: เพิ่ม event types ใหม่จาก VideoPlayer
+  'buffer_start', 'buffer_end',
 ]);
 
 const DEDUP_WINDOW_MS     = 300;
@@ -30,6 +32,11 @@ function getDeviceType() {
 
 function getCountry() {
   return document.querySelector('meta[name="country"]')?.getAttribute('content') ?? 'TH';
+}
+
+// FIX #1: stable event_id per event (ไม่ใช้ currentTime ซึ่งเปลี่ยนตลอด)
+function generateEventId() {
+  return crypto.randomUUID();
 }
 
 // ── class ──────────────────────────────────────────────────────────────────────
@@ -66,9 +73,6 @@ class VideoAnalytics {
     this._flushWatchChunk();
   }
 
-  // ── ใช้ตอน tab hidden / unmount ───────────────────────────────────────────
-  // push watchChunk เข้า buffer แล้ว sendBeacon ทันที
-  // กัน race condition กับ Tracker's own visibilitychange listener
   flushAndBeacon() {
     this._flushWatchChunk();
     this._flushSync();
@@ -80,19 +84,24 @@ class VideoAnalytics {
   }
 
   trackVideoEvent(data) {
-    if (!data?.videoId || !data?.eventType) {
+    // FIX: รองรับทั้ง videoId (camelCase จาก VideoPlayer) และ video_id (snake_case)
+    const videoId   = data?.videoId   ?? data?.video_id;
+    const eventType = data?.eventType ?? data?.event_type;
+
+    if (!videoId || !eventType) {
       console.warn('[VideoAnalytics] missing videoId or eventType', data);
       return;
     }
-    if (!VALID_EVENT_TYPES.has(data.eventType)) {
-      console.warn('[VideoAnalytics] unknown eventType:', data.eventType);
+    if (!VALID_EVENT_TYPES.has(eventType)) {
+      console.warn('[VideoAnalytics] unknown eventType:', eventType);
       return;
     }
 
-    // ── dedup ──────────────────────────────────────────────────────────────────
-    const dedupKey = data.eventType === 'watch'
-      ? `${data.videoId}|watch|${Math.floor(Date.now() / DEDUP_WINDOW_MS)}|${Math.round(data.currentTime ?? 0)}`
-      : `${data.videoId}|${data.eventType}|${Math.round(data.currentTime ?? 0)}`;
+    // ── dedup (ใช้ eventType ที่ normalize แล้ว) ───────────────────────────────
+    const currentTimeSec = data.current_time_seconds ?? data.currentTime ?? 0;
+    const dedupKey = eventType === 'watch' || eventType === 'watch_chunk'
+      ? `${videoId}|watch|${Math.floor(Date.now() / DEDUP_WINDOW_MS)}|${Math.round(currentTimeSec)}`
+      : `${videoId}|${eventType}|${Math.round(currentTimeSec)}`;
     const now      = Date.now();
     const lastSeen = this._dedupCache.get(dedupKey);
     if (lastSeen && now - lastSeen < DEDUP_WINDOW_MS) return;
@@ -101,26 +110,48 @@ class VideoAnalytics {
     this._cleanDedupCache(now);
     this._lastEventAt = now;
 
-    // ── build event ────────────────────────────────────────────────────────────
+    // ── FIX #2: build event ด้วย field names ที่ Worker คาดหวัง (snake_case) ──
+    const watchDuration   = data.watch_duration_seconds ?? data.duration ?? 0;
+    const totalWatch      = data.total_watch_seconds    ?? data.totalWatchTime ?? 0;
+    const chunkStart      = data.chunk_start_seconds;
+    const chunkEnd        = data.chunk_end_seconds;
+    const maxProgress     = data.max_progress_seconds   ?? Math.round(currentTimeSec);
+
     const event = {
-      videoId:        data.videoId,
-      userId:         data.userId ?? this.currentUserId ?? 'anonymous',
-      sessionId:      this.sessionId,
-      eventType:      data.eventType,
-      duration:       typeof data.duration       === 'number' ? Math.round(data.duration)       : 0,
-      totalWatchTime: typeof data.totalWatchTime === 'number' ? Math.round(data.totalWatchTime) : 0,
-      currentTime:    typeof data.currentTime    === 'number' ? Math.round(data.currentTime)    : 0,
-      device:         this.deviceType,
-      country:        this.country,
-      timestamp:      new Date().toISOString(),
-      ...(data.reason        && { reason:        data.reason }),
-      ...(data.errorCode     && { errorCode:     data.errorCode }),
-      ...(data.errorMessage  && { errorMessage:  data.errorMessage }),
-      ...(data.videoDuration && { videoDuration: Math.round(data.videoDuration) }),
-      max_progress_seconds: typeof data.max_progress_seconds === 'number'
-        ? data.max_progress_seconds
-        : Math.round(data.currentTime ?? 0),
+      event_id:              data.event_id ?? generateEventId(),   // FIX #1: มี event_id เสมอ
+      video_id:              videoId,
+      user_id:               data.userId ?? data.user_id ?? this.currentUserId ?? 'anonymous',
+      session_id:            data.session_id ?? data.sessionId ?? this.sessionId,
+      event_type:            eventType,
+     category:              data.video_category ?? 'unknown', // ✅ ได้ Category ไปให้ Python แล้ว
+      watch_duration_seconds: typeof watchDuration === 'number' ? Math.round(watchDuration) : 0,
+      total_watch_seconds:    typeof totalWatch    === 'number' ? Math.round(totalWatch)    : 0,
+      current_time_seconds:   typeof currentTimeSec === 'number' ? Math.round(currentTimeSec) : 0,
+
+      // chunk fields — ใส่เฉพาะเมื่อมีค่า (undefined จะถูก strip ทีหลัง)
+      chunk_start_seconds:   typeof chunkStart === 'number' ? Math.round(chunkStart) : undefined,
+      chunk_end_seconds:     typeof chunkEnd   === 'number' ? Math.round(chunkEnd)   : undefined,
+      max_progress_seconds:  typeof maxProgress === 'number' ? Math.round(maxProgress) : 0,
+
+      device_type:   this.deviceType,
+      country_code:  this.country,
+      event_time:    new Date().toISOString(),
+
+      // optional fields
+      ...(data.reason            && { reason:                  data.reason }),
+      ...(data.errorCode         && { error_code:              data.errorCode }),
+      ...(data.error_code        && { error_code:              data.error_code }),
+      ...(data.errorMessage      && { error_message:           data.errorMessage }),
+      ...(data.error_message     && { error_message:           data.error_message }),
+      ...(data.videoDuration     && { video_duration_seconds:  Math.round(data.videoDuration) }),
+      ...(data.seek_from_seconds !== undefined && { seek_from_seconds:  Math.round(data.seek_from_seconds) }),
+      ...(data.seek_delta_seconds !== undefined && { seek_delta_seconds: Math.round(data.seek_delta_seconds) }),
+      ...(data.buffered_ranges   && { buffered_ranges:         data.buffered_ranges }),
+      ...(data.buffer_duration_ms !== undefined && { buffer_duration_ms: data.buffer_duration_ms }),
     };
+
+    // strip undefined fields
+    Object.keys(event).forEach(k => event[k] === undefined && delete event[k]);
 
     const coalesced = this._coalesceWatch(event);
     if (coalesced === null) {
@@ -135,20 +166,28 @@ class VideoAnalytics {
   // ── private: coalescer ─────────────────────────────────────────────────────
 
   _coalesceWatch(event) {
-    if (event.eventType !== 'watch') {
+    // FIX: ใช้ event_type (snake_case) แทน eventType
+    if (event.event_type !== 'watch' && event.event_type !== 'watch_chunk') {
       this._flushWatchChunk();
       return event;
     }
 
-    const chunkStart = Math.max(0, event.currentTime - (event.duration || 0));
+    // รองรับทั้ง watch_chunk ที่มี chunk_start_seconds มาแล้ว และ watch ที่ต้อง derive
+    const chunkStart = typeof event.chunk_start_seconds === 'number'
+      ? event.chunk_start_seconds
+      : Math.max(0, event.current_time_seconds - (event.watch_duration_seconds || 0));
+    const chunkEnd   = typeof event.chunk_end_seconds === 'number'
+      ? event.chunk_end_seconds
+      : event.current_time_seconds;
 
     if (!this._watchChunk) {
       this._watchChunk = {
         ...event,
-        eventType:            'watch_chunk',
+        event_type:           'watch_chunk',
         chunk_start_seconds:  chunkStart,
-        chunk_end_seconds:    event.currentTime,
-        max_progress_seconds: event.currentTime,
+        chunk_end_seconds:    chunkEnd,
+        max_progress_seconds: chunkEnd,
+        watch_duration_seconds: event.watch_duration_seconds || 0,
       };
       return null;
     }
@@ -160,22 +199,32 @@ class VideoAnalytics {
       this._flushWatchChunk();
       this._watchChunk = {
         ...event,
-        eventType:            'watch_chunk',
+        event_type:           'watch_chunk',
         chunk_start_seconds:  chunkStart,
-        chunk_end_seconds:    event.currentTime,
-        max_progress_seconds: event.currentTime,
+        chunk_end_seconds:    chunkEnd,
+        max_progress_seconds: chunkEnd,
+        watch_duration_seconds: event.watch_duration_seconds || 0,
       };
       return null;
     }
 
-    this._watchChunk.chunk_end_seconds    = event.currentTime;
+    // FIX #5: accumulate duration (ไม่ใช้ OR ที่อาจ overwrite ด้วยค่าน้อยกว่า)
+    this._watchChunk.chunk_end_seconds    = chunkEnd;
     this._watchChunk.max_progress_seconds = Math.max(
       this._watchChunk.max_progress_seconds || 0,
-      event.currentTime,
+      chunkEnd,
     );
-    this._watchChunk.duration       = (this._watchChunk.duration || 0) + (event.duration || 0);
-    this._watchChunk.totalWatchTime = event.totalWatchTime || this._watchChunk.totalWatchTime;
-    this._watchChunk.timestamp      = event.timestamp;
+    this._watchChunk.watch_duration_seconds =
+      (this._watchChunk.watch_duration_seconds || 0) + (event.watch_duration_seconds || 0);
+    // FIX #5: total_watch_seconds ควรเป็น cumulative ล่าสุดเสมอ (ไม่ใช้ OR)
+    if (typeof event.total_watch_seconds === 'number') {
+      this._watchChunk.total_watch_seconds = Math.max(
+        this._watchChunk.total_watch_seconds || 0,
+        event.total_watch_seconds,
+      );
+    }
+    this._watchChunk.event_id  = generateEventId(); // fresh id สำหรับ coalesced chunk
+    this._watchChunk.event_time = event.event_time;
 
     return null;
   }
@@ -183,12 +232,14 @@ class VideoAnalytics {
   _flushWatchChunk() {
     if (!this._watchChunk) return;
 
-    const { chunk_start_seconds, chunk_end_seconds, duration } = this._watchChunk;
+    const { chunk_start_seconds, chunk_end_seconds, watch_duration_seconds } = this._watchChunk;
     const positionSpan = chunk_end_seconds - chunk_start_seconds;
 
-    if (positionSpan < 0.5 || duration < 0.5) {
-      this._watchChunk = null;
-      return;
+    // FIX #3: ไม่ drop เงียบๆ — log แล้วยังส่ง (ข้อมูลเล็กก็มีประโยชน์)
+    if (positionSpan < 0.5 || watch_duration_seconds < 0.5) {
+      console.debug('[VideoAnalytics] small watch_chunk, sending anyway:', {
+        positionSpan, duration: watch_duration_seconds,
+      });
     }
 
     this.buffer.push(this._watchChunk);
@@ -208,8 +259,6 @@ class VideoAnalytics {
 
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'hidden') {
-        // VideoPlayer's flushAndBeacon() จะ push watchChunk + sendBeacon ก่อนแล้ว
-        // Tracker ทำ _flushSync เพื่อ flush events ที่เหลือใน buffer (ถ้ามี)
         this._syncFlushed = true;
         this._flushSync();
       } else {
@@ -255,9 +304,8 @@ class VideoAnalytics {
   }
 
   _flushSync() {
-    // reset flush state ก่อน กัน async _flush ที่ค้างอยู่ trigger queue flush
     this._isFlushing  = false;
-    this._flushQueued = false; // ✅ กัน queued flush ยิงหลัง sync
+    this._flushQueued = false;
     this._flushWatchChunk();
     if (this.buffer.length === 0) return;
 
@@ -269,7 +317,6 @@ class VideoAnalytics {
       new Blob([payload], { type: 'application/json' }),
     );
 
-    // sendBeacon fail (payload > 64KB) → คืน buffer ไว้ให้ async flush ลอง
     if (!ok) this.buffer.unshift(...events);
   }
 

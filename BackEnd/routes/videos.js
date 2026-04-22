@@ -8,48 +8,70 @@ const { config } = require('../config/aws');
 const Video = require('../models/Video');
 const Purchase = require('../models/Purchase');
 const escapeStringRegexp = require('escape-string-regexp');
+const redisClient = require('../config/redis');
   const https = require('https');
   const QUEUES = require('../services/rabbitmq/queues');
 const router = express.Router();
 const { broadcast } = require('../websocket');
 router.get('/video-progress', authenticateToken, async (req, res) => {
   try {
-    console.log("kuy  เอ้ย fetching video progress");
     const { videoId } = req.query;
-
     if (!videoId) {
-      return res.status(400).json({ error: "videoId is required" });
+      return res.status(400).json({ error: 'videoId is required' });
     }
-
-    console.log("Fetching video progress for videoId:", videoId);
-
+ 
     const purchase = await Purchase.findOne({
       userId: req.user._id,
-      videoId: videoId
+      videoId: videoId,
     });
-
+ 
+    // ถ้าไม่มี purchase record → user ไม่ได้ซื้อ ไม่ต้อง restore progress
+    if (!purchase) {
+      return res.json({ lastTime: 0, owned: false });
+    }
+ 
     return res.json({
-      lastTime: purchase?.lastTime || 0
+      lastTime: purchase.lastTime || 0,
+      owned: true,
     });
-
   } catch (err) {
-    console.error("Error fetching progress", err);
-    return res.status(500).json({ error: "Server error" });
+    console.error('[VideoProgress] GET error:', err);
+    return res.status(500).json({ error: 'Server error' });
   }
 });
-
-// POST - บันทึก progress
+ 
+// POST - บันทึก progress (เฉพาะวิดีโอที่ซื้อแล้ว เท่านั้น)
 router.post('/video-progress', authenticateToken, async (req, res) => {
-  const { videoId, currentTime } = req.body;
-  const purchase = await Purchase.findOne({
-    userId: req.user._id,
-    videoId: videoId
-  });
-  purchase.lastTime = currentTime;
-  await purchase.save();
-  res.json({ success: true });
+  try {
+    const { videoId, currentTime } = req.body;
+ 
+    if (!videoId || currentTime == null) {
+      return res.status(400).json({ error: 'videoId and currentTime are required' });
+    }
+    if (typeof currentTime !== 'number' || currentTime < 0) {
+      return res.status(400).json({ error: 'currentTime must be a non-negative number' });
+    }
+ 
+    // findOne ก่อน — ถ้าไม่มี purchase record = ไม่ได้ซื้อ ไม่ save
+    const purchase = await Purchase.findOne({
+      userId: req.user._id,
+      videoId: videoId,
+    });
+ 
+    if (!purchase) {
+      // ไม่ error แต่ silent ignore (free video หรือ admin ไม่มี record)
+      return res.json({ success: false, reason: 'not_purchased' });
+    }
+ 
+    purchase.lastTime = Math.floor(currentTime);
+    await purchase.save();
+ 
+    return res.json({ success: true, lastTime: purchase.lastTime });
+  } catch (err) {
+    console.error('[VideoProgress] POST error:', err);
+    return res.status(500).json({ error: 'Server error' });
+  }
 });
-
 // Get video list (public videos or user's purchased videos)
 router.get('/', authenticateToken, async (req, res) => {
   try {
@@ -501,19 +523,14 @@ router.post(
         }
 
         // 4️⃣ อัปเดตข้อมูลตามสถานะ
-       if (status === "COMPLETE") {
-  video.uploadStatus = "completed";
-  video.thumbnailPath = `videos/${videoId}/thumbnails/original_thumb.0000000.jpg`;
+      if (status === "COMPLETE") {
+    video.uploadStatus = "completed";
+    video.thumbnailPath = `videos/${videoId}/thumbnails/original_thumb.0000000.jpg`;
+    
+    await video.save({ writeConcern: { w: 'majority', wtimeout: 5000 } });
 
-  await video.save({
-       writeConcern: { w: 'majority', wtimeout: 5000 } 
-       });
-  await broadcast({
-    videoId: videoId,
-    type: "transcode_completed",
-    status: "completed"
-  });
 
+    await broadcast({ videoId: videoId, type: "transcode_completed", status: "completed" });
   // 🚀 ส่ง Email Queue
   await queueService.sendToQueue(QUEUES.EMAIL_NOTIFY, {
     type: "VIDEO_COMPLETE",
@@ -644,6 +661,289 @@ router.get('/purchased/list', authenticateToken, async (req, res) => {
     });
   } catch (error) {
     console.error('Get purchased videos error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+/**
+ * 🧪 TESTING ONLY: Simulate purchase for a user
+ * ใช้สำหรับทดสอบเท่านั้น - ไม่ควรใช้ใน production จริง
+ */
+router.post('/simulate-purchase/:videoId', authenticateToken, async (req, res) => {
+  try {
+    const { videoId } = req.params;
+    const { userId, paymentMethod = 'cash' } = req.body; // ✅ เพิ่ม default
+
+    // ✅ ตรวจสอบสิทธิ์
+    if (req.user.role !== 'admin' && req.user.email !== 'tester@example.com') {
+      return res.status(403).json({ 
+        error: 'Forbidden - This endpoint is for testing only' 
+      });
+    }
+
+    // ✅ หา target user
+    let targetUser = req.user;
+    if (userId && req.user.role === 'admin') {
+      const User = require('../models/User');
+      targetUser = await User.findById(userId);
+      if (!targetUser) {
+        return res.status(404).json({ error: 'User not found' });
+      }
+    }
+
+    // ✅ หา video
+    const video = await Video.findOne({ 
+      _id: videoId,
+      uploadStatus: 'completed',
+      isActive: true 
+    });
+    
+    if (!video) {
+      return res.status(404).json({ error: 'Video not found or not available' });
+    }
+
+    // ✅ ตรวจสอบว่าซื้อไปแล้วหรือยัง
+    const existingPurchase = await Purchase.findOne({
+      userId: targetUser._id,
+      videoId: video._id,
+      status: 'completed'
+    });
+
+    if (existingPurchase) {
+      return res.status(400).json({ 
+        error: 'Already purchased',
+        purchase: {
+          id: existingPurchase._id,
+          purchaseDate: existingPurchase.purchaseDate,
+          amount: existingPurchase.amount
+        }
+      });
+    }
+
+    // ✅ สร้าง purchase (ใส่ทุก field ที่ required)
+    const purchase = new Purchase({
+      userId: targetUser._id,
+      videoId: video._id,
+      amount: video.price || 0,
+      status: 'completed',
+      paymentMethod: paymentMethod, // ✅ เพิ่มตรงนี้
+      paymentId: `simulate_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      purchaseDate: new Date(),
+      expiresAt: null,
+      accessCount: 0,
+      lastAccessedAt: null,
+      lastTime: 0
+    });
+
+    await purchase.save();
+
+    // ✅ เพิ่ม video เข้าไปใน purchasedVideos ของ user
+    if (targetUser.purchasedVideos) {
+      if (!targetUser.purchasedVideos.includes(video._id)) {
+        targetUser.purchasedVideos.push(video._id);
+        await targetUser.save();
+      }
+    }
+
+    console.log(`[SIMULATE] User ${targetUser.email} purchased video: ${video.title} with method: ${paymentMethod}`);
+
+    res.json({
+      success: true,
+      message: 'Purchase simulated successfully',
+      purchase: {
+        id: purchase._id,
+        videoId: video.id,
+        videoTitle: video.title,
+        userId: targetUser._id,
+        userEmail: targetUser.email,
+        amount: purchase.amount,
+        paymentMethod: purchase.paymentMethod,
+        purchaseDate: purchase.purchaseDate
+      }
+    });
+
+  } catch (error) {
+    console.error('Simulate purchase error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+/**
+ * 🧪 TESTING ONLY: Bulk purchase simulation
+ * ซื้อหลาย video พร้อมกัน
+ */
+router.post('/simulate-bulk-purchase', authenticateToken, async (req, res) => {
+  try {
+    const { userId, videoIds, paymentMethod = 'cash' } = req.body; // ✅ เพิ่ม default
+
+    // ✅ ตรวจสอบสิทธิ์
+    if (req.user.role !== 'admin' && req.user.email !== 'tester@example.com') {
+      return res.status(403).json({ error: 'Forbidden - This endpoint is for testing only' });
+    }
+
+    // ✅ หา target user
+    let targetUser = req.user;
+    if (userId && req.user.role === 'admin') {
+      const User = require('../models/User');
+      targetUser = await User.findById(userId);
+      if (!targetUser) {
+        return res.status(404).json({ error: 'User not found' });
+      }
+    }
+
+    // ✅ หา videos
+    const videos = await Video.find({
+      id: { $in: videoIds },
+      uploadStatus: 'completed',
+      isActive: true
+    });
+
+    if (videos.length === 0) {
+      return res.status(404).json({ error: 'No valid videos found' });
+    }
+
+    const results = {
+      success: [],
+      failed: []
+    };
+
+    for (const video of videos) {
+      try {
+        // ตรวจสอบว่าซื้อไปแล้วหรือยัง
+        const existing = await Purchase.findOne({
+          userId: targetUser._id,
+          videoId: video._id,
+          status: 'completed'
+        });
+
+        if (existing) {
+          results.failed.push({
+            videoId: video.id,
+            title: video.title,
+            reason: 'Already purchased'
+          });
+          continue;
+        }
+
+        // ✅ สร้าง purchase (ใส่ paymentMethod)
+        const purchase = new Purchase({
+          userId: targetUser._id,
+          videoId: video._id,
+          amount: video.price || 0,
+          status: 'completed',
+          paymentMethod: paymentMethod, // ✅ เพิ่มตรงนี้
+          paymentId: `simulate_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+          purchaseDate: new Date()
+        });
+
+        await purchase.save();
+
+        if (targetUser.purchasedVideos && !targetUser.purchasedVideos.includes(video._id)) {
+          targetUser.purchasedVideos.push(video._id);
+        }
+
+        results.success.push({
+          videoId: video.id,
+          title: video.title,
+          purchaseId: purchase._id
+        });
+
+      } catch (err) {
+        results.failed.push({
+          videoId: video.id,
+          title: video.title,
+          reason: err.message
+        });
+      }
+    }
+
+    if (targetUser.purchasedVideos && results.success.length > 0) {
+      await targetUser.save();
+    }
+
+    res.json({
+      success: true,
+      message: `Purchased ${results.success.length} videos, failed ${results.failed.length}`,
+      results
+    });
+
+  } catch (error) {
+    console.error('Bulk purchase error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+/**
+ * 🧪 TESTING ONLY: Get all purchases for a user
+ */
+router.get('/admin/purchases/:userId', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const { page = 1, limit = 20 } = req.query;
+
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+
+    const purchases = await Purchase.find({ userId })
+      .populate('videoId', 'id title thumbnailPath duration')
+      .sort({ purchaseDate: -1 })
+      .skip(skip)
+      .limit(parseInt(limit));
+
+    const total = await Purchase.countDocuments({ userId });
+
+    res.json({
+      userId,
+      purchases: purchases.map(p => ({
+        id: p._id,
+        videoId: p.videoId?.id,
+        videoTitle: p.videoId?.title,
+        amount: p.amount,
+        purchaseDate: p.purchaseDate,
+        accessCount: p.accessCount,
+        lastAccessedAt: p.lastAccessedAt,
+        lastTime: p.lastTime
+      })),
+      pagination: {
+        page: parseInt(page),
+        limit: parseInt(limit),
+        total,
+        pages: Math.ceil(total / parseInt(limit))
+      }
+    });
+
+  } catch (error) {
+    console.error('Get purchases error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * 🧪 TESTING ONLY: Reset purchase (delete purchase)
+ */
+router.delete('/admin/purchases/:purchaseId', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const { purchaseId } = req.params;
+
+    const purchase = await Purchase.findByIdAndDelete(purchaseId);
+
+    if (!purchase) {
+      return res.status(404).json({ error: 'Purchase not found' });
+    }
+
+    // ลบ video ออกจาก purchasedVideos ของ user
+    const User = require('../models/User');
+    const user = await User.findById(purchase.userId);
+    if (user && user.purchasedVideos) {
+      user.purchasedVideos = user.purchasedVideos.filter(
+        id => !id.equals(purchase.videoId)
+      );
+      await user.save();
+    }
+
+    res.json({
+      success: true,
+      message: 'Purchase deleted successfully'
+    });
+
+  } catch (error) {
+    console.error('Delete purchase error:', error);
     res.status(500).json({ error: error.message });
   }
 });

@@ -29,9 +29,11 @@ async function filterNewEvents(eventIds) {
 }
 
 function validateMessage(payload) {
-  if (!payload || typeof payload !== 'object') throw new Error('Payload is not JSON object');
-  if (!payload.videoId || (!payload.eventType && !payload.event_type)) {
-    throw new Error('Missing required fields: videoId or eventType');
+  const vId = payload.video_id ?? payload.videoId;
+  const eType = payload.event_type ?? payload.eventType;
+  
+  if (!vId || !eType) {
+    throw new Error('Missing required fields: video_id or event_type');
   }
   return true;
 }
@@ -125,6 +127,9 @@ class ClickHouseKafkaWorker {
 
   async start() {
     try {
+      // ✅ ต้องเพิ่มการ connect Redis ตรงนี้ก่อน!
+    await redisClient.connect(); 
+    console.log('[Worker] Redis ready for dedupe');
       await clickhouse.query({ query: 'SELECT 1', format: 'JSONEachRow' });
       await this.producer.connect();
       await this.consumer.connect();
