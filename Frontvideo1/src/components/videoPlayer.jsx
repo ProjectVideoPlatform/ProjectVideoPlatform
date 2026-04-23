@@ -3,8 +3,21 @@
 //  DURATION APPROACH:
 //    watch_duration_seconds = video-time diff (end - start)
 //    → buffer/lag ไม่กระทบ เพราะ video.currentTime ไม่เดินตอน buffer
-//    → หลัง seek: startChunk(dest) reset anchor → chunk ถัดไป duration นับจาก 0
 //    → ดีกว่า wall-clock ตรงที่ buffer 10 วิ ไม่ทำให้ duration พอง
+//
+//  FIX 1 (current_time_seconds โดด):
+//    browser บางตัว (Chrome/Safari) กระโดด video.currentTime ไปที่ seek dest
+//    ก่อนที่ seeking event จะ fire → handleSeeking เลยได้ ct = dest แทน pre-seek
+//    แก้โดยเพิ่ม lastVideoTimeRef ที่ timeupdate อัปเดตระหว่างเล่นปกติ
+//    (timeupdate ไม่ fire ระหว่าง seek → ค่านี้จะเป็น pre-seek เสมอ)
+//    handleSeeking ใช้ lastVideoTimeRef.current แทน video.currentTime
+//
+//  FIX 2 (seek ย้อนกลับ นับ duration ซ้ำ):
+//    ดู 0→25s → seek ย้อนไป 5s → เล่นต่อถึง 30s
+//    chunk หลัง seek ที่ผิด: start=5, end=30, duration=25 (ช่วง 5-25 นับซ้ำ)
+//    แก้โดย: seek ย้อนหลัง (dest < from) → startChunk(from) ไม่ใช่ startChunk(dest)
+//    chunk หลัง seek ที่ถูก: start=25(from), end=30, duration=5 ✅
+//    นับแค่เวลาที่ดูใหม่จริงๆ หลังจาก seek dest
 //
 import React, { useRef, useEffect, useState, useCallback } from 'react';
 import Hls from 'hls.js';
@@ -119,7 +132,7 @@ const VideoPlayer = ({ manifestUrl, onClose, videoId, videoCategory }) => {
   //    duration = video.currentTime_end - chunkStartVideoTime  (video-time diff)
   //    → buffer ไม่เดิน currentTime → duration ไม่พอง ✅
   //
-  //    seek → handleSeeking flush chunk ด้วย currentTime ก่อน seek
+  //    seek → handleSeeking flush chunk ด้วย lastVideoTimeRef (pre-seek)
   //         → handleSeeked เรียก startChunk(dest) → anchor reset เป็น dest
   //         → chunk ถัดไป: duration = newEnd - dest (นับจาก 0 หลัง seek) ✅
   //
@@ -133,6 +146,28 @@ const VideoPlayer = ({ manifestUrl, onClose, videoId, videoCategory }) => {
   const seekFromRef   = useRef(0);
   const seekTimerRef  = useRef(null);
   const seekCountRef  = useRef(0);
+
+  // ─── Last known video time (set by timeupdate, always pre-seek) ───────────
+  //  browser บางตัว (Chrome/Safari) กระโดด currentTime ไปที่ seek dest
+  //  ก่อน seeking event จะ fire → video.currentTime ณ handleSeeking = dest แล้ว
+  //  lastVideoTimeRef ถูก set ใน timeupdate ซึ่งไม่ fire ระหว่าง seek
+  //  → ค่านี้จะเป็นตำแหน่งก่อน seek เสมอ ใช้แทน video.currentTime ใน handleSeeking
+  const lastVideoTimeRef = useRef(0);
+
+  // ─── Chunk origin time (เวลาที่ startChunk ถูกเรียกครั้งแรกของ chunk นี้) ──
+  //  ใช้แก้กรณี seek ย้อนกลับ (dest < from):
+  //
+  //  ปัญหา: ถ้าดู 0→25 แล้ว seek ย้อนไป 5s แล้วเล่นต่อถึง 30s
+  //    chunk หลัง seek จะได้ start=5, end=30, duration=25
+  //    แต่ช่วง 5-25 ดูไปแล้วใน chunk ก่อนหน้า → นับซ้ำ
+  //
+  //  วิธีแก้: seek ย้อนหลัง → startChunk(from) ไม่ใช่ startChunk(dest)
+  //    chunk หลัง seek: start=25 (from), end=30, duration=5 ✅
+  //    บันทึกแค่เวลาที่ดูใหม่จริงๆ หลังจาก seek dest
+  //
+  //  chunkOriginTimeRef เก็บ videoTime ตอน startChunk ครั้งล่าสุด
+  //  → ใช้ใน handleSeeked เพื่อตัดสินใจ anchor ที่ถูกต้อง
+  const chunkOriginTimeRef = useRef(0);
 
   // ─── Misc refs ────────────────────────────────────────────────────────────
   const isHiddenRef = useRef(false);
@@ -174,6 +209,7 @@ const VideoPlayer = ({ manifestUrl, onClose, videoId, videoCategory }) => {
   // ═══════════════════════════════════════════════════════════════════════════
   const startChunk = useCallback((videoTime) => {
     chunkStartVideoTime.current = videoTime;
+    chunkOriginTimeRef.current  = videoTime; // เก็บ origin ของ chunk นี้ไว้
     log('startChunk', { anchor: videoTime.toFixed(2) });
   }, []);
 
@@ -219,7 +255,7 @@ const VideoPlayer = ({ manifestUrl, onClose, videoId, videoCategory }) => {
       chunk_start_seconds:    Math.round(start),
       chunk_end_seconds:      Math.round(end),
       watch_duration_seconds: Math.round(duration),
-      current_time_seconds:   Math.round(end),
+      current_time_seconds:   Math.round(end), // end คือ pre-seek time เสมอ ✅
     });
 
     log('flushChunk SENT', {
@@ -378,20 +414,26 @@ const VideoPlayer = ({ manifestUrl, onClose, videoId, videoCategory }) => {
 
     // ── seeking ───────────────────────────────────────────────────────────
     //
-    //  flush chunk ที่เล่นอยู่ก่อน seek ด้วย currentTime ปัจจุบัน
-    //  duration = currentTime - chunkStart = เวลาที่ดูจริงก่อน seek ✅
+    //  FIX: ใช้ lastVideoTimeRef.current แทน video.currentTime
     //
-    //  ถ้าไม่มี active chunk (pause แล้ว seek) → flushChunk SKIP เงียบๆ ✅
+    //  เหตุผล: browser บางตัว (Chrome/Safari) race condition —
+    //    currentTime กระโดดไปที่ seek dest ก่อน seeking event fire
+    //    → video.currentTime ณ จุดนี้ = dest ไม่ใช่ตำแหน่งก่อน seek
+    //
+    //  lastVideoTimeRef ถูก set ใน timeupdate ซึ่งไม่ fire ระหว่าง seek
+    //    → เป็น pre-seek position เสมอ ✅
+    //    → flushChunk ได้ duration ถูกต้อง ✅
+    //    → current_time_seconds ใน payload ตรงกับ chunk_end เสมอ ✅
     //
     const handleSeeking = () => {
       if (!isSeekingRef.current) {
-        const ct = safeTime(video.currentTime, video);
+        const ct = safeTime(lastVideoTimeRef.current, video); // ← FIX
         log('EVENT seeking START', {
-          ct:            ct.toFixed(2),
+          ct:             ct.toFixed(2),
           hasActiveChunk: chunkStartVideoTime.current !== null,
         });
         seekFromRef.current  = ct;
-        flushChunk(ct, 'seek-start'); // flush ด้วย currentTime ก่อน seek — duration ถูกต้อง
+        flushChunk(ct, 'seek-start'); // flush ด้วย pre-seek time จริงๆ ✅
         isSeekingRef.current = true;
       }
       seekCountRef.current += 1;
@@ -401,8 +443,16 @@ const VideoPlayer = ({ manifestUrl, onClose, videoId, videoCategory }) => {
 
     // ── seeked ────────────────────────────────────────────────────────────
     //
-    //  startChunk(dest) → anchor reset เป็น dest
-    //  chunk ถัดไป: duration = newEnd - dest (นับจาก 0 หลัง seek) ✅
+    //  seek ไปข้างหน้า (dest >= from):
+    //    startChunk(dest) → anchor = dest, duration chunk ใหม่นับจาก dest ✅
+    //
+    //  seek ย้อนกลับ (dest < from):
+    //    startChunk(from) → anchor = from (pre-seek)
+    //    chunk ถัดไป: start=from, end=X, duration = X - from
+    //    → นับแค่เวลาที่ดูใหม่จริงๆ หลัง seek dest ไม่นับช่วงที่เคยดูไปแล้ว ✅
+    //
+    //  ทั้งสองกรณี: chunk_start_seconds ใน payload จะถูก override เป็น origin
+    //  ที่ flushChunk ใช้จาก chunkStartVideoTime ซึ่ง = from เสมอ
     //
     const handleSeeked = () => {
       const dest = safeTime(video.currentTime, video);
@@ -410,9 +460,10 @@ const VideoPlayer = ({ manifestUrl, onClose, videoId, videoCategory }) => {
       isSeekingRef.current = false;
 
       log('EVENT seeked', {
-        from:   from.toFixed(2),
-        dest:   dest.toFixed(2),
-        paused: video.paused,
+        from:       from.toFixed(2),
+        dest:       dest.toFixed(2),
+        isBackward: dest < from,
+        paused:     video.paused,
       });
 
       if (seekCountRef.current <= 5) {
@@ -424,9 +475,16 @@ const VideoPlayer = ({ manifestUrl, onClose, videoId, videoCategory }) => {
         }));
       }
 
-      // anchor reset ที่ dest → duration chunk ใหม่นับจาก 0
       if (!video.paused && !document.hidden) {
-        startChunk(dest);
+        if (dest < from) {
+          // seek ย้อนกลับ → anchor เป็น from เพื่อนับแค่เวลาใหม่หลัง dest
+          // duration chunk ถัดไป = newEnd - from (ไม่นับช่วง dest..from ที่ดูแล้ว)
+          startChunk(from);
+          log('seeked BACKWARD — anchor reset to from', { from: from.toFixed(2) });
+        } else {
+          // seek ไปข้างหน้า → anchor เป็น dest ปกติ
+          startChunk(dest);
+        }
       }
 
       scheduleSaveProgress(dest);
@@ -434,7 +492,10 @@ const VideoPlayer = ({ manifestUrl, onClose, videoId, videoCategory }) => {
     };
 
     // ── timeupdate ────────────────────────────────────────────────────────
-    //  periodic flush ทุก N วิ (video-time based, buffer ไม่นับ)
+    //  1. อัปเดต lastVideoTimeRef — ต้องทำก่อนทุกอย่าง
+    //     timeupdate fires ระหว่างเล่นปกติเท่านั้น (ไม่ fire ระหว่าง seek)
+    //     → lastVideoTimeRef จะเป็น pre-seek position เสมอ
+    //  2. periodic flush ทุก N วิ (video-time based, buffer ไม่นับ)
     const handleTimeUpdate = () => {
       if (
         video.paused         ||
@@ -445,6 +506,10 @@ const VideoPlayer = ({ manifestUrl, onClose, videoId, videoCategory }) => {
       ) return;
 
       const ct = safeTime(video.currentTime, video);
+
+      // อัปเดต lastVideoTimeRef ทุกครั้งที่ timeupdate fire ระหว่างเล่นปกติ
+      // ค่านี้จะถูกใช้ใน handleSeeking เพื่อ flush chunk ด้วย pre-seek time ✅
+      lastVideoTimeRef.current = ct;
 
       // ไม่มี active chunk (หลัง buffer exit ฯลฯ) → เริ่มใหม่
       if (chunkStartVideoTime.current === null) {
