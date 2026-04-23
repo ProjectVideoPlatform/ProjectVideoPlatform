@@ -6,6 +6,7 @@ const { authenticateToken } = require('../middleware/auth');
 
 const TOPICS = { VIDEO_LOGS: process.env.KAFKA_TOPIC || 'video-logs' };
 const MAX_BATCH_SIZE = 1000;
+
 function validateEvent(event) {
   const videoId   = event.video_id   ?? event.videoId;
   const eventType = event.event_type ?? event.eventType;
@@ -15,12 +16,29 @@ function validateEvent(event) {
   if (typeof videoId !== 'string') return 'video_id must be string';
   return null;
 }
+
+// 🆕 Helper function to sanitize ObjectId
+function sanitizeObjectId(value) {
+  if (!value) return 'anonymous';
+  
+  // ถ้าเป็น ObjectId จาก MongoDB
+  if (typeof value === 'object' && value !== null) {
+    // Mongoose ObjectId หรือ MongoDB ObjectId
+    if (value._bsontype === 'ObjectId' || value.toString) {
+      return value.toString();
+    }
+  }
+  
+  // ถ้าเป็น string อยู่แล้วก็คืนค่าเดิม
+  return String(value);
+}
+
 router.post('/analytics/video', authenticateToken, async (req, res) => {
   try {
-    // ✅ ดึงจาก req.user ที่ middleware เตรียมไว้ให้
-    // ใช้ _id เพราะมาจาก MongoDB
-    const authenticatedUserId = req.user._id;
+    // ✅ แปลง ObjectId เป็น string ทันทีที่ได้รับ
+    const authenticatedUserId = sanitizeObjectId(req.user._id);
     console.log(`[analytics] Received ${Array.isArray(req.body.events) ? req.body.events.length : 1} event(s) from user ${authenticatedUserId}`);
+    
     let events = Array.isArray(req.body.events) ? req.body.events : [req.body];
 
     if (events.length === 0) return res.status(400).json({ error: 'No events provided' });
@@ -32,8 +50,8 @@ router.post('/analytics/video', authenticateToken, async (req, res) => {
       if (!err) {
         valid.push({
           ...events[i],
-          // ✅ บังคับใช้ ID จาก Server (Cookie) เท่านั้น ป้องกันการปลอมแปลง ID
-          user_id: authenticatedUserId, 
+          // ✅ ใช้ sanitized userId ที่เป็น string แล้ว
+          user_id: authenticatedUserId,
           userId: authenticatedUserId,
           event_id: events[i].event_id || crypto.randomUUID(),
           receivedAt: new Date().toISOString(),
@@ -44,8 +62,8 @@ router.post('/analytics/video', authenticateToken, async (req, res) => {
     // --- ส่วนส่ง Kafka ปกติ ---
     if (valid.length > 0) {
       const kafkaMessages = valid.map(event => ({
-        key: event.session_id || authenticatedUserId, 
-        value: JSON.stringify(event)
+        key: String(event.session_id || authenticatedUserId), // 🆕 บังคับเป็น string
+        value: JSON.stringify(event) // event มี user_id เป็น string แล้ว
       }));
       await kafkaService.sendBatch(TOPICS.VIDEO_LOGS, kafkaMessages);
     }
@@ -58,12 +76,11 @@ router.post('/analytics/video', authenticateToken, async (req, res) => {
 
     if (mlRelevantEvents.length > 0) {
       const mlMessages = mlRelevantEvents.map((event) => ({
-        key: authenticatedUserId,
+        key: authenticatedUserId, // 🆕 เป็น string แล้ว
         value: JSON.stringify({
-          userId: authenticatedUserId,
-          videoId: event.video_id || event.videoId,
+          userId: authenticatedUserId, // 🆕 เป็น string แล้ว
+          videoId: String(event.video_id || event.videoId), // 🆕 บังคับเป็น string
           eventType: event.event_type || event.eventType,
-          // ✅ กันเหนียวเรื่อง Category
           category: Array.isArray(event.category) ? event.category : [event.category || 'unknown'],
           timestamp: event.receivedAt
         })

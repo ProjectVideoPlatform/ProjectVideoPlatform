@@ -1,4 +1,4 @@
 confluent-kafka==2.3.0
 redis==5.0.1
 sentence-transformers==2.2.2
-pinecone-client==3.0.0
+pinecone==3.0.0

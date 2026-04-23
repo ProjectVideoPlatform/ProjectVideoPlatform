@@ -566,7 +566,7 @@ const VideoStreamingApp = () => {
     try {
       const r = await api.playVideo(video.id);
       currentUserIdRef.current = r.userId || null;
-      setPlayer({ manifestUrl: r.manifestUrl, videoId: video._id, userIdRef: currentUserIdRef, videoCategory: video.category });
+      setPlayer({ manifestUrl: r.manifestUrl, videoId: video._id, videoCategory: video.tags });
     } catch (e) { alert('Playback failed: ' + e.message); }
     finally { setActionLoading(null); }
   };
@@ -604,6 +604,9 @@ const VideoStreamingApp = () => {
             <button className={`vs-htab ${currentView === 'purchased' ? 'active' : ''}`} onClick={() => handleViewChange('purchased')}>
               <BookOpen size={13} style={{ display: 'inline', marginRight: 5, verticalAlign: 'middle' }} />วิดีโอของฉัน
             </button>
+              <button className="vs-htab" onClick={() => navigate('/foryou')}>
+    <Sparkles size={13} style={{ display: 'inline', marginRight: 5, verticalAlign: 'middle' }} />สำหรับคุณ
+  </button>
           </div>
           <div className="vs-header-spacer" />
           <div className="vs-header-actions">
@@ -691,19 +694,26 @@ const VideoStreamingApp = () => {
           )}
         </main>
 
-        <nav className="vs-bottom-nav">
-          <button className={`vs-bnav-item ${currentView === 'all' ? 'active' : ''}`} onClick={() => handleViewChange('all')}>
-            <Home />หน้าหลัก
-          </button>
-          {isAdmin && (
-            <button className="vs-bnav-center" onClick={() => setShowUpload(true)}>
-              <Upload size={22} color="#fff" />
-            </button>
-          )}
-          <button className={`vs-bnav-item ${currentView === 'purchased' ? 'active' : ''}`} onClick={() => handleViewChange('purchased')}>
-            <BookOpen />คลังของฉัน
-          </button>
-        </nav>
+     <nav className="vs-bottom-nav">
+  <button className={`vs-bnav-item ${currentView === 'all' ? 'active' : ''}`} onClick={() => handleViewChange('all')}>
+    <Home />หน้าหลัก
+  </button>
+
+  {/* ✅ เพิ่มปุ่ม "สำหรับคุณ" ก่อนปุ่ม Upload */}
+  <button className="vs-bnav-item" onClick={() => navigate('/foryou')}>
+    <Sparkles />สำหรับคุณ
+  </button>
+
+  {isAdmin && (
+    <button className="vs-bnav-center" onClick={() => setShowUpload(true)}>
+      <Upload size={22} color="#fff" />
+    </button>
+  )}
+
+  <button className={`vs-bnav-item ${currentView === 'purchased' ? 'active' : ''}`} onClick={() => handleViewChange('purchased')}>
+    <BookOpen />คลังของฉัน
+  </button>
+</nav>
       </div>
 
       {currentPlayer && (
@@ -711,7 +721,6 @@ const VideoStreamingApp = () => {
           manifestUrl={currentPlayer.manifestUrl}
           onClose={() => setPlayer(null)}
           videoId={currentPlayer.videoId}
-          userIdRef={currentPlayer.userIdRef}
           videoCategory={currentPlayer.videoCategory}
         />
       )}

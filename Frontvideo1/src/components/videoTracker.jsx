@@ -9,10 +9,10 @@ const VALID_EVENT_TYPES = new Set([
 
 const DEDUP_WINDOW_MS     = 300;
 const MAX_DEDUP_CACHE     = 200;
-const FLUSH_INTERVAL      = 8_000;
-const MAX_BUFFER_SIZE     = 30;
+const FLUSH_INTERVAL      = 5_000;
+const MAX_BUFFER_SIZE     = 10;
 const ADAPTIVE_BURST_SIZE = 50;
-
+const CHUNK_MAX_AGE_MS    = 10_000;  // ใหม่: ตัด chunk ทุก 10 วินาที
 // ── helpers ────────────────────────────────────────────────────────────────────
 function getSessionId() {
   let id = sessionStorage.getItem('va_session');
@@ -48,7 +48,6 @@ class VideoAnalytics {
     this.deviceType = getDeviceType();
     this.country    = getCountry();
 
-    this.currentUserId = null;
     this.buffer        = [];
 
     this._dedupCache  = new Map();
@@ -65,9 +64,6 @@ class VideoAnalytics {
 
   // ── public API ─────────────────────────────────────────────────────────────
 
-  updateUserId(id) {
-    this.currentUserId = id ?? null;
-  }
 
   forceFlushChunk() {
     this._flushWatchChunk();
@@ -120,7 +116,6 @@ class VideoAnalytics {
     const event = {
       event_id:              data.event_id ?? generateEventId(),   // FIX #1: มี event_id เสมอ
       video_id:              videoId,
-      user_id:               data.userId ?? data.user_id ?? this.currentUserId ?? 'anonymous',
       session_id:            data.session_id ?? data.sessionId ?? this.sessionId,
       event_type:            eventType,
      category:              data.video_category ?? 'unknown', // ✅ ได้ Category ไปให้ Python แล้ว
@@ -153,82 +148,82 @@ class VideoAnalytics {
     // strip undefined fields
     Object.keys(event).forEach(k => event[k] === undefined && delete event[k]);
 
-    const coalesced = this._coalesceWatch(event);
-    if (coalesced === null) {
-      if (this.buffer.length >= MAX_BUFFER_SIZE) this._flush();
-      return;
-    }
-
-    this.buffer.push(coalesced);
+   const coalesced = this._coalesceWatch(event);
+  if (coalesced === null) {
     if (this.buffer.length >= MAX_BUFFER_SIZE) this._flush();
+    return;
   }
 
+  this.buffer.push(coalesced);
+
+  // ✅ Flush ทันทีถ้าเป็น critical event หรือ buffer เริ่มเยอะ
+  const CRITICAL_EVENTS = ['play', 'pause', 'completed', 'error', 'close'];
+  if (CRITICAL_EVENTS.includes(coalesced.event_type) || this.buffer.length >= MAX_BUFFER_SIZE) {
+    this._flush();
+  }
+}
   // ── private: coalescer ─────────────────────────────────────────────────────
 
-  _coalesceWatch(event) {
-    // FIX: ใช้ event_type (snake_case) แทน eventType
-    if (event.event_type !== 'watch' && event.event_type !== 'watch_chunk') {
-      this._flushWatchChunk();
-      return event;
-    }
+ _coalesceWatch(event) {
+  if (event.event_type !== 'watch' && event.event_type !== 'watch_chunk') {
+    this._flushWatchChunk();
+    return event;
+  }
 
-    // รองรับทั้ง watch_chunk ที่มี chunk_start_seconds มาแล้ว และ watch ที่ต้อง derive
-    const chunkStart = typeof event.chunk_start_seconds === 'number'
-      ? event.chunk_start_seconds
-      : Math.max(0, event.current_time_seconds - (event.watch_duration_seconds || 0));
-    const chunkEnd   = typeof event.chunk_end_seconds === 'number'
-      ? event.chunk_end_seconds
-      : event.current_time_seconds;
+  const chunkStart = typeof event.chunk_start_seconds === 'number'
+    ? event.chunk_start_seconds
+    : Math.max(0, event.current_time_seconds - (event.watch_duration_seconds || 0));
+  const chunkEnd = typeof event.chunk_end_seconds === 'number'
+    ? event.chunk_end_seconds
+    : event.current_time_seconds;
 
-    if (!this._watchChunk) {
-      this._watchChunk = {
-        ...event,
-        event_type:           'watch_chunk',
-        chunk_start_seconds:  chunkStart,
-        chunk_end_seconds:    chunkEnd,
-        max_progress_seconds: chunkEnd,
-        watch_duration_seconds: event.watch_duration_seconds || 0,
-      };
-      return null;
-    }
-
-    const prevEnd = this._watchChunk.chunk_end_seconds;
-    const gap     = chunkStart - prevEnd;
-
-    if (Math.abs(gap) > 2) {
-      this._flushWatchChunk();
-      this._watchChunk = {
-        ...event,
-        event_type:           'watch_chunk',
-        chunk_start_seconds:  chunkStart,
-        chunk_end_seconds:    chunkEnd,
-        max_progress_seconds: chunkEnd,
-        watch_duration_seconds: event.watch_duration_seconds || 0,
-      };
-      return null;
-    }
-
-    // FIX #5: accumulate duration (ไม่ใช้ OR ที่อาจ overwrite ด้วยค่าน้อยกว่า)
-    this._watchChunk.chunk_end_seconds    = chunkEnd;
-    this._watchChunk.max_progress_seconds = Math.max(
-      this._watchChunk.max_progress_seconds || 0,
-      chunkEnd,
-    );
-    this._watchChunk.watch_duration_seconds =
-      (this._watchChunk.watch_duration_seconds || 0) + (event.watch_duration_seconds || 0);
-    // FIX #5: total_watch_seconds ควรเป็น cumulative ล่าสุดเสมอ (ไม่ใช้ OR)
-    if (typeof event.total_watch_seconds === 'number') {
-      this._watchChunk.total_watch_seconds = Math.max(
-        this._watchChunk.total_watch_seconds || 0,
-        event.total_watch_seconds,
-      );
-    }
-    this._watchChunk.event_id  = generateEventId(); // fresh id สำหรับ coalesced chunk
-    this._watchChunk.event_time = event.event_time;
-
+  if (!this._watchChunk) {
+    this._watchChunk = {
+      ...event,
+      _firstSeen: Date.now(),   // ✅ เก็บเวลาเริ่มสร้าง
+      event_type:             'watch_chunk',
+      chunk_start_seconds:    chunkStart,
+      chunk_end_seconds:      chunkEnd,
+      max_progress_seconds:   chunkEnd,
+      watch_duration_seconds: event.watch_duration_seconds || 0,
+    };
     return null;
   }
 
+  const prevEnd    = this._watchChunk.chunk_end_seconds;
+  const gap        = chunkStart - prevEnd;
+  const chunkAgeMs = Date.now() - (this._watchChunk._firstSeen || 0);
+
+  // ✅ ตัด chunk ถ้านานเกิน 10 วินาที หรือ gap กระโดด
+  if (chunkAgeMs > CHUNK_MAX_AGE_MS || Math.abs(gap) > 2) {
+    this._flushWatchChunk();
+    this._watchChunk = {
+      ...event,
+      _firstSeen:             Date.now(),
+      event_type:             'watch_chunk',
+      chunk_start_seconds:    chunkStart,
+      chunk_end_seconds:      chunkEnd,
+      max_progress_seconds:   chunkEnd,
+      watch_duration_seconds: event.watch_duration_seconds || 0,
+    };
+    return null;
+  }
+
+  // สะสมต่อ
+  this._watchChunk.chunk_end_seconds    = chunkEnd;
+  this._watchChunk.max_progress_seconds = Math.max(this._watchChunk.max_progress_seconds || 0, chunkEnd);
+  this._watchChunk.watch_duration_seconds =
+    (this._watchChunk.watch_duration_seconds || 0) + (event.watch_duration_seconds || 0);
+  if (typeof event.total_watch_seconds === 'number') {
+    this._watchChunk.total_watch_seconds = Math.max(
+      this._watchChunk.total_watch_seconds || 0,
+      event.total_watch_seconds,
+    );
+  }
+  this._watchChunk.event_id   = generateEventId();
+  this._watchChunk.event_time = event.event_time;
+  return null;
+}
   _flushWatchChunk() {
     if (!this._watchChunk) return;
 
@@ -289,6 +284,7 @@ class VideoAnalytics {
         headers:   { 'Content-Type': 'application/json' },
         body:      JSON.stringify({ events }),
         keepalive: true,
+        credentials: 'include',
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
     } catch (err) {

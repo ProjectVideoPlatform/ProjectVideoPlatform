@@ -1,20 +1,46 @@
-// VideoPlayer.jsx — Analytics fixed + Progress restore/save (purchased videos only)
+// VideoPlayer.jsx — Hybrid analytics (video-time diff + seek anchor reset)
+//
+//  DURATION APPROACH:
+//    watch_duration_seconds = video-time diff (end - start)
+//    → buffer/lag ไม่กระทบ เพราะ video.currentTime ไม่เดินตอน buffer
+//    → หลัง seek: startChunk(dest) reset anchor → chunk ถัดไป duration นับจาก 0
+//    → ดีกว่า wall-clock ตรงที่ buffer 10 วิ ไม่ทำให้ duration พอง
+//
 import React, { useRef, useEffect, useState, useCallback } from 'react';
 import Hls from 'hls.js';
 import { X, Play } from 'lucide-react';
 import videoAnalytics from './VideoTracker';
 import { fetchVideoProgress, saveVideoProgress } from './services/videoProgress';
 
+// ─── Helpers ─────────────────────────────────────────────────────────────────
 const getAdaptiveInterval = (t) => t < 60 ? 5 : t < 300 ? 10 : 30;
-function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; }
 
 function getOrCreateSessionId() {
   let s = sessionStorage.getItem('video_session_id');
   if (!s) { s = crypto.randomUUID(); sessionStorage.setItem('video_session_id', s); }
   return s;
 }
-function newEventId() { return crypto.randomUUID(); }
 
+// ─── Debug Logger ─────────────────────────────────────────────────────────────
+//  เปิด: localStorage.setItem('vp_debug', '1')  → refresh
+//  ปิด:  localStorage.removeItem('vp_debug')    → refresh
+//  หรือ URL: ?vp_debug=1
+const DEBUG = (() => {
+  try {
+    return (
+      localStorage.getItem('vp_debug') === '1' ||
+      new URLSearchParams(window.location.search).get('vp_debug') === '1'
+    );
+  } catch { return false; }
+})();
+
+const log = (label, data = {}) => {
+  if (!DEBUG) return;
+  const ts = performance.now().toFixed(1);
+  console.log(`%c[VP ${ts}ms] ${label}`, 'color:#e8445a;font-weight:bold;', data);
+};
+
+// ─── Styles ───────────────────────────────────────────────────────────────────
 const playerStyles = `
   .vp-backdrop {
     position: fixed; inset: 0;
@@ -56,9 +82,12 @@ const playerStyles = `
   .vp-idle {
     position: absolute; inset: 0;
     display: flex; align-items: center; justify-content: center;
-    pointer-events: none; transition: opacity .25s;
+    transition: opacity .25s;
+    cursor: pointer;
+    pointer-events: none;
   }
-  .vp-idle.gone { opacity: 0; }
+  .vp-idle.visible { pointer-events: all; opacity: 1; }
+  .vp-idle.gone    { pointer-events: none; opacity: 0; }
   .vp-play-circle {
     width: 68px; height: 68px; border-radius: 50%;
     background: rgba(232,68,90,.85);
@@ -69,97 +98,163 @@ const playerStyles = `
   @media (max-width: 640px) { .vp-spacer { height: 76px; } }
 `;
 
-function getBufferedRanges(video) {
-  if (!video?.buffered) return [];
-  const ranges = [];
-  for (let i = 0; i < video.buffered.length; i++) {
-    ranges.push({ start: video.buffered.start(i), end: video.buffered.end(i) });
-  }
-  return ranges;
-}
-
+// ─── Constants ────────────────────────────────────────────────────────────────
 const PROGRESS_SAVE_INTERVAL_SEC = 10;
+const MIN_CHUNK_DURATION_SEC     = 1;
+const MAX_CHUNK_DURATION_SEC     = 600;
 
-const VideoPlayer = ({ manifestUrl, onClose, videoId, userIdRef, videoCategory }) => {
-  const videoRef        = useRef(null);
-  const hlsRef          = useRef(null);
+// ─── Component ────────────────────────────────────────────────────────────────
+const VideoPlayer = ({ manifestUrl, onClose, videoId, videoCategory }) => {
+  const videoRef = useRef(null);
+  const hlsRef   = useRef(null);
+
   const [isPlaying, setIsPlaying] = useState(false);
 
-  const segmentStartTime      = useRef(null);
-  const totalWatchTime        = useRef(0);
-  const lastTrackedVideoTime  = useRef(0);
-  const lastWatchTrackedAt    = useRef(0);
+  // ─── Chunk tracking ───────────────────────────────────────────────────────
+  //
+  //  chunkStartVideoTime — video.currentTime ณ เริ่ม chunk
+  //                        null = ไม่มี active chunk
+  //
+  //  HYBRID LOGIC:
+  //    duration = video.currentTime_end - chunkStartVideoTime  (video-time diff)
+  //    → buffer ไม่เดิน currentTime → duration ไม่พอง ✅
+  //
+  //    seek → handleSeeking flush chunk ด้วย currentTime ก่อน seek
+  //         → handleSeeked เรียก startChunk(dest) → anchor reset เป็น dest
+  //         → chunk ถัดไป: duration = newEnd - dest (นับจาก 0 หลัง seek) ✅
+  //
+  //  total_watch_seconds = ผลรวม duration ทุก chunk (playback time รวม, ดูซ้ำบวกซ้ำ)
+  //
+  const chunkStartVideoTime = useRef(null);
+  const totalWatchSeconds   = useRef(0);
 
-  const hasSeeked       = useRef(false);
-  const isSeekingRef    = useRef(false);
-  const seekCountRef    = useRef(0);
-  const seekTimerRef    = useRef(null);
-  const prevTimeRef     = useRef(0);
+  // ─── Seek state ───────────────────────────────────────────────────────────
+  const isSeekingRef  = useRef(false);
+  const seekFromRef   = useRef(0);
+  const seekTimerRef  = useRef(null);
+  const seekCountRef  = useRef(0);
 
-  const isBufferingRef  = useRef(false);
-  const bufferStartTime = useRef(null);
-  const isHiddenRef     = useRef(false);
-  const isEndedRef      = useRef(false);
+  // ─── Misc refs ────────────────────────────────────────────────────────────
+  const isHiddenRef = useRef(false);
+  const isEndedRef  = useRef(false);
+  const sessionId   = useRef(getOrCreateSessionId());
 
-  const sessionId       = useRef(getOrCreateSessionId());
-
-  // Progress (purchased only)
+  // ─── Progress (purchased videos only) ────────────────────────────────────
   const isOwnedRef            = useRef(false);
   const lastSavedProgressTime = useRef(-1);
   const progressSaveTimer     = useRef(null);
 
-  const flushWatchTime = useCallback(() => {
-    if (segmentStartTime.current === null) return 0;
-    const v = videoRef.current;
-    const maxSecs = v?.duration > 0 ? v.duration : Infinity;
-    const elapsed = Math.min(Math.round((Date.now() - segmentStartTime.current) / 1000), maxSecs);
-    totalWatchTime.current += elapsed;
-    segmentStartTime.current = null;
-    return elapsed;
+  // ─── safeTime ─────────────────────────────────────────────────────────────
+  //  clamp video.currentTime ไม่ให้เกิน duration
+  //  browser บางตัว seek เกิน duration แล้วค่อย clamp → chunk_end / current_time ผิดได้
+  const safeTime = useCallback((t, video) => {
+    if (!video) return t;
+    const dur = video.duration;
+    if (!dur || !isFinite(dur)) return t;
+    return Math.min(t, dur);
   }, []);
 
+  // ─── makePayload ──────────────────────────────────────────────────────────
   const makePayloadRef = useRef(null);
   makePayloadRef.current = (o = {}) => ({
-    event_id:            newEventId(),
+    event_id:            crypto.randomUUID(),
     session_id:          sessionId.current,
-    videoId,
-    userId:              userIdRef.current,
-      video_category:      videoCategory || undefined,   // ← เพิ่ม
+    video_id:            videoId,
+    video_category:      videoCategory || undefined,
     timestamp:           new Date().toISOString(),
-    total_watch_seconds: totalWatchTime.current,
+    total_watch_seconds: Math.round(totalWatchSeconds.current),
     ...o,
   });
   const makePayload = useCallback((o) => makePayloadRef.current(o), []);
 
-  // ─── Progress save (purchased only) ──────────────────────────────────────
+  // ═══════════════════════════════════════════════════════════════════════════
+  //  startChunk(videoTime)
+  //    บันทึก video-time เป็น anchor ของ chunk ใหม่
+  //    เรียกหลัง seek → anchor reset → duration chunk ถัดไปนับจาก 0
+  // ═══════════════════════════════════════════════════════════════════════════
+  const startChunk = useCallback((videoTime) => {
+    chunkStartVideoTime.current = videoTime;
+    log('startChunk', { anchor: videoTime.toFixed(2) });
+  }, []);
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  //  flushChunk(videoTime, reason)
+  //    duration = videoTime - chunkStartVideoTime  (video-time diff)
+  //    ถ้าไม่มี active chunk → SKIP เงียบๆ ไม่ error
+  // ═══════════════════════════════════════════════════════════════════════════
+  const flushChunk = useCallback((videoTime, reason = '') => {
+    if (chunkStartVideoTime.current === null) {
+      log('flushChunk SKIP — no active chunk', { reason });
+      return false;
+    }
+
+    const start    = chunkStartVideoTime.current;
+    const end      = videoTime;
+    const duration = end - start; // video-time diff
+
+    // reset ก่อนเสมอ ป้องกัน double-flush
+    chunkStartVideoTime.current = null;
+
+    log('flushChunk attempt', {
+      reason,
+      start:       start.toFixed(2),
+      end:         end.toFixed(2),
+      duration:    duration.toFixed(2),
+      totalBefore: totalWatchSeconds.current.toFixed(2),
+    });
+
+    if (duration < MIN_CHUNK_DURATION_SEC) {
+      log('flushChunk DROPPED — too short', { duration: duration.toFixed(2) });
+      return false;
+    }
+    if (duration > MAX_CHUNK_DURATION_SEC) {
+      log('flushChunk DROPPED — too long (drift?)', { duration: duration.toFixed(2) });
+      return false;
+    }
+
+    totalWatchSeconds.current += duration;
+
+    const payload = makePayload({
+      event_type:             'watch_chunk',
+      chunk_start_seconds:    Math.round(start),
+      chunk_end_seconds:      Math.round(end),
+      watch_duration_seconds: Math.round(duration),
+      current_time_seconds:   Math.round(end),
+    });
+
+    log('flushChunk SENT', {
+      chunk_start: Math.round(start),
+      chunk_end:   Math.round(end),
+      duration:    Math.round(duration),
+      totalAfter:  totalWatchSeconds.current.toFixed(2),
+    });
+
+    videoAnalytics.trackVideoEvent(payload);
+    return true;
+  }, [makePayload]);
+
+  // ─── Progress save ────────────────────────────────────────────────────────
   const scheduleSaveProgress = useCallback((currentTime, immediate = false) => {
     if (!isOwnedRef.current) return;
-
     const doSave = () => {
       const t = Math.floor(currentTime);
       if (Math.abs(t - lastSavedProgressTime.current) >= PROGRESS_SAVE_INTERVAL_SEC) {
         lastSavedProgressTime.current = t;
-        saveVideoProgress(videoId, t); // fire-and-forget
+        saveVideoProgress(videoId, t);
       }
     };
-
     clearTimeout(progressSaveTimer.current);
-    if (immediate) {
-      doSave();
-    } else {
-      progressSaveTimer.current = setTimeout(doSave, 3000);
-    }
+    if (immediate) doSave();
+    else progressSaveTimer.current = setTimeout(doSave, 3000);
   }, [videoId]);
 
-  // ─── Progress restore on mount ───────────────────────────────────────────
+  // ─── Progress restore on mount ────────────────────────────────────────────
   useEffect(() => {
     if (!videoId) return;
     let cancelled = false;
 
     fetchVideoProgress(videoId).then((result) => {
       if (cancelled || !result) return;
-
-      // owned: false → free / admin → ไม่ restore ไม่ save
       if (!result.owned) { isOwnedRef.current = false; return; }
 
       isOwnedRef.current = true;
@@ -170,72 +265,33 @@ const VideoPlayer = ({ manifestUrl, onClose, videoId, userIdRef, videoCategory }
         if (cancelled || !videoRef.current) return;
         videoRef.current.currentTime = savedTime;
         lastSavedProgressTime.current = savedTime;
-        lastTrackedVideoTime.current  = savedTime;
-        prevTimeRef.current           = savedTime;
-        console.log(`[Progress] Restored: ${savedTime}s`);
-        videoAnalytics.trackVideoEvent(makePayload({
-          eventType:            'resume',
-          current_time_seconds: savedTime,
-        }));
       };
 
-      if (videoRef.current.readyState >= HTMLMediaElement.HAVE_METADATA) {
-        applyTime();
-      } else {
-        videoRef.current.addEventListener('loadedmetadata', applyTime, { once: true });
-      }
+      if (videoRef.current.readyState >= HTMLMediaElement.HAVE_METADATA) applyTime();
+      else videoRef.current.addEventListener('loadedmetadata', applyTime, { once: true });
     });
 
     return () => {
       cancelled = true;
       clearTimeout(progressSaveTimer.current);
     };
-  }, [videoId, makePayload]);
+  }, [videoId]);
 
-  // ─── Main video events ────────────────────────────────────────────────────
+  // ─── Overlay click ────────────────────────────────────────────────────────
+  const handleOverlayClick = useCallback(() => {
+    const v = videoRef.current;
+    if (!v) return;
+    v.paused ? v.play().catch(() => {}) : v.pause();
+  }, []);
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  //  MAIN EVENT SETUP
+  // ═══════════════════════════════════════════════════════════════════════════
   useEffect(() => {
     if (!manifestUrl || !videoRef.current) return;
     const video = videoRef.current;
 
-    const startPlayWindow = () => {
-      segmentStartTime.current = Date.now();
-      lastWatchTrackedAt.current = Date.now();
-    };
-    const pausePlayWindow = () => {
-      flushWatchTime();
-      lastWatchTrackedAt.current = 0;
-    };
-
-    const enterBuffering = () => {
-      if (isBufferingRef.current) return;
-      isBufferingRef.current = true;
-      bufferStartTime.current = Date.now();
-      videoAnalytics.trackVideoEvent(makePayload({
-        eventType:            'buffer_start',
-        current_time_seconds: video?.currentTime ?? 0,
-        buffered_ranges:      getBufferedRanges(video),
-      }));
-      if (segmentStartTime.current !== null) {
-        const maxSecs = video?.duration > 0 ? video.duration : Infinity;
-        totalWatchTime.current += Math.min(Math.round((Date.now() - segmentStartTime.current) / 1000), maxSecs);
-        segmentStartTime.current = null;
-      }
-      videoAnalytics.forceFlushChunk();
-      lastWatchTrackedAt.current = 0;
-    };
-
-    const exitBuffering = () => {
-      if (!isBufferingRef.current) return;
-      isBufferingRef.current = false;
-      videoAnalytics.trackVideoEvent(makePayload({
-        eventType:            'buffer_end',
-        current_time_seconds: video?.currentTime ?? 0,
-        buffer_duration_ms:   bufferStartTime.current ? Date.now() - bufferStartTime.current : 0,
-      }));
-      bufferStartTime.current = null;
-      if (!video.paused) startPlayWindow();
-    };
-
+    // ── HLS setup ─────────────────────────────────────────────────────────
     if (hlsRef.current) { hlsRef.current.destroy(); hlsRef.current = null; }
     if (video.canPlayType('application/vnd.apple.mpegurl')) {
       video.src = manifestUrl;
@@ -244,193 +300,204 @@ const VideoPlayer = ({ manifestUrl, onClose, videoId, userIdRef, videoCategory }
       hlsRef.current = hls;
       hls.loadSource(manifestUrl);
       hls.attachMedia(video);
-      hls.on(Hls.Events.BUFFER_STALLED, enterBuffering);
-      hls.on(Hls.Events.FRAG_BUFFERED, () => exitBuffering());
     }
 
+    // ── Tab visibility ─────────────────────────────────────────────────────
+    //  hidden  → flush chunk ที่เล่นอยู่ (video.currentTime หยุดเดินตอน hidden)
+    //  visible → startChunk ใหม่ถ้ายังเล่นอยู่
     const handleVisibility = () => {
+      const ct = safeTime(video.currentTime, video);
       if (document.visibilityState === 'hidden') {
         isHiddenRef.current = true;
+        log('tab HIDDEN', { ct: ct.toFixed(2), paused: video.paused });
         if (!video.paused) {
-          const d = video.currentTime - lastTrackedVideoTime.current;
-          if (d > 0.5) {
-            videoAnalytics.trackVideoEvent(makePayload({
-              eventType:            'watch_chunk',
-              chunk_start_seconds:  Math.round(lastTrackedVideoTime.current),
-              chunk_end_seconds:    Math.round(video.currentTime),
-              duration:             Math.round(d),
-              current_time_seconds: Math.round(video.currentTime),
-            }));
-          }
-          lastTrackedVideoTime.current = video.currentTime;
-          pausePlayWindow();
-          videoAnalytics.trackVideoEvent(makePayload({
-            eventType:            'tab_hide',
-            current_time_seconds: Math.round(video.currentTime),
-            reason:               'tab_hidden',
-          }));
-          scheduleSaveProgress(video.currentTime, true);
-          videoAnalytics.flushAndBeacon();
-        } else {
-          scheduleSaveProgress(video.currentTime, true);
+          flushChunk(ct, 'tab-hide');
           videoAnalytics.flushAndBeacon();
         }
+        scheduleSaveProgress(ct, true);
       } else {
         isHiddenRef.current = false;
-        if (!video.paused && !isBufferingRef.current) {
-          startPlayWindow();
-          videoAnalytics.trackVideoEvent(makePayload({
-            eventType:            'tab_show',
-            current_time_seconds: Math.round(video.currentTime),
-          }));
+        log('tab VISIBLE', { ct: ct.toFixed(2), paused: video.paused });
+        if (!video.paused && !isSeekingRef.current) {
+          startChunk(ct);
         }
       }
     };
     document.addEventListener('visibilitychange', handleVisibility);
 
+    // ── play ──────────────────────────────────────────────────────────────
+    //  guard double-fire: ถ้ามี active chunk แล้วไม่ต้องเริ่มใหม่
     const handlePlay = () => {
-      if (isSeekingRef.current || document.hidden) return;
-      isEndedRef.current = false;
-      isHiddenRef.current = false;
-      startPlayWindow();
       setIsPlaying(true);
-      videoAnalytics.trackVideoEvent(makePayload({
-        eventType:            'play',
-        current_time_seconds: Math.round(video.currentTime),
-        duration:             0,
-      }));
-    };
+      const ct = safeTime(video.currentTime, video);
+      log('EVENT play', {
+        ct:            ct.toFixed(2),
+        isSeeking:     isSeekingRef.current,
+        hasActiveChunk: chunkStartVideoTime.current !== null,
+      });
 
-    const handlePause = () => {
-      if (isSeekingRef.current || hasSeeked.current) return;
-      setIsPlaying(false);
-      if (isEndedRef.current) { isEndedRef.current = false; return; }
-      const d = video.currentTime - lastTrackedVideoTime.current;
-      if (d > 0.5 && d < (video.duration ?? Infinity)) {
-        videoAnalytics.trackVideoEvent(makePayload({
-          eventType:            'watch_chunk',
-          chunk_start_seconds:  Math.round(lastTrackedVideoTime.current),
-          chunk_end_seconds:    Math.round(video.currentTime),
-          duration:             Math.round(d),
-          current_time_seconds: Math.round(video.currentTime),
-        }));
+      if (isSeekingRef.current || document.hidden) return;
+      if (chunkStartVideoTime.current !== null) {
+        log('play IGNORED — chunk already active');
+        return;
       }
-      lastTrackedVideoTime.current = video.currentTime;
-      pausePlayWindow();
-      videoAnalytics.forceFlushChunk();
+
+      isEndedRef.current  = false;
+      isHiddenRef.current = false;
+      startChunk(ct);
+
       videoAnalytics.trackVideoEvent(makePayload({
-        eventType:            'pause',
-        current_time_seconds: Math.round(video.currentTime),
+        event_type:           'play',
+        current_time_seconds: Math.round(ct),
       }));
-      scheduleSaveProgress(video.currentTime, true);
     };
 
+    // ── pause ─────────────────────────────────────────────────────────────
+    const handlePause = () => {
+      const ct = safeTime(video.currentTime, video);
+      log('EVENT pause', {
+        ct:        ct.toFixed(2),
+        isSeeking: isSeekingRef.current,
+        isEnded:   isEndedRef.current,
+      });
+
+      if (isSeekingRef.current) return;
+      if (isEndedRef.current)   return;
+
+      setIsPlaying(false);
+      flushChunk(ct, 'pause');
+
+      videoAnalytics.trackVideoEvent(makePayload({
+        event_type:           'pause',
+        current_time_seconds: Math.round(ct),
+      }));
+
+      scheduleSaveProgress(ct, true);
+      videoAnalytics.forceFlushChunk();
+    };
+
+    // ── seeking ───────────────────────────────────────────────────────────
+    //
+    //  flush chunk ที่เล่นอยู่ก่อน seek ด้วย currentTime ปัจจุบัน
+    //  duration = currentTime - chunkStart = เวลาที่ดูจริงก่อน seek ✅
+    //
+    //  ถ้าไม่มี active chunk (pause แล้ว seek) → flushChunk SKIP เงียบๆ ✅
+    //
     const handleSeeking = () => {
-      isSeekingRef.current = true;
-      if (!hasSeeked.current) {
-        hasSeeked.current = true;
-        const d = video.currentTime - lastTrackedVideoTime.current;
-        if (d > 0.5 && d < 5) {
-          videoAnalytics.trackVideoEvent(makePayload({
-            eventType:            'watch_chunk',
-            chunk_start_seconds:  Math.round(lastTrackedVideoTime.current),
-            chunk_end_seconds:    Math.round(video.currentTime),
-            duration:             Math.round(d),
-            current_time_seconds: Math.round(video.currentTime),
-          }));
-        }
-        prevTimeRef.current = video.currentTime;
-        lastTrackedVideoTime.current = video.currentTime;
-        pausePlayWindow();
-        videoAnalytics.forceFlushChunk();
+      if (!isSeekingRef.current) {
+        const ct = safeTime(video.currentTime, video);
+        log('EVENT seeking START', {
+          ct:            ct.toFixed(2),
+          hasActiveChunk: chunkStartVideoTime.current !== null,
+        });
+        seekFromRef.current  = ct;
+        flushChunk(ct, 'seek-start'); // flush ด้วย currentTime ก่อน seek — duration ถูกต้อง
+        isSeekingRef.current = true;
       }
       seekCountRef.current += 1;
       clearTimeout(seekTimerRef.current);
       seekTimerRef.current = setTimeout(() => { seekCountRef.current = 0; }, 1000);
     };
 
-    const handleSeeked = debounce(() => {
-      if (!videoRef.current) return;
-      hasSeeked.current = false;
+    // ── seeked ────────────────────────────────────────────────────────────
+    //
+    //  startChunk(dest) → anchor reset เป็น dest
+    //  chunk ถัดไป: duration = newEnd - dest (นับจาก 0 หลัง seek) ✅
+    //
+    const handleSeeked = () => {
+      const dest = safeTime(video.currentTime, video);
+      const from = seekFromRef.current;
       isSeekingRef.current = false;
-      const dest = video.currentTime;
-      const from = lastTrackedVideoTime.current;
-      lastTrackedVideoTime.current = dest;
-      prevTimeRef.current = dest;
-      lastWatchTrackedAt.current = Date.now();
-      if (segmentStartTime.current) segmentStartTime.current = Date.now();
-      if (seekCountRef.current <= 3) {
+
+      log('EVENT seeked', {
+        from:   from.toFixed(2),
+        dest:   dest.toFixed(2),
+        paused: video.paused,
+      });
+
+      if (seekCountRef.current <= 5) {
         videoAnalytics.trackVideoEvent(makePayload({
-          eventType:            'seek',
+          event_type:           'seek',
           seek_from_seconds:    Math.round(from),
           current_time_seconds: Math.round(dest),
-          seek_delta_seconds:   Math.round(Math.abs(dest - from)),
-          duration:             0,
+          seek_delta_seconds:   Math.round(dest - from),
         }));
       }
-      videoAnalytics.forceFlushChunk();
-      scheduleSaveProgress(dest);
-    }, 300);
 
-    const handleEnded = () => {
-      isEndedRef.current = true;
-      setIsPlaying(false);
-      pausePlayWindow();
+      // anchor reset ที่ dest → duration chunk ใหม่นับจาก 0
+      if (!video.paused && !document.hidden) {
+        startChunk(dest);
+      }
+
+      scheduleSaveProgress(dest);
       videoAnalytics.forceFlushChunk();
-      videoAnalytics.trackVideoEvent(makePayload({
-        eventType:              'completed',
-        video_duration_seconds: video.duration,
-        current_time_seconds:   Math.round(video.currentTime),
-      }));
-      if (video.duration > 0) scheduleSaveProgress(video.duration, true);
     };
 
+    // ── timeupdate ────────────────────────────────────────────────────────
+    //  periodic flush ทุก N วิ (video-time based, buffer ไม่นับ)
     const handleTimeUpdate = () => {
-      if (video.paused || video.ended || isSeekingRef.current || isHiddenRef.current || document.hidden) return;
-      const ct = video.currentTime;
-      const diff = Math.abs(ct - prevTimeRef.current);
-      if (diff > 2 && prevTimeRef.current > 0) { isSeekingRef.current = true; prevTimeRef.current = ct; return; }
-      prevTimeRef.current = ct;
-      if (video.readyState < HTMLMediaElement.HAVE_FUTURE_DATA) { enterBuffering(); return; }
-      exitBuffering();
-      if (segmentStartTime.current === null) segmentStartTime.current = Date.now();
-      if (lastWatchTrackedAt.current === 0) return;
-      const wallElapsed = Date.now() - lastWatchTrackedAt.current;
-      if (wallElapsed >= getAdaptiveInterval(ct) * 1000) {
-        const vd = ct - lastTrackedVideoTime.current;
-        if (vd <= 0 || vd > (video.duration ?? Infinity)) return;
-        lastWatchTrackedAt.current = Date.now();
-        lastTrackedVideoTime.current = ct;
-        videoAnalytics.trackVideoEvent(makePayload({
-          eventType:            'watch_chunk',
-          chunk_start_seconds:  Math.round(ct - vd),
-          chunk_end_seconds:    Math.round(ct),
-          duration:             Math.round(vd),
-          current_time_seconds: Math.round(ct),
-        }));
+      if (
+        video.paused         ||
+        video.ended          ||
+        isSeekingRef.current ||
+        isHiddenRef.current  ||
+        document.hidden
+      ) return;
+
+      const ct = safeTime(video.currentTime, video);
+
+      // ไม่มี active chunk (หลัง buffer exit ฯลฯ) → เริ่มใหม่
+      if (chunkStartVideoTime.current === null) {
+        log('timeupdate — no active chunk, starting', { ct: ct.toFixed(2) });
+        startChunk(ct);
+        return;
+      }
+
+      // video-time diff สำหรับ interval check (consistent กับ duration ที่จะ flush)
+      const elapsed = ct - chunkStartVideoTime.current;
+
+      if (elapsed >= getAdaptiveInterval(ct)) {
+        log('timeupdate — periodic flush', { ct: ct.toFixed(2), elapsed: elapsed.toFixed(2) });
+        flushChunk(ct, 'periodic');
+        startChunk(ct);
         scheduleSaveProgress(ct);
       }
     };
 
-    const handleError = () => {
-      const err = video.error;
+    // ── ended ─────────────────────────────────────────────────────────────
+    const handleEnded = () => {
+      isEndedRef.current = true;
+      setIsPlaying(false);
+
+      const endTime = safeTime(video.currentTime, video);
+      log('EVENT ended', {
+        endTime:  endTime.toFixed(2),
+        duration: video.duration?.toFixed(2),
+        total:    totalWatchSeconds.current.toFixed(2),
+      });
+
+      flushChunk(endTime, 'ended');
+      videoAnalytics.forceFlushChunk();
+
       videoAnalytics.trackVideoEvent(makePayload({
-        eventType:            'error',
-        errorCode:            err?.code,
-        errorMessage:         err?.message ?? 'Unknown error',
-        current_time_seconds: Math.round(video.currentTime),
+        event_type:             'completed',
+        current_time_seconds:   Math.round(endTime),
+        video_duration_seconds: Math.round(video.duration),
       }));
+
+      if (video.duration > 0) scheduleSaveProgress(video.duration, true);
     };
 
+    // ── register events ───────────────────────────────────────────────────
     video.addEventListener('play',       handlePlay);
     video.addEventListener('pause',      handlePause);
     video.addEventListener('seeking',    handleSeeking);
     video.addEventListener('seeked',     handleSeeked);
     video.addEventListener('ended',      handleEnded);
     video.addEventListener('timeupdate', handleTimeUpdate);
-    video.addEventListener('error',      handleError);
     video.play().catch(() => {});
 
+    // ── cleanup ───────────────────────────────────────────────────────────
     return () => {
       video.removeEventListener('play',       handlePlay);
       video.removeEventListener('pause',      handlePause);
@@ -438,33 +505,57 @@ const VideoPlayer = ({ manifestUrl, onClose, videoId, userIdRef, videoCategory }
       video.removeEventListener('seeked',     handleSeeked);
       video.removeEventListener('ended',      handleEnded);
       video.removeEventListener('timeupdate', handleTimeUpdate);
-      video.removeEventListener('error',      handleError);
       document.removeEventListener('visibilitychange', handleVisibility);
+
       clearTimeout(seekTimerRef.current);
-      pausePlayWindow();
-      videoAnalytics.forceFlushChunk();
-      if (!isEndedRef.current) scheduleSaveProgress(video.currentTime, true);
+
+      const ct = safeTime(video.currentTime, video);
+      log('CLEANUP', {
+        isEnded: isEndedRef.current,
+        ct:      ct.toFixed(2),
+        total:   totalWatchSeconds.current.toFixed(2),
+      });
+
+      if (!isEndedRef.current) {
+        flushChunk(ct, 'close');
+        scheduleSaveProgress(ct, true);
+      }
+
       videoAnalytics.trackVideoEvent(makePayload({
-        eventType:            'close',
-        current_time_seconds: Math.round(video.currentTime),
+        event_type:           'close',
+        current_time_seconds: Math.round(ct),
       }));
+      videoAnalytics.forceFlushChunk();
+
       if (hlsRef.current) { hlsRef.current.destroy(); hlsRef.current = null; }
     };
-  }, [manifestUrl, videoId, flushWatchTime, makePayload, scheduleSaveProgress]);
+  }, [manifestUrl, videoId, flushChunk, startChunk, makePayload, scheduleSaveProgress, safeTime]);
 
+  // ─── Render ───────────────────────────────────────────────────────────────
   return (
     <>
       <style>{playerStyles}</style>
       <div className="vp-backdrop">
         <div className="vp-topbar">
           <span className="vp-label">🎬 Now Playing</span>
-          <button className="vp-close" onClick={onClose} aria-label="ปิดวิดีโอ"><X size={18} /></button>
+          <button className="vp-close" onClick={onClose} aria-label="ปิดวิดีโอ">
+            <X size={18} />
+          </button>
         </div>
         <div className="vp-body">
           <div className="vp-box">
-            <video ref={videoRef} controls playsInline>Your browser does not support HTML5 video.</video>
-            <div className={`vp-idle ${isPlaying ? 'gone' : ''}`}>
-              <div className="vp-play-circle"><Play size={28} color="#fff" fill="#fff" /></div>
+            <video ref={videoRef} controls playsInline>
+              Your browser does not support HTML5 video.
+            </video>
+            <div
+              className={`vp-idle ${isPlaying ? 'gone' : 'visible'}`}
+              onClick={handleOverlayClick}
+              aria-label="เล่นวิดีโอ"
+              role="button"
+            >
+              <div className="vp-play-circle">
+                <Play size={28} color="#fff" fill="#fff" />
+              </div>
             </div>
           </div>
         </div>

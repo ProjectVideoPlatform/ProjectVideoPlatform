@@ -22,7 +22,8 @@ CREATE TABLE IF NOT EXISTS app_db.video_watch_events
     device_type            LowCardinality(String),
     country_code           LowCardinality(String),
     event_time             DateTime,
-    _inserted_at           DateTime DEFAULT now()
+    _inserted_at           DateTime DEFAULT now(),
+   category                String DEFAULT 'unknown'
 )
 ENGINE = ReplacingMergeTree(_inserted_at)
 PARTITION BY toYYYYMM(event_time)

@@ -8,6 +8,7 @@ const { config } = require('../config/aws');
 const Video = require('../models/Video');
 const Purchase = require('../models/Purchase');
 const escapeStringRegexp = require('escape-string-regexp');
+const { getRecommendedVideos } = require('../services/recommendations'); 
 const redisClient = require('../config/redis');
   const https = require('https');
   const QUEUES = require('../services/rabbitmq/queues');
@@ -140,6 +141,23 @@ router.get('/', authenticateToken, async (req, res) => {
   } catch (error) {
     console.error('Get videos error:', error);
     res.status(500).json({ error: 'Internal server error' });
+  }
+});
+// routes/videos.js
+
+
+router.get('/foryou', authenticateToken, async (req, res) => {
+  try {
+    const userId = req.user._id;
+
+    const { videos, source } = await getRecommendedVideos(userId);
+
+    const result = await attachPurchaseStatus(videos, userId);
+
+    res.json({ videos: result, source }); // source: 'personalized' | 'trending'
+  } catch (error) {
+    console.error('[/foryou]', error);
+    res.status(500).json({ message: 'Internal server error' });
   }
 });
 

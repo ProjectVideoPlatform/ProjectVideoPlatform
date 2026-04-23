@@ -10,6 +10,7 @@ import Auth from './components/Auth.jsx';
 import VideoDetails from './components/VideoDetails.jsx';
 import { AuthProvider } from './AuthProvider';
 import { ProtectedRoute } from './ProtectedRoute';
+import ForYouPage from './components/ForYou';
 import UserProfile from './components/UserProfile.jsx';
 import { NotifProvider } from './NotifContext'; // ✅ import context provider
 import GlobalNotification from './components/GlobalNotification'; // ✅ import global notification component
@@ -80,6 +81,20 @@ function App() {
             }
           />
         </Routes>
+        <Routes> {/* เพิ่มเส้นทางสำหรับ ForYouPage */}
+          <Route
+            path="/foryou"   
+            element={
+              <ProtectedRoute>
+                <ErrorBoundary>
+                  <Suspense fallback={<div>กำลังโหลด...</div>}>
+                    <ForYouPage />
+                  </Suspense>
+                </ErrorBoundary>
+              </ProtectedRoute>
+            }
+          />
+         </Routes>
       </Router>
       </NotifProvider>
     </AuthProvider>

@@ -28,10 +28,22 @@ async function filterNewEvents(eventIds) {
   return newIds;
 }
 
+function sanitizeObjectId(value) {
+  if (!value) return '';
+  if (typeof value === 'object' && value !== null) {
+    if (value._bsontype === 'ObjectId' || value.toString) {
+      return value.toString();
+    }
+    if (value.constructor && value.constructor.name === 'ObjectId') {
+      return value.toString();
+    }
+  }
+  return String(value);
+}
+
 function validateMessage(payload) {
-  const vId = payload.video_id ?? payload.videoId;
+  const vId   = payload.video_id  ?? payload.videoId;
   const eType = payload.event_type ?? payload.eventType;
-  
   if (!vId || !eType) {
     throw new Error('Missing required fields: video_id or event_type');
   }
@@ -43,57 +55,46 @@ function toClickhouseTimestamp(raw) {
 }
 
 function mapToRow(data) {
-  // ✅ เพิ่ม Types ให้ครบตามที่ VideoPlayer.jsx ใช้งานจริง
   const VALID_TYPES = new Set([
-    'play', 
-    'watch', 
-    'watch_chunk', 
-    'pause', 
-    'seek', 
-    'completed', 
-    'close', 
-    'error',
-    'buffer_start', // 🆕 เพิ่ม
-    'buffer_end',   // 🆕 เพิ่ม
-    'resume',       // 🆕 เพิ่ม (จาก Progress Restore)
-    'tab_hide',     // 🆕 เพิ่ม
-    'tab_show'      // 🆕 เพิ่ม
+    'play', 'watch', 'watch_chunk', 'pause', 'seek',
+    'completed', 'close', 'error', 'buffer_start', 'buffer_end',
+    'resume', 'tab_hide', 'tab_show',
   ]);
+
   const eventType = String(data.eventType || data.event_type || 'unknown');
   if (!VALID_TYPES.has(eventType)) {
     throw new Error(`Invalid eventType: "${eventType}"`);
   }
 
-  // ── FIX #1: fallbackId ใช้ fields ที่มีจริงใน payload เท่านั้น ─────────────
-  // เดิมใช้ data.startTime ซึ่งไม่เคยถูกส่งมา → ทุก event ได้ hash เหมือนกัน
-  // ใช้ currentTime + timestamp แทน ซึ่งมีค่าเสมอ
+  const videoId   = sanitizeObjectId(data.videoId   || data.video_id   || '');
+  const userId    = sanitizeObjectId(data.userId    || data.user_id    || 'anonymous');
+  const sessionId = sanitizeObjectId(data.sessionId || data.session_id || '');
+
   const fallbackId = crypto
     .createHash('md5')
     .update([
-      data.videoId    || data.video_id    || '',
-      data.userId     || data.user_id     || '',
-      data.sessionId  || data.session_id  || '',
-      eventType,
+      videoId, userId, sessionId, eventType,
       data.currentTime || data.current_time_seconds || 0,
-      data.timestamp   || data.event_time || Date.now(),
+      data.timestamp   || data.event_time           || Date.now(),
     ].join('_'))
     .digest('hex');
 
-  // ── FIX #5: chunk fields ต้อง Math.round() เหมือนกับ duration fields อื่น ─
   return {
     event_id:   String(data.eventId || data.event_id || fallbackId),
-    video_id:   String(data.videoId || data.video_id || ''),
-    user_id:    String(data.userId  || data.user_id  || 'anonymous'),
-    session_id: String(data.sessionId || data.session_id || ''),
+    video_id:   videoId,
+    user_id:    userId,
+    session_id: sessionId,
     event_type: eventType,
 
-    watch_duration_seconds: Math.max(0, Math.round(Number(data.duration             || data.watch_duration_seconds || 0))),
-    total_watch_seconds:    Math.max(0, Math.round(Number(data.totalWatchTime       || data.total_watch_seconds    || 0))),
-    current_time_seconds:   Math.max(0, Math.round(Number(data.currentTime          || data.current_time_seconds   || 0))),
+    // ✅ FIX: เพิ่ม category
+    category: String(data.category || data.video_category || 'unknown'),
 
-    chunk_start_seconds:  Math.max(0, Math.round(Number(data.chunk_start_seconds  || 0))),
-    chunk_end_seconds:    Math.max(0, Math.round(Number(data.chunk_end_seconds    || 0))),
-    max_progress_seconds: Math.max(0, Math.round(Number(data.max_progress_seconds || 0))),
+    watch_duration_seconds: Math.max(0, Math.round(Number(data.duration              || data.watch_duration_seconds || 0))),
+    total_watch_seconds:    Math.max(0, Math.round(Number(data.totalWatchTime         || data.total_watch_seconds    || 0))),
+    current_time_seconds:   Math.max(0, Math.round(Number(data.currentTime           || data.current_time_seconds   || 0))),
+    chunk_start_seconds:    Math.max(0, Math.round(Number(data.chunk_start_seconds   || 0))),
+    chunk_end_seconds:      Math.max(0, Math.round(Number(data.chunk_end_seconds     || 0))),
+    max_progress_seconds:   Math.max(0, Math.round(Number(data.max_progress_seconds  || 0))),
 
     device_type:  String(data.device  || data.device_type  || 'unknown'),
     country_code: String(data.country || data.country_code || 'unknown'),
@@ -101,25 +102,47 @@ function mapToRow(data) {
   };
 }
 
-// ── FIX #6: unwrap { events: [...] } format ที่ frontend ส่งมา ────────────────
-// frontend ส่ง POST body = { events: [...] }
-// worker เดิม expect [...] หรือ {...} ตรงๆ → items ไม่ถูก parse
 function extractItems(payload) {
-  if (Array.isArray(payload))          return payload;           // [...] raw array
-  if (Array.isArray(payload?.events))  return payload.events;   // { events: [...] }
-  return [payload];                                              // single event object
+  if (Array.isArray(payload))         return payload;
+  if (Array.isArray(payload?.events)) return payload.events;
+  return [payload];
+}
+
+// ✅ FIX: return object เสมอ ไม่ parse สองรอบ
+function sanitizePayload(rawValue) {
+  let parsed;
+  try {
+    parsed = JSON.parse(rawValue);
+  } catch (err) {
+    throw new Error(`Invalid JSON: ${err.message}`);
+  }
+
+  function deepSanitize(obj) {
+    if (obj === null || obj === undefined) return obj;
+    if (typeof obj !== 'object') return obj;
+    if (obj._bsontype === 'ObjectId' ||
+        (obj.constructor && obj.constructor.name === 'ObjectId')) {
+      return obj.toString();
+    }
+    if (Array.isArray(obj)) return obj.map(deepSanitize);
+    const sanitized = {};
+    for (const [key, value] of Object.entries(obj)) {
+      sanitized[key] = deepSanitize(value);
+    }
+    return sanitized;
+  }
+
+  return deepSanitize(parsed);
 }
 
 class ClickHouseKafkaWorker {
   constructor() {
     this.MAX_RETRIES    = 3;
-    this.BATCH_SIZE     = parseInt(process.env.BATCH_SIZE    || '1000', 10);
-    this.TOPIC          = process.env.KAFKA_TOPIC            || 'video-logs';
-    this.DLQ_TOPIC      = process.env.KAFKA_DLQ_TOPIC        || 'video-logs-dlq';
+    this.BATCH_SIZE     = parseInt(process.env.BATCH_SIZE     || '1000', 10);
+    this.TOPIC          = process.env.KAFKA_TOPIC             || 'video-logs';
+    this.DLQ_TOPIC      = process.env.KAFKA_DLQ_TOPIC         || 'video-logs-dlq';
     this.isShuttingDown = false;
-
-    // ── FIX #4: track active batch ให้ shutdown รอ ───────────────────────────
-    this._activeBatch = null;
+    this._activeBatch   = null;
 
     this.kafka = new Kafka({
       clientId: 'clickhouse-ingester',
@@ -139,9 +162,12 @@ class ClickHouseKafkaWorker {
 
   async start() {
     try {
-      // ✅ ต้องเพิ่มการ connect Redis ตรงนี้ก่อน!
-    await redisClient.connect(); 
-    console.log('[Worker] Redis ready for dedupe');
+      // ✅ FIX: เช็ค isOpen ก่อน connect ป้องกัน crash ถ้า connect แล้ว
+      if (!redisClient.isOpen) {
+        await redisClient.connect();
+      }
+      console.log('[Worker] Redis ready for dedupe');
+
       await clickhouse.query({ query: 'SELECT 1', format: 'JSONEachRow' });
       await this.producer.connect();
       await this.consumer.connect();
@@ -154,8 +180,6 @@ class ClickHouseKafkaWorker {
         eachBatchAutoResolve: false,
         eachBatch: async ({ batch, resolveOffset, heartbeat, commitOffsetsIfNecessary, isStale }) => {
           if (this.isShuttingDown || isStale()) return;
-
-          // ── FIX #4: เก็บ promise ของ batch ปัจจุบัน ───────────────────────
           this._activeBatch = this._processBatch(
             batch, resolveOffset, heartbeat, commitOffsetsIfNecessary,
           );
@@ -169,10 +193,6 @@ class ClickHouseKafkaWorker {
     }
   }
 
-  // ── FIX #2: commit ครั้งเดียวหลังทุก chunk ใน batch สำเร็จ ─────────────────
-  // เดิม commit ทีละ chunk → ถ้า chunk ที่ 2 fail ข้อมูล chunk ที่ 1 หาย
-  // ใหม่: resolveOffset ทีละ chunk (บอก kafkajs ว่า process แล้ว)
-  //       แต่ commitOffsetsIfNecessary เรียกครั้งเดียวตอนจบ batch
   async _processBatch(batch, resolveOffset, heartbeat, commitOffsetsIfNecessary) {
     const messages = batch.messages;
     for (let i = 0; i < messages.length; i += this.BATCH_SIZE) {
@@ -182,7 +202,6 @@ class ClickHouseKafkaWorker {
       resolveOffset(chunk[chunk.length - 1].offset);
       await heartbeat();
     }
-    // commit ครั้งเดียวหลัง batch ทั้งหมดสำเร็จ
     await commitOffsetsIfNecessary();
   }
 
@@ -195,17 +214,18 @@ class ClickHouseKafkaWorker {
         const rawValue = msg.value?.toString();
         if (!rawValue) throw new Error('Empty message value');
 
-        const payload = JSON.parse(rawValue);
-        // ── FIX #6: ใช้ extractItems แทน Array.isArray ตรงๆ ─────────────────
-        const items = extractItems(payload);
+        // ✅ FIX: sanitizePayload return object เลย ไม่ต้อง parse อีกรอบ
+        const payload = sanitizePayload(rawValue);
+        const items   = extractItems(payload);
 
         for (const item of items) {
           validateMessage(item);
           candidateRows.push({ row: mapToRow(item), msg });
         }
       } catch (err) {
+        console.error(`[Worker] Message processing error: ${err.message}`);
         failedMessages.push({
-          key:     msg.key || Buffer.from('validation-error'),
+          key:     msg.key   || Buffer.from('validation-error'),
           value:   msg.value || Buffer.from(''),
           headers: { error: err.message, originalOffset: String(msg.offset) },
         });
@@ -224,8 +244,8 @@ class ClickHouseKafkaWorker {
     const rowsToInsert = candidateRows.filter(({ row }) => newEventIds.has(row.event_id));
 
     if (rowsToInsert.length > 0) {
-      let retries = 0;
-      let success = false;
+      let retries    = 0;
+      let success    = false;
       const insertData = rowsToInsert.map(({ row }) => row);
 
       while (retries < this.MAX_RETRIES && !success) {
@@ -236,12 +256,11 @@ class ClickHouseKafkaWorker {
             format: 'JSONEachRow',
           });
           success = true;
+          console.log(`[Worker] Inserted ${insertData.length} events successfully`);
         } catch (err) {
           retries++;
           console.error(`[Worker] Insert attempt ${retries} failed: ${err.message}`);
           if (retries < this.MAX_RETRIES) {
-            // ── FIX #3: heartbeat ทุก retry ป้องกัน Kafka คิดว่า consumer ตาย ─
-            // backoff 1s, 2s (ไม่ใช้ 4s เพราะ maxWaitTimeInMs=9s)
             await heartbeat();
             await new Promise(r => setTimeout(r, 1000 * retries));
           }
@@ -263,13 +282,13 @@ class ClickHouseKafkaWorker {
     if (failedMessages.length > 0) {
       try {
         await this.producer.send({ topic: this.DLQ_TOPIC, messages: failedMessages });
+        console.log(`[Worker] Sent ${failedMessages.length} messages to DLQ`);
       } catch (dlqErr) {
         console.error('[Worker] CRITICAL: DLQ send failed!', dlqErr.message);
       }
     }
   }
 
-  // ── FIX #4: shutdown รอ batch ปัจจุบันให้เสร็จก่อน disconnect ───────────────
   async shutdown() {
     if (this.isShuttingDown) return;
     this.isShuttingDown = true;
@@ -277,14 +296,16 @@ class ClickHouseKafkaWorker {
     try {
       if (this._activeBatch) await this._activeBatch;
     } catch {
-      // batch อาจ fail ตอน shutdown — ไม่เป็นไร ไป disconnect ต่อ
+      // batch อาจ fail ตอน shutdown
     }
     try {
       await this.consumer.disconnect();
       await this.producer.disconnect();
       await clickhouse.close();
+      await redisClient.quit();
       process.exit(0);
-    } catch {
+    } catch (err) {
+      console.error('[Worker] Shutdown error:', err.message);
       process.exit(1);
     }
   }

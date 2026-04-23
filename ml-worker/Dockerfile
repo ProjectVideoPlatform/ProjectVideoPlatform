@@ -1,19 +1,25 @@
-# ใช้ Python 3.9 แบบ slim เพื่อลดขนาด Image
 FROM python:3.9-slim
 
 WORKDIR /app
 
-# Install system dependencies (จำเป็นสำหรับการ build บาง library เช่น confluent-kafka)
+# Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
+    gcc \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy และ Install requirements
+# Copy requirements
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir --default-timeout=100 -r requirements.txt
 
-# Copy โค้ด Python เข้าไป
+# Copy source code
 COPY worker.py .
 
-# สั่งรัน script
-CMD ["python", "worker.py"]
+# Environment variables (set defaults)
+ENV KAFKA_BROKERS=kafka:9092 \
+    REDIS_HOST=redis \
+    REDIS_PASSWORD=redispassword123 \
+    PINECONE_API_KEY=""
+
+# Run worker
+CMD ["python", "-u", "worker.py"]
