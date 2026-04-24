@@ -1,128 +1,74 @@
--- ═══════════════════════════════════════════════════════════════
--- 1. ALTER main table — เพิ่ม column ใหม่สำหรับ watch_chunk
---    run นี้ก่อน deploy worker ใหม่
--- ═══════════════════════════════════════════════════════════════
-
-ALTER TABLE app_db.video_watch_events
-    ADD COLUMN IF NOT EXISTS chunk_start_seconds  UInt32 DEFAULT 0,
-    ADD COLUMN IF NOT EXISTS chunk_end_seconds    UInt32 DEFAULT 0,
-    ADD COLUMN IF NOT EXISTS max_progress_seconds UInt32 DEFAULT 0;
-
-
--- ═══════════════════════════════════════════════════════════════
--- 2. Retention target table
---    เก็บ pre-aggregated retention data per video per 10s bucket
---    query เร็วมาก เพราะไม่ต้อง scan raw table ทุกครั้ง
--- ═══════════════════════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS app_db.video_watch_events
+(
+    event_id               String,
+    video_id               String,
+    user_id                String,
+    session_id             String,
+    event_type             LowCardinality(String),
+    watch_duration_seconds UInt32,
+    total_watch_seconds    UInt32,
+    current_time_seconds   UInt32,
+    chunk_start_seconds    UInt32 DEFAULT 0,
+    chunk_end_seconds      UInt32 DEFAULT 0,
+    max_progress_seconds   UInt32 DEFAULT 0,
+    device_type            LowCardinality(String),
+    country_code           LowCardinality(String),
+    traffic_source         LowCardinality(String) DEFAULT 'direct', -- 👈 เพิ่มตรงนี้
+    event_time             DateTime,
+    _inserted_at           DateTime DEFAULT now(),
+    category               String DEFAULT 'unknown'
+)
+ENGINE = ReplacingMergeTree(_inserted_at)
+PARTITION BY toYYYYMM(event_time)
+ORDER BY (video_id, toDate(event_time), event_id)
+SETTINGS index_granularity = 8192;
 
 CREATE TABLE IF NOT EXISTS app_db.video_retention_mv
 (
     video_id       String,
-    bucket_seconds UInt32,   -- 0, 10, 20, 30, ... (ทุก 10 วิ)
-    viewers        AggregateFunction(uniq, String),  -- unique session_id
+    bucket_seconds UInt32,
+    viewers        AggregateFunction(uniq, String),
     event_date     Date
 )
 ENGINE = AggregatingMergeTree()
 PARTITION BY event_date
 ORDER BY (video_id, bucket_seconds, event_date);
 
-
--- ═══════════════════════════════════════════════════════════════
--- 3. Materialized View — trigger ทุกครั้งที่ insert เข้า raw table
---    แปลง watch_chunk → retention buckets อัตโนมัติ
---
---    Logic: chunk startTime=10 endTime=40 → cover buckets 10,20,30,40
---    ใช้ arrayJoin + range เพื่อ explode chunk เป็น buckets
--- ═══════════════════════════════════════════════════════════════
-
 CREATE MATERIALIZED VIEW IF NOT EXISTS app_db.mv_video_retention
 TO app_db.video_retention_mv
 AS
 SELECT
     video_id,
-    -- explode chunk range เป็น bucket ทุก 10 วิ
-    -- intDiv(n, 10) * 10 → snap to 10s grid
-    arrayJoin(
-        arrayMap(
-            i -> toUInt32(i * 10),
+    toUInt32(
+        arrayJoin(
             range(
-                toUInt32(intDiv(chunk_start_seconds, 10)),
-                toUInt32(intDiv(chunk_end_seconds,   10) + 1)
+                toUInt64(intDiv(chunk_start_seconds, 10)),
+                toUInt64(intDiv(chunk_end_seconds - 1, 10)) + 1 -- 👈 แก้ Logic ตรงนี้
             )
-        )
+        ) * 10
     ) AS bucket_seconds,
     uniqState(session_id) AS viewers,
-    toDate(event_time) AS event_date
+    toDate(event_time)    AS event_date
 FROM app_db.video_watch_events
 WHERE event_type = 'watch_chunk'
-  AND chunk_end_seconds > chunk_start_seconds  -- ป้องกัน chunk ที่ invalid
+  AND chunk_end_seconds > chunk_start_seconds
 GROUP BY video_id, bucket_seconds, event_date;
 
-
--- ═══════════════════════════════════════════════════════════════
--- 4. Retention Curve query — ใช้ใน Grafana
---    อ่านจาก MV แทน raw table → เร็วกว่า 10-50x
--- ═══════════════════════════════════════════════════════════════
-
--- 4a. Retention % per bucket (normalize ด้วย viewers ที่ bucket 0)
+////
+INSERT INTO app_db.video_retention_mv
 SELECT
-    bucket_seconds                                        AS second,
-    uniqMerge(viewers)                                    AS viewer_count,
-    ROUND(
-        uniqMerge(viewers) * 100.0
-        / NULLIF(
-            (
-                SELECT uniqMerge(viewers)
-                FROM app_db.video_retention_mv
-                WHERE video_id    = 'YOUR_VIDEO_ID'
-                  AND bucket_seconds = 0
-                  AND event_date BETWEEN toDate(now() - INTERVAL 30 DAY) AND toDate(now())
-            ),
-            0
-        ),
-        1
-    )                                                     AS retention_pct
-FROM app_db.video_retention_mv
-WHERE video_id    = 'YOUR_VIDEO_ID'
-  AND event_date BETWEEN toDate(now() - INTERVAL 30 DAY) AND toDate(now())
-GROUP BY bucket_seconds
-ORDER BY bucket_seconds;
-
-
--- 4b. Drop-off query (แก้ไขจาก Grafana dashboard ของคุณ)
---    ใช้ SUM(watch_duration_seconds) แทน argMax(current_time_seconds)
---    เพราะ current_time_seconds = position ที่อยู่ตอนออก ≠ เวลาที่ดูจริง
-SELECT
-    toString(intDiv(total_watched, 10) * 10) AS second_bucket,
-    COUNT(*)                                 AS drop_offs
-FROM (
-    SELECT
-        session_id,
-        SUM(watch_duration_seconds)       AS total_watched,
-        max(event_type = 'completed')     AS is_completed
-    FROM app_db.video_watch_events
-    WHERE $__timeFilter(event_time)
-    GROUP BY session_id
-)
-WHERE is_completed = 0
-GROUP BY second_bucket
-ORDER BY toInt32(second_bucket);
-
-
--- ═══════════════════════════════════════════════════════════════
--- 5. Grafana panel JSON snippet — Retention Curve
---    แทน panel "Drop-off by Video" ของเดิม
--- ═══════════════════════════════════════════════════════════════
-
--- rawSql สำหรับ Grafana (ใช้ $__timeFilter กับ event_date):
-/*
-SELECT
-    bucket_seconds AS second,
-    uniqMerge(viewers) AS viewers
-FROM app_db.video_retention_mv
-WHERE video_id = '$video_id'
-  AND event_date >= toDate($__fromTime)
-  AND event_date <= toDate($__toTime)
-GROUP BY bucket_seconds
-ORDER BY bucket_seconds
-*/
+    video_id,
+    toUInt32(
+        arrayJoin(
+            range(
+                toUInt64(intDiv(chunk_start_seconds, 10)),
+                toUInt64(intDiv(chunk_end_seconds - 1, 10)) + 1 -- 👈 แก้ Logic ตรงนี้ด้วย
+            )
+        ) * 10
+    ) AS bucket_seconds,
+    uniqState(session_id) AS viewers,
+    toDate(event_time)    AS event_date
+FROM app_db.video_watch_events
+WHERE event_type = 'watch_chunk'
+  AND chunk_end_seconds > chunk_start_seconds
+GROUP BY video_id, bucket_seconds, event_date;

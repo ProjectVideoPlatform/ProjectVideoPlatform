@@ -260,36 +260,36 @@ services:
       timeout: 10s
       retries: 3
 # Kafka Message Broker (KRaft Mode)
+  # Kafka Message Broker (KRaft Mode)
   kafka:
-      image: apache/kafka:latest   # <-- เปลี่ยนมาใช้ Official Apache Image
-      container_name: secure-video-kafka
-      restart: unless-stopped
-      ports:
-        - "9092:9092"
-      environment:
-        # ลบ prefix KAFKA_CFG_ ออกทั้งหมด
-        KAFKA_NODE_ID: 1
-        KAFKA_PROCESS_ROLES: broker,controller
-        KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
-        KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
-        KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
-        KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
-        KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
-        KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
-        # เพิ่มค่า CLUSTER_ID จำเป็นสำหรับ KRaft Mode ของ Apache
-        CLUSTER_ID: 'secure-video-kafka-cluster' 
-        KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
-      networks:
-        - secure-video-network
-      volumes:
-        # ปรับ path เก็บข้อมูลให้ตรงกับโครงสร้างของ Apache image
-        - kafka_data:/var/lib/kafka/data
-      healthcheck:
-        # ปรับ path ของ script ตรวจสอบ healthcheck
-        test: ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list"]
-        interval: 10s
-        timeout: 5s
-        retries: 5
+    image: apache/kafka:latest   # ใช้ Official Apache Image
+    container_name: secure-video-kafka
+    restart: unless-stopped
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      # แก้ไขบรรทัดนี้ให้เป็น Base64 UUID
+      CLUSTER_ID: 'MkU3OEVBNTcwNTJENDM2Qk' 
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+    networks:
+      - secure-video-network
+    volumes:
+      - kafka_data:/tmp/kraft-combined-logs # <-- Path เก็บข้อมูลของ official apache/kafka คือที่นี่
+    healthcheck:
+      # ปรับคำสั่ง healthcheck ให้ชัวร์ว่ารันได้ใน Container
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 60s  # <--- เพิ่มเวลาให้ Kafka ตั้งตัวได้นานขึ้น
   # Nginx
   nginx:
     image: nginx:1.25-alpine

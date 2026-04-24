@@ -54,7 +54,25 @@
         "graphMode": "area",
         "justifyMode": "auto"
       },
-      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 }
+      "gridPos": { "h": 4, "w": 4, "x": 12, "y": 0 }
+    },
+    {
+      "title": "🎯 Recommendation CTR",
+      "description": "สัดส่วนคนที่กดดูวิดีโอจากระบบแนะนำ (เทียบกับยอด Play ทั้งหมด)",
+      "type": "stat",
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse_ds" },
+      "targets": [
+        {
+          "queryType": "sql",
+          "rawSql": "SELECT ROUND((countIf(event_type = 'play' AND traffic_source = 'recommendation') / NULLIF(countIf(event_type = 'play'), 0)) * 100, 1) FROM app_db.video_watch_events WHERE $__timeFilter(event_time)"
+        }
+      ],
+      "options": {
+        "textMode": "value_and_name",
+        "graphMode": "area",
+        "justifyMode": "auto"
+      },
+      "gridPos": { "h": 4, "w": 4, "x": 16, "y": 0 }
     },
     {
       "title": "⚠️ Error Rate",
@@ -67,7 +85,7 @@
           "rawSql": "SELECT countIf(event_type = 'error') FROM app_db.video_watch_events WHERE $__timeFilter(event_time)"
         }
       ],
-      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 }
+      "gridPos": { "h": 4, "w": 4, "x": 20, "y": 0 }
     },
     {
       "title": "📈 Views Over Time",
