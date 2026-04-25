@@ -12,7 +12,7 @@ const MAX_DEDUP_CACHE     = 200;
 const FLUSH_INTERVAL      = 5_000;
 const MAX_BUFFER_SIZE     = 10;
 const ADAPTIVE_BURST_SIZE = 50;
-const CHUNK_MAX_AGE_MS    = 10_000;  // ใหม่: ตัด chunk ทุก 10 วินาที
+const CHUNK_MAX_AGE_MS    = 30_000;  // ใหม่: ตัด chunk ทุก 30 วินาที
 // ── helpers ────────────────────────────────────────────────────────────────────
 function getSessionId() {
   let id = sessionStorage.getItem('va_session');
@@ -42,7 +42,7 @@ function generateEventId() {
 // ── class ──────────────────────────────────────────────────────────────────────
 class VideoAnalytics {
   constructor() {
-    this.analyticsUrl = 'http://localhost:3000/api/public/analytics/video';
+    this.analyticsUrl = '/api/public/analytics/video';
 
     this.sessionId  = getSessionId();
     this.deviceType = getDeviceType();
@@ -194,7 +194,7 @@ class VideoAnalytics {
   const gap        = chunkStart - prevEnd;
   const chunkAgeMs = Date.now() - (this._watchChunk._firstSeen || 0);
 
-  // ✅ ตัด chunk ถ้านานเกิน 10 วินาที หรือ gap กระโดด
+  // ✅ ตัด chunk ถ้านานเกิน 30 วินาที หรือ gap กระโดด
   if (chunkAgeMs > CHUNK_MAX_AGE_MS || Math.abs(gap) > 2) {
     this._flushWatchChunk();
     this._watchChunk = {

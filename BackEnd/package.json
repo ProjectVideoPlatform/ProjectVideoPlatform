@@ -22,6 +22,7 @@
     "@aws-sdk/lib-storage": "^3.876.0",
     "@aws-sdk/s3-request-presigner": "^3.896.0",
     "@clickhouse/client": "^1.17.0",
+    "@pinecone-database/pinecone": "^7.2.0",
     "amqplib": "^0.10.9",
     "aws-cloudfront-sign": "^3.0.2",
     "aws-sdk": "^2.1467.0",

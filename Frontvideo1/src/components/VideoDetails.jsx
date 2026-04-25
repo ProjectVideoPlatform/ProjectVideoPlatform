@@ -4,7 +4,7 @@ import { useParams } from 'react-router-dom';
 import Hls from 'hls.js';
 import { useNavigate } from 'react-router-dom';
 // API service (เหมือนกับ VideoStreamingApp)
-const API_BASE = 'http://localhost:3000/api';
+const API_BASE = '/api';
 const api = {
   getVideo: async (id) => {
     const response = await fetch(`${API_BASE}/videos/${id}`, {

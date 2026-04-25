@@ -5,8 +5,8 @@ services:
     container_name: secure-video-rabbitmq
     restart: unless-stopped
     ports:
-      - "5672:5672"   # AMQP protocol
-      - "15672:15672" # Management UI (User/Pass: guest/guest)
+      - "5672:5672"
+      - "15672:15672"
     environment:
       - RABBITMQ_DEFAULT_USER=guest
       - RABBITMQ_DEFAULT_PASS=guest
@@ -20,7 +20,7 @@ services:
       timeout: 5s
       retries: 5
 
-  # Email Worker (Consumer)
+  # Email Worker
   email-worker:
     build:
       context: .
@@ -71,7 +71,7 @@ services:
       - /tmp
       - /app/tmp
 
-  # React Frontend
+  # React Frontend (Vite dev server — ไม่ expose port ออกตรงๆ เข้าผ่าน Nginx)
   react-app:
     image: node:20-alpine
     working_dir: /app
@@ -79,8 +79,7 @@ services:
       - ./Frontvideo1:/app
       - /app/node_modules
     command: sh -c "npm install && npm run dev -- --host"
-    ports:
-      - "5173:5173"
+    # ไม่ expose port 5173 ออกข้างนอก — Nginx proxy แทน
     environment:
       - CHOKIDAR_USEPOLLING=true
       - HOST=0.0.0.0
@@ -103,30 +102,28 @@ services:
     env_file:
       - ./BackEnd/.env
     environment:
-        - NODE_ENV=production
-        # - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672  <-- ลบออก
-        - KAFKA_BROKERS=kafka:9092                         # <-- เพิ่มบรรทัดนี้
-        - CLICKHOUSE_HOST=clickhouse
-        - CLICKHOUSE_PORT=8123
-        - CLICKHOUSE_USER=app_user
-        - CLICKHOUSE_PASSWORD=strong_password
-        - CLICKHOUSE_DB=app_db
+      - NODE_ENV=production
+      - KAFKA_BROKERS=kafka:9092
+      - CLICKHOUSE_HOST=clickhouse
+      - CLICKHOUSE_PORT=8123
+      - CLICKHOUSE_USER=app_user
+      - CLICKHOUSE_PASSWORD=strong_password
+      - CLICKHOUSE_DB=app_db
     networks:
-        - secure-video-network
+      - secure-video-network
     depends_on:
-        kafka:                                             # <-- เปลี่ยนจาก rabbitmq
-          condition: service_healthy
-        clickhouse:
-          condition: service_healthy
-  # Main Node.js API (Producer)
+      kafka:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+
+  # Main Node.js API (ไม่ expose port ออกตรงๆ — เข้าผ่าน Nginx เท่านั้น)
   app:
     build:
       context: .
       dockerfile: Dockerfile
     container_name: secure-video-app
     restart: unless-stopped
-    ports:
-      - "127.0.0.1:3000:3000"
     env_file:
       - ./BackEnd/.env
     environment:
@@ -134,6 +131,8 @@ services:
       - PORT=3000
       - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672
       - KAFKA_BROKERS=kafka:9092
+      - REDIS_HOST=secure-video-redis
+      - REDIS_PASSWORD=redispassword123
     volumes:
       - ./BackEnd/keys:/app/keys:ro
       - ./BackEnd/vault/certs:/app/vault-certs:ro
@@ -147,7 +146,7 @@ services:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
-      kafka:                                             # <-- เพิ่มบรรทัดนี้
+      kafka:
         condition: service_healthy
     user: "1001:1001"
     read_only: true
@@ -165,7 +164,7 @@ services:
       retries: 3
       start_period: 30s
 
-  # MongoDB Database
+  # MongoDB
   mongodb1:
     image: mongo:7.0
     container_name: secure-video-mongodb1
@@ -210,7 +209,6 @@ services:
     networks:
       - secure-video-network
 
-  # MongoDB Replica Set Initialization
   mongo-init:
     image: mongo:7.0
     container_name: secure-video-mongo-init
@@ -259,10 +257,10 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-# Kafka Message Broker (KRaft Mode)
-  # Kafka Message Broker (KRaft Mode)
+
+  # Kafka (KRaft Mode)
   kafka:
-    image: apache/kafka:latest   # ใช้ Official Apache Image
+    image: apache/kafka:latest
     container_name: secure-video-kafka
     restart: unless-stopped
     ports:
@@ -276,21 +274,20 @@ services:
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
       KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
       KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
-      # แก้ไขบรรทัดนี้ให้เป็น Base64 UUID
-      CLUSTER_ID: 'MkU3OEVBNTcwNTJENDM2Qk' 
+      CLUSTER_ID: 'MkU3OEVBNTcwNTJENDM2Qk'
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
     networks:
       - secure-video-network
     volumes:
-      - kafka_data:/tmp/kraft-combined-logs # <-- Path เก็บข้อมูลของ official apache/kafka คือที่นี่
+      - kafka_data:/tmp/kraft-combined-logs
     healthcheck:
-      # ปรับคำสั่ง healthcheck ให้ชัวร์ว่ารันได้ใน Container
       test: ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5
-      start_period: 60s  # <--- เพิ่มเวลาให้ Kafka ตั้งตัวได้นานขึ้น
-  # Nginx
+      start_period: 60s
+
+  # Nginx — ทุก traffic เข้าที่นี่หมด
   nginx:
     image: nginx:1.25-alpine
     container_name: secure-video-nginx
@@ -300,15 +297,15 @@ services:
       - "443:443"
     volumes:
       - ./BackEnd/nginx.conf:/etc/nginx/nginx.conf:ro
-      - ./BackEnd/nginx/conf.d:/etc/nginx/conf.d:ro
       - ./BackEnd/ssl:/etc/nginx/ssl:ro
       - nginx_logs:/var/log/nginx
     networks:
       - secure-video-network
     depends_on:
       - app
+      - react-app
 
-  # Monitoring Profiles
+  # Monitoring
   prometheus:
     image: prom/prometheus:v2.47.0
     container_name: secure-video-prometheus
@@ -329,7 +326,6 @@ services:
     profiles:
       - monitoring
 
-  # Grafana Dashboard
   grafana:
     image: grafana/grafana:10.1.0
     container_name: secure-video-grafana
@@ -356,8 +352,8 @@ services:
     container_name: clickhouse_db
     restart: always
     ports:
-      - "8123:8123"   # HTTP API
-      - "9000:9000"   # Native client
+      - "8123:8123"
+      - "9000:9000"
     environment:
       CLICKHOUSE_USER: app_user
       CLICKHOUSE_PASSWORD: strong_password
@@ -378,7 +374,7 @@ services:
       retries: 5
       start_period: 10s
 
-  # Mongo Express (Admin UI for MongoDB)
+  # Mongo Express (Admin UI)
   mongo-express:
     image: mongo-express:latest
     container_name: secure-video-mongo-express
@@ -395,48 +391,30 @@ services:
       - mongodb1
       - mongodb2
       - mongodb3
-  # Vault - production-ready
-  # vault:
-  #   image: vault:1.13.3
-  #   container_name: secure-video-vault
-  #   restart: unless-stopped
-  #   ports:
-  #     - "8200:8200"
-  #   environment:
-  #     VAULT_ADDR: https://0.0.0.0:8200
-  #   cap_add:
-  #     - IPC_LOCK
-  #   networks:
-  #     - secure-video-network
-  #   volumes:
-  #     - vault_data:/vault/data
-  #     - ./vault/config:/vault/config:ro
-  #     - ./vault/certs:/vault/certs:ro
-  #   command: "vault server -config=/vault/config/server.hcl"
-  #   healthcheck:
-  #     test: ["CMD", "vault", "status", "-address=https://0.0.0.0:8200"]
-  #     interval: 10s
-  #     retries: 5
+
+  # Loki
   loki:
     image: grafana/loki:latest
     ports:
       - "3100:3100"
     command: -config.file=/etc/loki/local-config.yaml
     networks:
-      - secure-video-network    
+      - secure-video-network
     volumes:
-      - loki-storage:/loki # Named Volume: เน้น Performance/Persistence     
+      - loki-storage:/loki
       - ./loki-config.yaml:/etc/loki/local-config.yaml
 
-  # 2. Promtail (ตัวดึง Log จากไฟล์ส่งไป Loki)
+  # Promtail
   promtail:
     image: grafana/promtail:latest
     volumes:
-      - ./logs:/var/log/app_logs  # เชื่อมโฟลเดอร์ logs จาก Node.js เข้าไป
+      - ./logs:/var/log/app_logs
       - ./promtail-config.yaml:/etc/promtail/config.yaml
     command: -config.file=/etc/promtail/config.yaml
     networks:
       - secure-video-network
+
+  # ML Worker
   ml-worker:
     build:
       context: ./ml-worker
@@ -446,23 +424,25 @@ services:
     env_file:
       - ./BackEnd/.env
     environment:
-      - PYTHONUNBUFFERED=1           # ให้ Python print log ออกมาที่ Docker ทันที
-      - KAFKA_BROKERS=kafka:9092     # เชื่อมต่อ Kafka ผ่านชื่อ Service
-      - REDIS_HOST=redis             # เชื่อมต่อ Redis ผ่านชื่อ Service
-      - PINECONE_API_KEY=${PINECONE_API_KEY} # เตรียมไว้ดึงจาก .env ของคุณ
+      - PYTHONUNBUFFERED=1
+      - KAFKA_BROKERS=kafka:9092
+      - REDIS_HOST=redis
+      - PINECONE_API_KEY=${PINECONE_API_KEY}
       - REDIS_PASSWORD=redispassword123
     networks:
-      - secure-video-network 
+      - secure-video-network
     depends_on:
       kafka:
         condition: service_healthy
       redis:
-        condition: service_healthy    
+        condition: service_healthy
+
+  # Kafka UI
   kafka-ui:
     image: provectuslabs/kafka-ui:latest
     container_name: kafka-ui
     ports:
-      - "8080:8080" # เข้าผ่าน browser ที่ localhost:8080
+      - "8080:8080"
     environment:
       - KAFKA_CLUSTERS_0_NAME=local
       - KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS=kafka:9092
@@ -470,6 +450,7 @@ services:
       - secure-video-network
     depends_on:
       - kafka
+
 networks:
   secure-video-network:
     driver: bridge
@@ -485,5 +466,5 @@ volumes:
   prometheus_data:
   grafana_data:
   clickhouse_data:
-  loki-storage: # ประกาศชื่อ Volume ไว้ที่นี่
+  loki-storage:
   kafka_data:

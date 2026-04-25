@@ -9,7 +9,7 @@ import { useNotif } from '../NotifContext';
 const UserProfile = () => {
   const { notifications, videoNotifications, addNotification } = useNotif();
 
-  const apiBaseUrl = 'http://localhost:3000';
+  const apiBaseUrl = '';
   const [activeTab, setActiveTab] = useState('overview');
 
   // ✅ fix UI: แยก showPassword ให้แต่ละ field — toggle ช่องเดียวไม่กระทบช่องอื่น

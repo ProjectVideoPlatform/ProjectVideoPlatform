@@ -5,7 +5,7 @@ import { useAuth } from '../AuthProvider';
 import videoTracker from './videoTracker';
 import { Loader, Eye, EyeOff, Film, Mail, Lock, User, Shield, ChevronRight, RefreshCw, LogOut, Clapperboard } from 'lucide-react';
 
-const API_BASE_URL = 'http://localhost:3000/api';
+const API_BASE_URL = '/api';
 
 /* ─── Styles (unchanged — design system intact) ──────────── */
 const styles = `

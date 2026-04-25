@@ -27,7 +27,7 @@ app.get("/metrics", async (req, res) => {
 
 // ====== MIDDLEWARE ======
 app.use(cors({
-  origin: ['https://toteja.co', 'http://localhost:5173'],
+  origin: ['https://toteja.co', 'http://localhost:5173','http://localhost'],
   methods: ['GET', 'POST', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
   credentials: true

@@ -153,7 +153,7 @@ class ClickHouseKafkaWorker {
     this.consumer = this.kafka.consumer({
       groupId:         'clickhouse-worker-group',
       sessionTimeout:  30000,
-      maxWaitTimeInMs: 9000,
+      maxWaitTimeInMs: 10000,
       minBytes:        1024 * 500,
     });
 

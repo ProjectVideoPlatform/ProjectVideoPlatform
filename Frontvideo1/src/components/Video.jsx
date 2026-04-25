@@ -9,7 +9,7 @@ import { useNavigate } from 'react-router-dom';
 import VideoPlayer from './VideoPlayer';
 import { useNotif } from '../NotifContext';
 
-const API_BASE = 'http://localhost:3000/api';
+const API_BASE = '/api';
 
 /* ─── Styles (unchanged) ──────────────────────────────────── */
 const styles = `
