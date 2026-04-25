@@ -71,21 +71,6 @@ services:
       - /tmp
       - /app/tmp
 
-  # React Frontend (Vite dev server — ไม่ expose port ออกตรงๆ เข้าผ่าน Nginx)
-  react-app:
-    image: node:20-alpine
-    working_dir: /app
-    volumes:
-      - ./Frontvideo1:/app
-      - /app/node_modules
-    command: sh -c "npm install && npm run dev -- --host"
-    # ไม่ expose port 5173 ออกข้างนอก — Nginx proxy แทน
-    environment:
-      - CHOKIDAR_USEPOLLING=true
-      - HOST=0.0.0.0
-    networks:
-      - secure-video-network
-
   # Analytics Worker
   analytics-worker:
     build:
@@ -117,13 +102,15 @@ services:
       clickhouse:
         condition: service_healthy
 
-  # Main Node.js API (ไม่ expose port ออกตรงๆ — เข้าผ่าน Nginx เท่านั้น)
+  # Main Node.js API
   app:
     build:
       context: .
       dockerfile: Dockerfile
     container_name: secure-video-app
     restart: unless-stopped
+    expose:
+      - "3000"
     env_file:
       - ./BackEnd/.env
     environment:
@@ -131,7 +118,8 @@ services:
       - PORT=3000
       - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672
       - KAFKA_BROKERS=kafka:9092
-      - REDIS_HOST=secure-video-redis
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
       - REDIS_PASSWORD=redispassword123
     volumes:
       - ./BackEnd/keys:/app/keys:ro
@@ -245,15 +233,15 @@ services:
     image: redis:7.2-alpine
     container_name: secure-video-redis
     restart: unless-stopped
-    ports:
-      - "6379:6379"
+    expose:
+      - "6379"
     volumes:
       - redis_data:/data
     networks:
       - secure-video-network
     command: redis-server --appendonly yes --requirepass redispassword123
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD", "redis-cli", "-a", "redispassword123", "ping"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -263,31 +251,37 @@ services:
     image: apache/kafka:latest
     container_name: secure-video-kafka
     restart: unless-stopped
-    ports:
-      - "9092:9092"
+    expose:
+      - "9092"
+    user: root
     environment:
       KAFKA_NODE_ID: 1
       KAFKA_PROCESS_ROLES: broker,controller
-      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      # แก้ไข: เปลี่ยนจาก 1@kafka เป็น 1@secure-video-kafka
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@secure-video-kafka:9093
       KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      # แก้ไข: เปลี่ยนเป็นชื่อคอนเทนเนอร์จริง
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://secure-video-kafka:9092
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
       KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
       KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
       CLUSTER_ID: 'MkU3OEVBNTcwNTJENDM2Qk'
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      # เพิ่มเติม: ระบุไดเรกทอรีเก็บข้อมูลให้ชัดเจน
+      KAFKA_LOG_DIRS: /tmp/kraft-combined-logs
     networks:
       - secure-video-network
     volumes:
       - kafka_data:/tmp/kraft-combined-logs
     healthcheck:
-      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list || exit 1"]
-      interval: 10s
-      timeout: 5s
+      # แก้ไข: ใช้คำสั่งเช็คพอร์ตเบื้องต้น (ถ้าไม่มี nc ให้ใช้ kafka-topics แบบไม่ต้องระบุ path เต็ม)
+      test: ["CMD-SHELL", "kafka-topics.sh --bootstrap-server localhost:9092 --list || exit 1"]
+      interval: 15s
+      timeout: 10s
       retries: 5
-      start_period: 60s
+      start_period: 40s
 
-  # Nginx — ทุก traffic เข้าที่นี่หมด
+  # Nginx — serve static React + proxy API (ไม่มี react-app service แล้ว)
   nginx:
     image: nginx:1.25-alpine
     container_name: secure-video-nginx
@@ -299,11 +293,12 @@ services:
       - ./BackEnd/nginx.conf:/etc/nginx/nginx.conf:ro
       - ./BackEnd/ssl:/etc/nginx/ssl:ro
       - nginx_logs:/var/log/nginx
+      - ./Frontvideo1/dist:/var/www/html:ro   # ← dist ที่ build แล้ว
     networks:
       - secure-video-network
     depends_on:
-      - app
-      - react-app
+      app:
+        condition: service_healthy
 
   # Monitoring
   prometheus:
@@ -317,6 +312,7 @@ services:
       - prometheus_data:/prometheus
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
       - '--storage.tsdb.path=/prometheus'
       - '--web.console.libraries=/usr/share/prometheus/console_libraries'
       - '--web.console.templates=/usr/share/prometheus/consoles'
@@ -351,9 +347,9 @@ services:
     image: clickhouse/clickhouse-server:latest
     container_name: clickhouse_db
     restart: always
-    ports:
-      - "8123:8123"
-      - "9000:9000"
+    expose:
+      - "8123"
+      - "9000"
     environment:
       CLICKHOUSE_USER: app_user
       CLICKHOUSE_PASSWORD: strong_password
@@ -374,17 +370,17 @@ services:
       retries: 5
       start_period: 10s
 
-  # Mongo Express (Admin UI)
+  # Mongo Express (Admin UI — internal only)
   mongo-express:
     image: mongo-express:latest
     container_name: secure-video-mongo-express
     restart: unless-stopped
-    ports:
-      - "8081:8081"
+    expose:
+      - "8081"
     environment:
       ME_CONFIG_BASICAUTH: "false"
       ME_CONFIG_MONGODB_ENABLE_ADMIN: "false"
-      ME_CONFIG_MONGODB_URL: mongodb://mongodb1:27017,secure-video-mongodb2:27017,secure-video-mongodb3:27017/secure-video?replicaSet=rs0
+      ME_CONFIG_MONGODB_URL: mongodb://mongodb1:27017,mongodb2:27017,mongodb3:27017/secure-video?replicaSet=rs0
     networks:
       - secure-video-network
     depends_on:
@@ -395,8 +391,8 @@ services:
   # Loki
   loki:
     image: grafana/loki:latest
-    ports:
-      - "3100:3100"
+    expose:
+      - "3100"
     command: -config.file=/etc/loki/local-config.yaml
     networks:
       - secure-video-network
@@ -427,8 +423,8 @@ services:
       - PYTHONUNBUFFERED=1
       - KAFKA_BROKERS=kafka:9092
       - REDIS_HOST=redis
-      - PINECONE_API_KEY=${PINECONE_API_KEY}
       - REDIS_PASSWORD=redispassword123
+      - PINECONE_API_KEY=${PINECONE_API_KEY}
     networks:
       - secure-video-network
     depends_on:

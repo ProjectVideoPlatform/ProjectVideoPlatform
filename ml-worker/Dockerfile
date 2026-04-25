@@ -46,6 +46,6 @@ USER appuser
 ENV KAFKA_BROKERS=kafka:9092 \
     REDIS_HOST=redis \
     REDIS_PASSWORD=redispassword123 \
-    PINECONE_API_KEY=""
+    PINECONE_API_KEY=pcsk_hXfG6_G1g4A4Qfke8LyjeVVjMs3jvqskJW2XiUPVSevjkKLCD9gWSqyj8Dc7reVQaDzQX
 
 CMD ["python", "-u", "worker.py"]

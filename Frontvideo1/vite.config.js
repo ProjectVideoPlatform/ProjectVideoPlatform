@@ -15,5 +15,6 @@ export default defineConfig({
     preview: {
       port: 4173,
       strictPort: true,
-    }
-})
+    },
+    root: process.cwd()
+})  
