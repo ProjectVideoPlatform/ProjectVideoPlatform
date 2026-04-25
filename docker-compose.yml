@@ -375,8 +375,8 @@ services:
     image: mongo-express:latest
     container_name: secure-video-mongo-express
     restart: unless-stopped
-    expose:
-      - "8081"
+    ports:
+      - "8081:8081"
     environment:
       ME_CONFIG_BASICAUTH: "false"
       ME_CONFIG_MONGODB_ENABLE_ADMIN: "false"
@@ -416,7 +416,7 @@ services:
       context: ./ml-worker
       dockerfile: Dockerfile
     container_name: secure-video-ml-worker
-    restart: unless-stopped
+    restart: unless-stopped                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          
     env_file:
       - ./BackEnd/.env
     environment:
