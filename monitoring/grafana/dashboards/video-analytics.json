@@ -194,7 +194,7 @@
       "targets": [
         {
           "queryType": "sql",
-          "rawSql": "SELECT multiIf(seek_delta_seconds > 0, 'Forward', seek_delta_seconds < 0, 'Backward', 'Same') AS direction, COUNT(*) AS seeks FROM app_db.video_watch_events WHERE $__timeFilter(event_time) AND event_type = 'seek' GROUP BY direction ORDER BY seeks DESC"
+          "rawSql": "SELECT multiIf(seek_to_seconds > seek_from_seconds, 'Forward', seek_to_seconds < seek_from_seconds, 'Backward', 'Same') AS direction, COUNT(*) AS seeks FROM app_db.video_watch_events WHERE $__timeFilter(event_time) AND event_type = 'seek' GROUP BY direction ORDER BY seeks DESC"
         }
       ],
       "gridPos": { "h": 8, "w": 8, "x": 0, "y": 29 }

@@ -423,11 +423,11 @@ services:
       - REDIS_PASSWORD=redispassword123
     networks:
       - secure-video-network
-    depends_on:
-      kafka:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
+    # depends_on:
+    #   kafka:
+    #     condition: service_healthy
+    #   redis:
+    #     condition: service_healthy
 
   # Kafka UI
   kafka-ui:
