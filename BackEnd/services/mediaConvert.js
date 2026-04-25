@@ -176,7 +176,7 @@ const createMediaConvertJob = async (inputS3Path, outputS3Path, videoId) => {
                 Codec: "FRAME_CAPTURE",
                 FrameCaptureSettings: {
                   FramerateNumerator: 1,
-                  FramerateDenominator: 60,
+                  FramerateDenominator: 30,
                   MaxCaptures: 10,
                   Quality: 80
                 }

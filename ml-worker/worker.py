@@ -9,8 +9,8 @@ from pinecone import Pinecone, ServerlessSpec
 # ── Config ──────────────────────────────────────────────
 KAFKA_BROKER   = os.environ.get('KAFKA_BROKERS', 'kafka:9092')
 REDIS_HOST     = os.environ.get('REDIS_HOST', 'redis')
-REDIS_PASSWORD = os.environ.get('REDIS_PASSWORD', 'redispassword123')
-PINECONE_KEY   = os.environ.get('PINECONE_API_KEY', 'pcsk_hXfG6_G1g4A4Qfke8LyjeVVjMs3jvqskJW2XiUPVSevjkKLCD9gWSqyj8Dc7reVQaDzQX')
+REDIS_PASSWORD = os.environ.get('REDIS_PASSWORD')   # None if not set
+PINECONE_KEY   = os.environ.get('PINECONE_API_KEY') # No hardcoded fallback
 
 VIDEO_INDEX_NAME = 'video-catalog'
 BATCH_SIZE       = 50

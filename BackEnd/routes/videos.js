@@ -4,13 +4,14 @@ const { authenticateToken, requireAdmin } = require('../middleware/auth');
 const { generatePresignedUploadUrl, validateVideoFile, validateFileSize } = require('../services/s3Upload');
 const queueService = require('../services/queueService');
 const { generateSignedCookies, setCookiesInResponse } = require('../services/cloudfront');
-const { config } = require('../config/aws');
+const { config,s3 } = require('../config/aws');
 const Video = require('../models/Video');
 const Purchase = require('../models/Purchase');
 const escapeStringRegexp = require('escape-string-regexp');
 const { getRecommendedVideos } = require('../services/recommendations'); 
 const redisClient = require('../config/redis');
   const https = require('https');
+  
   const QUEUES = require('../services/rabbitmq/queues');
 const router = express.Router();
 const { broadcast } = require('../websocket');
@@ -541,24 +542,43 @@ router.post(
         }
 
         // 4️⃣ อัปเดตข้อมูลตามสถานะ
-      if (status === "COMPLETE") {
-    video.uploadStatus = "completed";
-    video.thumbnailPath = `videos/${videoId}/thumbnails/original_thumb.0000000.jpg`;
-    
-    await video.save({ writeConcern: { w: 'majority', wtimeout: 5000 } });
+    // 4️⃣ อัปเดตข้อมูลตามสถานะ
+    if (status === "COMPLETE") {
+      video.uploadStatus = "completed";
 
 
-    await broadcast({ videoId: videoId, type: "transcode_completed", status: "completed" });
-  // 🚀 ส่ง Email Queue
-  await queueService.sendToQueue(QUEUES.EMAIL_NOTIFY, {
-    type: "VIDEO_COMPLETE",
-    videoId: videoId,
-email: video.email || "manaphatg@gmail.com",
-    title: video.title
-  });
+      try {
+        // ใช้ .promise() เพื่อให้รองรับ await ใน SDK v2
+        const listResult = await s3.listObjectsV2({
+          Bucket: process.env.HLS_OUTPUT_BUCKET,
+          Prefix: `videos/${videoId}/thumbnails/`,
+        }).promise();
 
-  console.log(`📧 Email queued COMPLETE for: ${videoId}`);
-}
+        const thumbs = listResult.Contents
+          ?.map(o => o.Key)
+          .filter(k => k.endsWith('.jpg'))
+          .sort();
+
+        const thumbKey = thumbs?.[1] ?? thumbs?.[0];
+        console.log(`Thumbnails found for video ${videoId}:`, thumbs);
+        if (thumbKey) {
+          video.thumbnailPath = thumbKey;
+        }
+      } catch (s3Error) {
+        console.error("⚠️ Error fetching thumbnails from S3:", s3Error.message);
+        // ไม่ต้อง return ให้ทำงานต่อไปเพื่อเซฟสถานะ
+      }
+
+      await video.save({ writeConcern: { w: 'majority', wtimeout: 5000 } });
+      await broadcast({ videoId: videoId, type: "transcode_completed", status: "completed" });
+      
+      await queueService.sendToQueue(QUEUES.EMAIL_NOTIFY, {
+        type: "VIDEO_COMPLETE",
+        videoId: videoId,
+        email: video.email || "manaphatg@gmail.com",
+        title: video.title
+      });
+    }
 else if (status === "ERROR") {
   video.uploadStatus = "failed";
   await video.save();

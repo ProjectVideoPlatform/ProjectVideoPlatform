@@ -30,7 +30,14 @@ PARTITION BY toYYYYMM(event_time)
 ORDER BY (video_id, toDate(event_time), event_id)
 SETTINGS index_granularity = 8192;
 
+-- Step 1: เพิ่ม columns (safe, non-breaking)
+ALTER TABLE app_db.video_watch_events
+  ADD COLUMN IF NOT EXISTS seek_from_seconds UInt32 DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS seek_to_seconds   UInt32 DEFAULT 0;
 
+-- Step 2: (optional) TTL สำหรับ raw events เก่า ถ้ากังวลเรื่อง storage
+ALTER TABLE app_db.video_watch_events
+  MODIFY TTL event_time + INTERVAL 90 DAY;
 -- ─────────────────────────────────────────────────────────────────────────────
 --  video_retention_mv  (target table)
 -- ─────────────────────────────────────────────────────────────────────────────
@@ -96,14 +103,3 @@ WHERE event_type = 'watch_chunk'
 GROUP BY video_id, bucket_seconds, event_date;
 
 
--- ─────────────────────────────────────────────────────────────────────────────
---  ตัวอย่าง retention query
--- ─────────────────────────────────────────────────────────────────────────────
--- SELECT
---     bucket_seconds,
---     uniqMerge(viewers) AS unique_viewers
--- FROM app_db.video_retention_mv
--- WHERE video_id = 'xxx'
---   AND event_date BETWEEN '2026-01-01' AND '2026-04-30'
--- GROUP BY bucket_seconds
--- ORDER BY bucket_seconds;

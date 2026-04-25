@@ -57,8 +57,7 @@ function toClickhouseTimestamp(raw) {
 function mapToRow(data) {
   const VALID_TYPES = new Set([
     'play', 'watch', 'watch_chunk', 'pause', 'seek',
-    'completed', 'close', 'error', 'buffer_start', 'buffer_end',
-    'resume', 'tab_hide', 'tab_show',
+    'completed', 'close', 'error'
   ]);
 
   const eventType = String(data.eventType || data.event_type || 'unknown');
@@ -99,6 +98,8 @@ function mapToRow(data) {
     device_type:  String(data.device  || data.device_type  || 'unknown'),
     country_code: String(data.country || data.country_code || 'unknown'),
     event_time:   toClickhouseTimestamp(data.timestamp || data.event_time || data.receivedAt),
+    seek_from_seconds: Math.max(0, Math.round(Number(data.seekFrom || data.seek_from_seconds || 0))),
+seek_to_seconds:   Math.max(0, Math.round(Number(data.seekTo   || data.seek_to_seconds   || 0))),
   };
 }
 

@@ -274,12 +274,11 @@ services:
     volumes:
       - kafka_data:/tmp/kraft-combined-logs
     healthcheck:
-      # แก้ไข: ใช้คำสั่งเช็คพอร์ตเบื้องต้น (ถ้าไม่มี nc ให้ใช้ kafka-topics แบบไม่ต้องระบุ path เต็ม)
-      test: ["CMD-SHELL", "kafka-topics.sh --bootstrap-server localhost:9092 --list || exit 1"]
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list || exit 1"]
       interval: 15s
       timeout: 10s
       retries: 5
-      start_period: 40s
+      start_period: 60s  # เพิ่มเป็น 60s เพราะ Kafka ใช้เวลา start นานกว่า 40s
 
   # Nginx — serve static React + proxy API (ไม่มี react-app service แล้ว)
   nginx:
@@ -312,7 +311,6 @@ services:
       - prometheus_data:/prometheus
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'
-      - '--storage.tsdb.path=/prometheus'
       - '--storage.tsdb.path=/prometheus'
       - '--web.console.libraries=/usr/share/prometheus/console_libraries'
       - '--web.console.templates=/usr/share/prometheus/consoles'
@@ -347,9 +345,8 @@ services:
     image: clickhouse/clickhouse-server:latest
     container_name: clickhouse_db
     restart: always
-    expose:
-      - "8123"
-      - "9000"
+    ports:
+      - "8123:8123"
     environment:
       CLICKHOUSE_USER: app_user
       CLICKHOUSE_PASSWORD: strong_password
@@ -424,7 +421,6 @@ services:
       - KAFKA_BROKERS=kafka:9092
       - REDIS_HOST=redis
       - REDIS_PASSWORD=redispassword123
-      - PINECONE_API_KEY=${PINECONE_API_KEY}
     networks:
       - secure-video-network
     depends_on:

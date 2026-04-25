@@ -481,12 +481,13 @@ const VideoPlayer = ({ manifestUrl, onClose, videoId, videoCategory }) => {
       });
 
       if (seekCountRef.current <= 5) {
-        videoAnalytics.trackVideoEvent(makePayload({
-          event_type:           'seek',
-          seek_from_seconds:    Math.round(from),
-          current_time_seconds: Math.round(dest),
-          seek_delta_seconds:   Math.round(dest - from),
-        }));
+       // แก้เป็น
+videoAnalytics.trackVideoEvent(makePayload({
+  event_type:           'seek',
+  seek_from_seconds:    Math.round(from),
+  seek_to_seconds:      Math.round(dest),          // ✅ ตรงกับ column ใหม่
+  current_time_seconds: Math.round(dest),
+}));
       }
 
       if (isRestoringProgressRef.current) {

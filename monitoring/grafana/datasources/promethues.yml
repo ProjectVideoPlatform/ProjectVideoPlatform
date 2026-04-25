@@ -9,6 +9,6 @@ datasources:
     isDefault: true
     editable: true
     jsonData:
-      httpMethod: POST
+      httpMethod: GET
       # ปรับตามความเหมาะสม (15s เท่ากับ scrape_interval ของคุณ)
       timeInterval: 15s
