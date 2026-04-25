@@ -103,3 +103,28 @@ WHERE event_type = 'watch_chunk'
 GROUP BY video_id, bucket_seconds, event_date;
 
 
+หรือ กรณีUIรันไม่ผ่าน 
+docker exec -it clickhouse clickhouse-client \
+  --user app_user \
+  --password strong_password \
+  --query "
+CREATE MATERIALIZED VIEW IF NOT EXISTS app_db.mv_video_retention
+TO app_db.video_retention_mv
+AS
+SELECT
+    video_id,
+    toUInt32(
+        arrayJoin(
+            range(
+                toUInt64(intDiv(chunk_start_seconds, 10)),
+                toUInt64(intDiv(chunk_end_seconds,   10))
+            )
+        ) * 10
+    ) AS bucket_seconds,
+    uniqState(session_id) AS viewers,
+    toDate(event_time)    AS event_date
+FROM app_db.video_watch_events
+WHERE event_type = 'watch_chunk'
+  AND chunk_end_seconds > chunk_start_seconds
+GROUP BY video_id, bucket_seconds, event_date
+"

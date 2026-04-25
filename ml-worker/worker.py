@@ -5,7 +5,7 @@ import redis
 from confluent_kafka import Consumer, KafkaError
 from sentence_transformers import SentenceTransformer
 from pinecone import Pinecone, ServerlessSpec
-
+from confluent_kafka.admin import AdminClient, NewTopic
 # ── Config ──────────────────────────────────────────────
 KAFKA_BROKER   = os.environ.get('KAFKA_BROKERS', 'kafka:9092')
 REDIS_HOST     = os.environ.get('REDIS_HOST', 'redis')
@@ -28,7 +28,7 @@ def connect_redis():
                 port=6379, 
                 db=0,
                 decode_responses=True, 
-                password=REDIS_PASSWORD if REDIS_PASSWORD != 'redispassword123' else None
+                password=REDIS_PASSWORD 
             )
             r.ping()
             print("✅ Connected to Redis")
@@ -39,7 +39,19 @@ def connect_redis():
     raise Exception("Could not connect to Redis")
 
 r = connect_redis()
-
+def ensure_topic_exists(broker: str, topic: str, partitions: int = 3):
+    admin = AdminClient({'bootstrap.servers': broker})
+    existing = admin.list_topics(timeout=10).topics
+    if topic not in existing:
+        print(f"Creating topic: {topic}")
+        fs = admin.create_topics([NewTopic(topic, num_partitions=partitions, replication_factor=1)])
+        for t, f in fs.items():
+            try:
+                f.result()
+                print(f"✅ Topic '{t}' created")
+            except Exception as e:
+                print(f"⚠️ Topic creation: {e}")  # อาจ already exists
+        time.sleep(2)
 # ── Model ───────────────────────────────────────────────
 print("Loading SentenceTransformer model...")
 model = SentenceTransformer('all-MiniLM-L6-v2')
@@ -71,10 +83,9 @@ conf = {
     'session.timeout.ms': 6000,
     'max.poll.interval.ms': 300000
 }
-
+ensure_topic_exists(KAFKA_BROKER, 'user-activities')
 consumer = Consumer(conf)
 consumer.subscribe(['user-activities'])
-
 print(f"🚀 ML Worker running... Kafka: {KAFKA_BROKER}")
 
 # ── Batch Buffer ────────────────────────────────────────
