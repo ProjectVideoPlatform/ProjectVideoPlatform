@@ -2,6 +2,7 @@ import json
 import os
 import time
 import pika
+import traceback
 from sentence_transformers import SentenceTransformer
 from pinecone import Pinecone, ServerlessSpec
 
@@ -103,8 +104,8 @@ def process_message(ch, method, properties, body):
         ch.basic_ack(delivery_tag=method.delivery_tag)
 
     except Exception as e:
-        print(f"❌ Embed error: {e}")
-        # ถ้าพังระหว่างทาง (เช่น Pinecone ล่ม) ส่ง NACK งานจะถูกเด้งไปเข้า DLX ไม่สูญหาย
+        print(f"❌ Embed error for video {video_id}: {e}")
+        traceback.print_exc()  # 🚨 เพิ่มบรรทัดนี้ มันจะบอกเลยว่าพังบรรทัดที่เท่าไหร่ เพราะอะไร
         ch.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
 
 def connect_and_consume():
