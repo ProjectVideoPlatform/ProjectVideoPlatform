@@ -489,134 +489,108 @@ router.post('/:id/play', authenticateToken, async (req, res) => {
 
 router.post(
   "/mediaconvert/subscribe",
-  express.json({ type: "*/*" }), // รองรับทุก Content-Type จาก AWS
+  express.json({ type: "*/*" }),
   async (req, res) => {
     try {
       console.log("--- New Webhook Received ---");
       const body = req.body;
-      console.log("Raw Body:", JSON.stringify(body));
-      // 1️⃣ จัดการเรื่อง Subscription Confirmation (กรณีใช้ SNS)
+      
+      // 1. จัดการเรื่อง Subscription Confirmation
       if (body.Type === "SubscriptionConfirmation") {
         console.log("Confirming SNS subscription...");
         await fetch(body.SubscribeURL);
         return res.json({ confirmed: true });
       }
 
-      // 2️⃣ แกะข้อมูล (รองรับทั้ง EventBridge Direct และ SNS Wrapper)
-      let message;
-      if (body["detail-type"]) {
-        // กรณีส่งตรงจาก EventBridge (ตรงกับ Log ล่าสุดของคุณ)
-        message = body;
-      } else if (body.Type === "Notification" && body.Message) {
-        // กรณีส่งผ่าน SNS
-        message = JSON.parse(body.Message);
-      } else {
-        console.log("⚠️ Unknown format:", body);
-        return res.json({ received: false, error: "Unknown format" });
-      }
-
-      const detailType = message["detail-type"];
-      const detail = message.detail;
-
-      // 3️⃣ ประมวลผลสถานะ MediaConvert
-      if (detailType === "MediaConvert Job State Change") {
-        const status = detail.status;
-        const videoId = detail.userMetadata?.VideoId;
-
-        console.log(`Job ID: ${detail.jobId} | Status: ${status} | VideoId: ${videoId}`);
-
-        if (!videoId) {
-          console.log("❌ VideoId missing in userMetadata");
-          return res.status(400).json({ error: "VideoId missing" });
-        }
-
-        // ค้นหาโดยใช้ _id (เพราะ videoId ที่ได้มาคือ UUID string)
-        // สำคัญ: Schema ของคุณต้องตั้ง _id: String
-        const video = await Video.findOne({ id: videoId });
-
-        if (!video) {
-          console.log("❌ Video not found in DB:", videoId);
-          return res.status(404).json({ error: "Video not found" });
-        }
-
-        // 4️⃣ อัปเดตข้อมูลตามสถานะ
-    // 4️⃣ อัปเดตข้อมูลตามสถานะ
-    if (status === "COMPLETE") {
-      video.uploadStatus = "completed";
-
-
-      try {
-        // ใช้ .promise() เพื่อให้รองรับ await ใน SDK v2
-        const listResult = await s3.listObjectsV2({
-          Bucket: process.env.HLS_OUTPUT_BUCKET,
-          Prefix: `videos/${videoId}/thumbnails/`,
-        }).promise();
-
-        const thumbs = listResult.Contents
-          ?.map(o => o.Key)
-          .filter(k => k.endsWith('.jpg'))
-          .sort();
-
-        const thumbKey = thumbs?.[1] ?? thumbs?.[0];
-        console.log(`Thumbnails found for video ${videoId}:`, thumbs);
-        if (thumbKey) {
-          video.thumbnailPath = thumbKey;
-        }
-        const video = await Video.findById(videoId);
-
-if (!video) {
-  console.log("❌ Video not found in DB:", videoId);
-  return res.status(404).json({ error: "Video not found" });
-}
-     // สมมติว่าคุณมี object 'video' ที่ดึงมาจาก MongoDB เรียบร้อยแล้ว
-  await queueService.sendToQueue('video_index', {
-    eventType:   'video_ready',
-    videoId:     videoId,
-    title:       video.title || '',        // ✅ เพิ่ม title
-    description: video.description || '',  // ✅ เพิ่ม description
-    categories:  video.tags || [],         // ✅ เปลี่ยนชื่อคีย์เป็น categories (มี 's') ให้ตรงกับ Python
-  });
-      } catch (s3Error) {
-        console.error("⚠️ Error fetching thumbnails from S3:", s3Error.message);
-        // ไม่ต้อง return ให้ทำงานต่อไปเพื่อเซฟสถานะ
-      }
-
-      await video.save({ writeConcern: { w: 'majority', wtimeout: 5000 } });
-      await broadcast({ videoId: videoId, type: "transcode_completed", status: "completed" });
+      // 2. แกะข้อมูล Message
+      let message = body["detail-type"] ? body : (body.Type === "Notification" ? JSON.parse(body.Message) : null);
       
+      if (!message || message["detail-type"] !== "MediaConvert Job State Change") {
+        return res.json({ received: true, note: "Ignored non-mediaconvert event" });
+      }
+
+      const { status, userMetadata, jobId } = message.detail;
+      const videoId = userMetadata?.VideoId;
+
+      if (!videoId) {
+        console.log("❌ VideoId missing in userMetadata");
+        return res.status(400).json({ error: "VideoId missing" });
+      }
+
+      // 3. 🔍 ดึงข้อมูล Video จาก DB มาก่อน
+      const video = await Video.findOne({ id: videoId }); 
+
+      if (!video) {
+        console.log("❌ Video not found in DB:", videoId);
+        return res.status(404).json({ error: "Video not found" });
+      }
+
+      console.log(`Job ID: ${jobId} | Status: ${status} | VideoId: ${videoId}`);
+
+      // 4. เตรียมข้อมูลตามสถานะ
+      if (status === "COMPLETE") {
+        video.uploadStatus = "completed";
+
+        // หา Thumbnail จาก S3
+        try {
+          const listResult = await s3.listObjectsV2({
+            Bucket: process.env.HLS_OUTPUT_BUCKET,
+            Prefix: `videos/${videoId}/thumbnails/`,
+          }).promise();
+
+          const thumbs = listResult.Contents
+            ?.map(o => o.Key)
+            .filter(k => k.endsWith('.jpg'))
+            .sort();
+
+          if (thumbs && thumbs.length > 0) {
+            video.thumbnailPath = thumbs[1] ?? thumbs[0];
+            console.log(`Thumbnail set: ${video.thumbnailPath}`);
+          }
+        } catch (s3Error) {
+          console.error("⚠️ S3 Thumbnail Error:", s3Error.message);
+        }
+      } else if (status === "ERROR") {
+        video.uploadStatus = "failed";
+        console.log(`📧 Job FAILED for: ${videoId}`);
+      }
+
+      // 🚨 5. [สำคัญมาก] บันทึกการเปลี่ยนแปลงลง DB ให้สำเร็จก่อน!
+      await video.save({ writeConcern: { w: 'majority' } });
+      console.log(`✅ DB Saved Status: ${video.uploadStatus} for VideoId: ${videoId}`);
+
+      // 6. เมื่อ DB อัปเดตผ่านชัวร์ๆ แล้ว ค่อยกระจายงานให้ระบบอื่นๆ
+      if (status === "COMPLETE") {
+        // ส่งเข้า Queue เพื่อทำ Index / ML (Embedding)
+        await queueService.sendToQueue('video_index', {
+          eventType: 'video_ready',
+          videoId: videoId,
+          title: video.title || '',
+          description: video.description || '',
+          categories: video.tags || [],
+        });
+   console.log(video.tags +" Video Tags");
+        // แจ้งเตือนหน้าเว็บ
+        await broadcast({ videoId, type: "transcode_completed", status: "completed" });
+      }
+
+      // ส่ง Email แจ้งเตือน (ทำทั้งตอน Complete และ Error)
       await queueService.sendToQueue(QUEUES.EMAIL_NOTIFY, {
-        type: "VIDEO_COMPLETE",
+        type: status === "COMPLETE" ? "VIDEO_COMPLETE" : "VIDEO_FAILED",
         videoId: videoId,
         email: video.email || "manaphatg@gmail.com",
         title: video.title
       });
-    }
-else if (status === "ERROR") {
-  video.uploadStatus = "failed";
-  await video.save();
 
-  await queueService.sendToQueue(QUEUES.EMAIL_NOTIFY, {
-    type: "VIDEO_FAILED",
-    videoId: videoId,
-    email: video.email || "manaphatg@gmail.com",
-    title: video.title
-  });
+      return res.json({ updated: true, videoId });
 
-  console.log(`📧 Email queued FAILED for: ${videoId}`);
-}
-        return res.json({ updated: true, videoId });
-      }
-
-      res.json({ received: true });
     } catch (error) {
       console.error("🔥 Error in Webhook:", error.message);
-      // ส่ง 200 กลับไปให้ AWS เพื่อไม่ให้มัน Retry จนถล่ม Server เรา แต่ Log error ไว้ดูเอง
+      // ส่ง 200 เพื่อป้องกัน AWS Retry loop ถล่ม Server
       res.status(200).json({ error: "Processing failed", details: error.message });
     }
   }
 );
-
-
 // MediaConvert webhook handler
 // router.post('/mediaconvert/webhook', async (req, res) => {
 //   try {

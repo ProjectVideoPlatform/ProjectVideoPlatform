@@ -454,13 +454,16 @@ services:
     environment:
       - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672
       - PYTHONUNBUFFERED=1
+      - TRANSFORMERS_CACHE=/app/model-cache
+      - SENTENCE_TRANSFORMERS_HOME=/app/model-cache
     env_file:
       - ./BackEnd/.env
     mem_limit: 2g
     cpus: 2.0
+    volumes:
+      - ml-model-cache:/app/model-cache   # ✅ cache model ข้าม restart
     networks:
       - secure-video-network
-
   # Kafka UI
   kafka-ui:
     image: provectuslabs/kafka-ui:latest
@@ -492,3 +495,4 @@ volumes:
   clickhouse_data:
   loki-storage:
   kafka_data:
+  ml-model-cache:

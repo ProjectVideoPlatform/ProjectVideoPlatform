@@ -7,8 +7,8 @@ from confluent_kafka import Consumer, KafkaError
 HISTORY_MAX  = 200
 REDIS_HOST   = os.environ.get('REDIS_HOST', 'redis')
 KAFKA_BROKER = os.environ.get('KAFKA_BROKERS', 'kafka:9092')
-
-r = redis.Redis(host=REDIS_HOST, port=6379, decode_responses=True)
+REDIS_PASSWORD = os.environ.get('REDIS_PASSWORD')   # ✅ เพิ่ม
+r = redis.Redis(host=REDIS_HOST, port=6379, decode_responses=True,password=REDIS_PASSWORD  )
 
 def handle_user_activity(data):
     user_id  = data.get('userId')

@@ -10,22 +10,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 COPY requirements.txt .
 
-# ติดตั้ง torch CPU-only ก่อน แยก step
-# ป้องกัน pip ดึง torch+cuda มาแทน (~3GB)
 RUN pip install --no-cache-dir \
     torch \
     --extra-index-url https://download.pytorch.org/whl/cpu
 
-# ติดตั้งที่เหลือ
 RUN pip install --no-cache-dir -r requirements.txt
-
-# pre-download model ตอน build
-RUN python -c "\
-    from sentence_transformers import SentenceTransformer; \
-    SentenceTransformer('all-MiniLM-L6-v2')"
 
 COPY worker.py .
 
 ENV PYTHONUNBUFFERED=1
+# ✅ ให้ download model ตอน container start แทน
+# โดย cache ไว้ใน volume แทนการ bake เข้า image
+ENV TRANSFORMERS_CACHE=/app/model-cache
+ENV SENTENCE_TRANSFORMERS_HOME=/app/model-cache
 
 CMD ["python", "-u", "worker.py"]
