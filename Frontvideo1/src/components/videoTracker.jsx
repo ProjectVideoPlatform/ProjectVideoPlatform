@@ -2,9 +2,7 @@
 
 // ── constants ──────────────────────────────────────────────────────────────────
 const VALID_EVENT_TYPES = new Set([
-  'play', 'watch', 'watch_chunk', 'pause', 'seek', 'completed', 'close', 'error',
-  'tab_hide', 'tab_show',   // FIX: เพิ่ม event types ใหม่จาก VideoPlayer
-  'buffer_start', 'buffer_end',
+  'play',  'watch_chunk', 'pause', 'seek', 'completed', 'close', 'error',
 ]);
 
 const DEDUP_WINDOW_MS     = 300;
@@ -140,6 +138,7 @@ class VideoAnalytics {
       ...(data.error_message     && { error_message:           data.error_message }),
       ...(data.videoDuration     && { video_duration_seconds:  Math.round(data.videoDuration) }),
       ...(data.seek_from_seconds !== undefined && { seek_from_seconds:  Math.round(data.seek_from_seconds) }),
+      ...(data.seek_to_seconds    !== undefined && { seek_to_seconds:    Math.round(data.seek_to_seconds) }),   // ✅ เพิ่มตรงนี้
       ...(data.seek_delta_seconds !== undefined && { seek_delta_seconds: Math.round(data.seek_delta_seconds) }),
       ...(data.buffered_ranges   && { buffered_ranges:         data.buffered_ranges }),
       ...(data.buffer_duration_ms !== undefined && { buffer_duration_ms: data.buffer_duration_ms }),

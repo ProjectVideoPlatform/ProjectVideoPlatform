@@ -45,7 +45,6 @@ services:
         condition: service_healthy
     volumes:
       - ./BackEnd/keys:/app/keys:ro
-
   # Transcode Worker
   transcode-worker:
     build:
@@ -101,7 +100,24 @@ services:
         condition: service_healthy
       clickhouse:
         condition: service_healthy
-
+  trending-worker:
+    build: 
+      context: .
+      dockerfile: Dockerfile
+    container_name: trending_worker
+    command: ["node", "workers/trendingWorker.js"]
+    # depends_on:
+    #   - redis
+    #   - clickhouse
+    env_file: ./BackEnd/.env
+    environment:
+      - NODE_ENV=production
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=redispassword123
+    restart: always
+    networks:
+      - secure-video-network
   # Main Node.js API
   app:
     build:
@@ -295,10 +311,7 @@ services:
       - ./Frontvideo1/dist:/var/www/html:ro   # ← dist ที่ build แล้ว
     networks:
       - secure-video-network
-    depends_on:
-      app:
-        condition: service_healthy
-
+ 
   # Monitoring
   prometheus:
     image: prom/prometheus:v2.47.0
@@ -408,26 +421,45 @@ services:
       - secure-video-network
 
   # ML Worker
-  ml-worker:
+  ml-worker-kafka:
     build:
-      context: ./ml-worker
+      context: ./ml-worker/history
       dockerfile: Dockerfile
-    container_name: secure-video-ml-worker
-    restart: unless-stopped                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          
-    env_file:
-      - ./BackEnd/.env
+    container_name: secure-video-ml-worker-kafka
+    restart: unless-stopped
+    depends_on:
+      kafka:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     environment:
-      - PYTHONUNBUFFERED=1
       - KAFKA_BROKERS=kafka:9092
       - REDIS_HOST=redis
-      - REDIS_PASSWORD=redispassword123
+      - PYTHONUNBUFFERED=1
+    env_file:
+      - ./BackEnd/.env
     networks:
       - secure-video-network
-    # depends_on:
-    #   kafka:
-    #     condition: service_healthy
-    #   redis:
-    #     condition: service_healthy
+
+  # ── ML Worker: Embedder (RabbitMQ + Pinecone) ─────────────
+  ml-worker-embedder:
+    build:
+      context: ./ml-worker/embedder
+      dockerfile: Dockerfile
+    container_name: secure-video-ml-worker-embedder
+    restart: unless-stopped
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672
+      - PYTHONUNBUFFERED=1
+    env_file:
+      - ./BackEnd/.env
+    mem_limit: 2g
+    cpus: 2.0
+    networks:
+      - secure-video-network
 
   # Kafka UI
   kafka-ui:

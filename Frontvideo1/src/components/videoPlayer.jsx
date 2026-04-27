@@ -482,6 +482,7 @@ const VideoPlayer = ({ manifestUrl, onClose, videoId, videoCategory }) => {
 
       if (seekCountRef.current <= 5) {
        // แก้เป็น
+       console.log('🔍 seek payload before track:', JSON.stringify(payload));  // ← เพิ่มตรงนี้
 videoAnalytics.trackVideoEvent(makePayload({
   event_type:           'seek',
   seek_from_seconds:    Math.round(from),

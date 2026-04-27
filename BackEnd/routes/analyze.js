@@ -1,91 +1,81 @@
-const express = require('express');
-const router = express.Router();
-const crypto = require('crypto');
-const kafkaService = require('../services/kafkaService');
-const { authenticateToken } = require('../middleware/auth');
+const express  = require('express');
+const router   = express.Router();
+const crypto   = require('crypto');
+const kafkaService        = require('../services/kafkaService');
+const { authenticateToken } = require('../middleware/auth'); // ✅ ใช้ JWT
 
-const TOPICS = { VIDEO_LOGS: process.env.KAFKA_TOPIC || 'video-logs' };
+const TOPICS = {
+  VIDEO_LOGS:      process.env.KAFKA_TOPIC || 'video-logs',
+  USER_ACTIVITIES: 'user-activities',
+};
 const MAX_BATCH_SIZE = 1000;
 
 function validateEvent(event) {
   const videoId   = event.video_id   ?? event.videoId;
   const eventType = event.event_type ?? event.eventType;
-
-  if (!videoId)   return 'Missing field: video_id';
-  if (!eventType) return 'Missing field: event_type';
+  if (!videoId)                    return 'Missing field: video_id';
+  if (!eventType)                  return 'Missing field: event_type';
   if (typeof videoId !== 'string') return 'video_id must be string';
   return null;
 }
 
-// 🆕 Helper function to sanitize ObjectId
-function sanitizeObjectId(value) {
-  if (!value) return 'anonymous';
-  
-  // ถ้าเป็น ObjectId จาก MongoDB
-  if (typeof value === 'object' && value !== null) {
-    // Mongoose ObjectId หรือ MongoDB ObjectId
-    if (value._bsontype === 'ObjectId' || value.toString) {
-      return value.toString();
-    }
-  }
-  
-  // ถ้าเป็น string อยู่แล้วก็คืนค่าเดิม
-  return String(value);
-}
-
 router.post('/analytics/video', authenticateToken, async (req, res) => {
   try {
-    // ✅ แปลง ObjectId เป็น string ทันทีที่ได้รับ
-    const authenticatedUserId = sanitizeObjectId(req.user._id);
-    console.log(`[analytics] Received ${Array.isArray(req.body.events) ? req.body.events.length : 1} event(s) from user ${authenticatedUserId}`);
-    
+    // ✅ ดึงจาก JWT token — น่าเชื่อถือกว่า cookie
+    const userId = req.user?.id || req.user?._id || 'anonymous';
+
     let events = Array.isArray(req.body.events) ? req.body.events : [req.body];
+    if (events.length === 0)              return res.status(400).json({ error: 'No events provided' });
+    if (events.length > MAX_BATCH_SIZE)   return res.status(400).json({ error: 'Batch too large' });
 
-    if (events.length === 0) return res.status(400).json({ error: 'No events provided' });
-    if (events.length > MAX_BATCH_SIZE) return res.status(400).json({ error: `Batch too large` });
-
+    // validate + inject userId
     const valid = [];
-    for (let i = 0; i < events.length; i++) {
-      const err = validateEvent(events[i]);
-      if (!err) {
+    for (const event of events) {
+      if (!validateEvent(event)) {
         valid.push({
-          ...events[i],
-          // ✅ ใช้ sanitized userId ที่เป็น string แล้ว
-          user_id: authenticatedUserId,
-          userId: authenticatedUserId,
-          event_id: events[i].event_id || crypto.randomUUID(),
+          ...event,
+          user_id:  userId,
+          userId:   userId,
+          event_id: event.event_id || crypto.randomUUID(),
           receivedAt: new Date().toISOString(),
         });
       }
     }
 
-    // --- ส่วนส่ง Kafka ปกติ ---
-    if (valid.length > 0) {
-      const kafkaMessages = valid.map(event => ({
-        key: String(event.session_id || authenticatedUserId), // 🆕 บังคับเป็น string
-        value: JSON.stringify(event) // event มี user_id เป็น string แล้ว
-      }));
-      await kafkaService.sendBatch(TOPICS.VIDEO_LOGS, kafkaMessages);
-    }
+    if (valid.length === 0) return res.status(400).json({ error: 'All events invalid' });
 
-    // --- ส่วนส่งไป ML (Python) ---
-    const mlRelevantEvents = valid.filter(event => 
-      (event.event_type ?? event.eventType) === 'completed' || 
-      (event.event_type ?? event.eventType) === 'watch_chunk'
+    // ── 1. ClickHouse pipeline (ทุก event) ──────────────────
+    await kafkaService.sendBatch(
+      TOPICS.VIDEO_LOGS,
+      valid.map(e => ({
+        key:   String(e.session_id || userId),
+        value: JSON.stringify(e),
+      }))
     );
 
-    if (mlRelevantEvents.length > 0) {
-      const mlMessages = mlRelevantEvents.map((event) => ({
-        key: authenticatedUserId, // 🆕 เป็น string แล้ว
-        value: JSON.stringify({
-          userId: authenticatedUserId, // 🆕 เป็น string แล้ว
-          videoId: String(event.video_id || event.videoId), // 🆕 บังคับเป็น string
-          eventType: event.event_type || event.eventType,
-          category: Array.isArray(event.category) ? event.category : [event.category || 'unknown'],
-          timestamp: event.receivedAt
-        })
-      }));
-      await kafkaService.sendBatch('user-activities', mlMessages);
+    // ── 2. ML pipeline (เฉพาะ completed) ────────────────────
+    // watch_chunk ส่งบ่อยมาก แต่ ml-worker ต้องการแค่รู้ว่า
+    // user ดูวิดีโออะไรจบ → ใช้ completed อย่างเดียวพอ
+    const mlEvents = valid.filter(e =>
+      (e.event_type ?? e.eventType) === 'completed'
+    );
+
+    if (mlEvents.length > 0 && userId !== 'anonymous') {
+      await kafkaService.sendBatch(
+        TOPICS.USER_ACTIVITIES,
+        mlEvents.map(e => ({
+          key:   userId,
+          value: JSON.stringify({
+            userId:    userId,
+            videoId:   String(e.video_id || e.videoId),
+            eventType: e.event_type || e.eventType,
+            category:  Array.isArray(e.video_category)
+                         ? e.video_category
+                         : [e.video_category || 'unknown'],
+            timestamp: e.receivedAt,
+          }),
+        }))
+      );
     }
 
     return res.status(202).json({ queued: valid.length });

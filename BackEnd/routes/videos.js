@@ -11,7 +11,7 @@ const escapeStringRegexp = require('escape-string-regexp');
 const { getRecommendedVideos } = require('../services/recommendations'); 
 const redisClient = require('../config/redis');
   const https = require('https');
-  
+  const kafkaService = require('../services/kafkaService');
   const QUEUES = require('../services/rabbitmq/queues');
 const router = express.Router();
 const { broadcast } = require('../websocket');
@@ -153,9 +153,7 @@ router.get('/foryou', authenticateToken, async (req, res) => {
 
     const { videos, source } = await getRecommendedVideos(userId);
 
-    const result = await attachPurchaseStatus(videos, userId);
-
-    res.json({ videos: result, source }); // source: 'personalized' | 'trending'
+    res.json({ videos: videos, source }); // source: 'personalized' | 'trending'
   } catch (error) {
     console.error('[/foryou]', error);
     res.status(500).json({ message: 'Internal server error' });
@@ -564,6 +562,20 @@ router.post(
         if (thumbKey) {
           video.thumbnailPath = thumbKey;
         }
+        const video = await Video.findById(videoId);
+
+if (!video) {
+  console.log("❌ Video not found in DB:", videoId);
+  return res.status(404).json({ error: "Video not found" });
+}
+     // สมมติว่าคุณมี object 'video' ที่ดึงมาจาก MongoDB เรียบร้อยแล้ว
+  await queueService.sendToQueue('video_index', {
+    eventType:   'video_ready',
+    videoId:     videoId,
+    title:       video.title || '',        // ✅ เพิ่ม title
+    description: video.description || '',  // ✅ เพิ่ม description
+    categories:  video.tags || [],         // ✅ เปลี่ยนชื่อคีย์เป็น categories (มี 's') ให้ตรงกับ Python
+  });
       } catch (s3Error) {
         console.error("⚠️ Error fetching thumbnails from S3:", s3Error.message);
         // ไม่ต้อง return ให้ทำงานต่อไปเพื่อเซฟสถานะ
