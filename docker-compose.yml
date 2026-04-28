@@ -76,7 +76,6 @@ services:
       context: .
       dockerfile: Dockerfile
     container_name: secure-video-analytics-worker
-    restart: unless-stopped
     command: ["node", "workers/analystic.js"]
     user: "1001:1001"
     read_only: true
@@ -93,29 +92,50 @@ services:
       - CLICKHOUSE_USER=app_user
       - CLICKHOUSE_PASSWORD=strong_password
       - CLICKHOUSE_DB=app_db
-    networks:
-      - secure-video-network
+    restart: unless-stopped
+    # ✅ FIX 1: depends_on ที่ถูกต้อง
     depends_on:
       kafka:
         condition: service_healthy
       clickhouse:
         condition: service_healthy
+      redis:
+        condition: service_healthy
+    # ✅ FIX 2: healthcheck
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"require('http').get('http://localhost:3098/health', r => process.exit(r.statusCode === 200 ? 0 : 1))\""]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    networks:
+      - secure-video-network
   trending-worker:
-    build: 
+    build:
       context: .
       dockerfile: Dockerfile
     container_name: trending_worker
     command: ["node", "workers/trendingWorker.js"]
-    # depends_on:
-    #   - redis
-    #   - clickhouse
     env_file: ./BackEnd/.env
     environment:
       - NODE_ENV=production
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - REDIS_PASSWORD=redispassword123
-    restart: always
+    restart: unless-stopped
+    # ✅ FIX 1: เพิ่ม depends_on ที่ถูกต้อง
+    depends_on:
+      redis:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+    # ✅ FIX 2: healthcheck ตรวจว่า worker ยัง alive
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"require('http').get('http://localhost:3099/health', r => process.exit(r.statusCode === 200 ? 0 : 1))\""]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
     networks:
       - secure-video-network
   # Main Node.js API
@@ -162,7 +182,7 @@ services:
     cap_drop:
       - ALL
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
+      test: ["CMD", "curl", "-f", "http://localhost/api/health"]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -494,7 +514,56 @@ services:
       - secure-video-network
     depends_on:
       - kafka
-
+# ── Apache Flink (Stream Processing) ──────────────────────
+  # Flink Master Node & Web UI
+  flink-jobmanager:
+    image: flink:1.18.1-java11
+    container_name: secure-video-flink-jobmanager
+    restart: unless-stopped
+    expose:
+      - "6123" # RPC port สำหรับ TaskManager มาคุย
+    ports:
+      - "8082:8081" # Web UI ของ Flink (เปลี่ยนเป็น 8082 เพราะ 8081 อาจจะชนกับ Mongo Express)
+    command: jobmanager
+    environment:
+      - |
+        FLINK_PROPERTIES=
+        jobmanager.rpc.address: flink-jobmanager
+    networks:
+      - secure-video-network
+    depends_on:
+      kafka:
+        condition: service_healthy
+  # Flink Worker Node
+  flink-taskmanager:
+      image: flink:1.18.1-java11
+      container_name: secure-video-flink-taskmanager
+      restart: unless-stopped
+      depends_on:
+        flink-jobmanager:
+          condition: service_started
+        kafka:
+          condition: service_healthy
+      command: taskmanager
+      # เพิ่มส่วน Resource Limit เพื่อความเสถียร
+      deploy:
+        resources:
+          limits:
+            memory: 2G
+      environment:
+        - |
+          FLINK_PROPERTIES=
+          jobmanager.rpc.address: flink-jobmanager
+          taskmanager.numberOfTaskSlots: 4
+          taskmanager.memory.process.size: 1728m # แบ่งให้ Flink จัดการ (น้อยกว่าขีดจำกัด Docker เล็กน้อย)
+      # เพิ่มการทำ Healthcheck ให้ตัวมันเอง
+      healthcheck:
+        test: ["CMD", "curl", "-f", "http://localhost:8081"] # เช็คผ่าน API ของ JobManager หรือเช็คโปรเซส
+        interval: 30s
+        timeout: 10s
+        retries: 3
+      networks:
+        - secure-video-network
 networks:
   secure-video-network:
     driver: bridge

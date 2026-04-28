@@ -17,13 +17,13 @@
     },
     {
       "title": "Unique Users",
-      "description": "จำนวน user ที่ไม่ซ้ำที่กด play",
+      "description": "จำนวน user ที่ไม่ซ้ำที่กด play (ไม่รวม anonymous)",
       "type": "stat",
       "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse_ds" },
       "targets": [
         {
           "queryType": "sql",
-          "rawSql": "SELECT uniqExact(user_id) FROM app_db.video_watch_events WHERE $__timeFilter(event_time) AND event_type = 'play'"
+          "rawSql": "SELECT uniqExact(user_id) FROM app_db.video_watch_events WHERE $__timeFilter(event_time) AND event_type = 'play' AND user_id != 'anonymous'"
         }
       ],
       "gridPos": { "h": 4, "w": 4, "x": 4, "y": 0 }
@@ -43,13 +43,13 @@
     },
     {
       "title": "✅ Completion Rate",
-      "description": "% session ที่ดูจนได้รับ completed event (ต่อ session ที่มี play)",
+      "description": "% session ที่ได้รับ completed event ต่อ session ที่มี play (นับ unique session)",
       "type": "stat",
       "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse_ds" },
       "targets": [
         {
           "queryType": "sql",
-          "rawSql": "SELECT ROUND((countIf(event_type = 'completed') / NULLIF(countIf(event_type = 'play'), 0)) * 100, 1) FROM app_db.video_watch_events WHERE $__timeFilter(event_time)"
+          "rawSql": "SELECT ROUND((uniqExactIf(session_id, event_type = 'completed') / NULLIF(uniqExactIf(session_id, event_type = 'play'), 0)) * 100, 1) FROM app_db.video_watch_events WHERE $__timeFilter(event_time)"
         }
       ],
       "gridPos": { "h": 4, "w": 4, "x": 12, "y": 0 }
@@ -136,14 +136,14 @@
 
     {
       "title": "📉 Drop-off Distribution",
-      "description": "session ที่ไม่ completed จบที่ช่วงไหนบ้าง — bucket จาก SUM(watch_duration_seconds) ต่อ session",
+      "description": "session ที่ไม่ completed จบที่ช่วงไหนบ้าง (เฉพาะ logged-in users)",
       "type": "barchart",
       "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse_ds" },
       "targets": [
         {
           "refId": "A",
           "queryType": "sql",
-          "rawSql": "SELECT toString(intDiv(total_watched, 10) * 10) || 's' AS second_bucket, COUNT(*) AS drop_offs FROM (SELECT session_id, SUM(watch_duration_seconds) AS total_watched, maxIf(1, event_type = 'completed') AS is_completed FROM app_db.video_watch_events WHERE $__timeFilter(event_time) GROUP BY session_id) WHERE is_completed = 0 GROUP BY second_bucket ORDER BY toUInt32(replaceAll(second_bucket, 's', '')) ASC"
+          "rawSql": "SELECT toString(intDiv(total_watched, 10) * 10) || 's' AS second_bucket, COUNT(*) AS drop_offs FROM (SELECT session_id, SUM(watch_duration_seconds) AS total_watched, maxIf(1, event_type = 'completed') AS is_completed FROM app_db.video_watch_events WHERE $__timeFilter(event_time) AND user_id != 'anonymous' GROUP BY session_id) WHERE is_completed = 0 GROUP BY second_bucket ORDER BY toUInt32(replaceAll(second_bucket, 's', '')) ASC"
         }
       ],
       "options": {
@@ -201,13 +201,13 @@
     },
     {
       "title": "⏰ Peak Hours (Play Events)",
-      "description": "ช่วงเวลาที่มีคนกด play มากที่สุด (local hour ของ event_time)",
+      "description": "ช่วงเวลาที่มีคนกด play มากที่สุด (Asia/Bangkok UTC+7)",
       "type": "barchart",
       "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse_ds" },
       "targets": [
         {
           "queryType": "sql",
-          "rawSql": "SELECT toString(toHour(event_time)) || ':00' AS hour, uniq(session_id) AS views FROM app_db.video_watch_events WHERE $__timeFilter(event_time) AND event_type = 'play' GROUP BY hour ORDER BY toUInt32(replaceAll(hour, ':00', '')) ASC"
+          "rawSql": "SELECT toString(toHour(toTimeZone(event_time, 'Asia/Bangkok'))) || ':00' AS hour, uniq(session_id) AS views FROM app_db.video_watch_events WHERE $__timeFilter(event_time) AND event_type = 'play' GROUP BY hour ORDER BY toUInt32(replaceAll(hour, ':00', '')) ASC"
         }
       ],
       "gridPos": { "h": 8, "w": 8, "x": 8, "y": 29 }
@@ -224,6 +224,36 @@
         }
       ],
       "gridPos": { "h": 8, "w": 8, "x": 16, "y": 29 }
+    },
+
+    {
+      "title": "📱 Watch Time by Device",
+      "description": "เปรียบ avg watch time ระหว่าง mobile และ desktop",
+      "type": "barchart",
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse_ds" },
+      "targets": [
+        {
+          "queryType": "sql",
+          "rawSql": "SELECT device_type, ROUND(AVG(session_sec), 0) AS avg_watch_sec FROM (SELECT session_id, device_type, SUM(watch_duration_seconds) AS session_sec FROM app_db.video_watch_events WHERE $__timeFilter(event_time) AND event_type = 'watch_chunk' GROUP BY session_id, device_type) GROUP BY device_type ORDER BY avg_watch_sec DESC"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "s" }
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 37 }
+    },
+    {
+      "title": "👤 Logged-in vs Anonymous Views",
+      "description": "เปรียบ session ระหว่าง logged-in user กับ anonymous",
+      "type": "piechart",
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse_ds" },
+      "targets": [
+        {
+          "queryType": "sql",
+          "rawSql": "SELECT multiIf(user_id = 'anonymous', 'Anonymous', 'Logged-in') AS user_type, uniqExact(session_id) AS sessions FROM app_db.video_watch_events WHERE $__timeFilter(event_time) AND event_type = 'play' GROUP BY user_type"
+        }
+      ],
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 37 }
     },
 
     {
@@ -260,7 +290,7 @@
           }
         ]
       },
-      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 37 }
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 45 }
     }
   ]
 }

@@ -1,8 +1,9 @@
 'use strict';
 
+const http    = require('http');
 const { Kafka } = require('kafkajs');
 const { createClient } = require('@clickhouse/client');
-const crypto = require('crypto');
+const crypto  = require('crypto');
 const redisClient = require('../config/redis');
 
 const clickhouse = createClient({
@@ -14,6 +15,7 @@ const clickhouse = createClient({
 
 const DEDUPE_TTL_SEC = 60 * 60 * 24;
 
+// ─── Redis dedupe ──────────────────────────────────────────────────────────────
 async function filterNewEvents(eventIds) {
   if (eventIds.length === 0) return new Set();
   const pipeline = redisClient.pipeline();
@@ -28,15 +30,12 @@ async function filterNewEvents(eventIds) {
   return newIds;
 }
 
+// ─── Helpers ───────────────────────────────────────────────────────────────────
 function sanitizeObjectId(value) {
   if (!value) return '';
   if (typeof value === 'object' && value !== null) {
-    if (value._bsontype === 'ObjectId' || value.toString) {
-      return value.toString();
-    }
-    if (value.constructor && value.constructor.name === 'ObjectId') {
-      return value.toString();
-    }
+    if (value._bsontype === 'ObjectId' || value.toString) return value.toString();
+    if (value.constructor && value.constructor.name === 'ObjectId') return value.toString();
   }
   return String(value);
 }
@@ -54,10 +53,24 @@ function toClickhouseTimestamp(raw) {
   return new Date(raw || Date.now()).toISOString().replace('T', ' ').substring(0, 19);
 }
 
+// ─── mapToRow ──────────────────────────────────────────────────────────────────
+//
+//  Idempotent event_id:
+//    1. ถ้า client ส่ง event_id มา → ใช้เลย (VideoTracker ส่ง UUID เสมอ)
+//    2. ถ้าไม่มี → SHA256 hash จาก stable fields (ไม่รวม timestamp)
+//    ผลลัพธ์: retry ด้วย payload เดิม → event_id เดิม → Redis block → ไม่ duplicate
+//
+function makeStableFallbackId(data, eventType, videoId, sessionId) {
+  const chunkStart = data.chunk_start_seconds ?? data.currentTime ?? data.current_time_seconds ?? 0;
+  const chunkEnd   = data.chunk_end_seconds   ?? data.currentTime ?? data.current_time_seconds ?? 0;
+  const key = [videoId, sessionId, eventType, chunkStart, chunkEnd].join('|');
+  return crypto.createHash('sha256').update(key).digest('hex').slice(0, 32);
+}
+
 function mapToRow(data) {
   const VALID_TYPES = new Set([
     'play', 'watch', 'watch_chunk', 'pause', 'seek',
-    'completed', 'close', 'error'
+    'completed', 'close', 'error',
   ]);
 
   const eventType = String(data.eventType || data.event_type || 'unknown');
@@ -69,37 +82,29 @@ function mapToRow(data) {
   const userId    = sanitizeObjectId(data.userId    || data.user_id    || 'anonymous');
   const sessionId = sanitizeObjectId(data.sessionId || data.session_id || '');
 
-  const fallbackId = crypto
-    .createHash('md5')
-    .update([
-      videoId, userId, sessionId, eventType,
-      data.currentTime || data.current_time_seconds || 0,
-      data.timestamp   || data.event_time           || Date.now(),
-    ].join('_'))
-    .digest('hex');
+  const clientEventId = data.eventId || data.event_id;
+  const eventId = clientEventId
+    ? String(clientEventId)
+    : makeStableFallbackId(data, eventType, videoId, sessionId);
 
   return {
-    event_id:   String(data.eventId || data.event_id || fallbackId),
-    video_id:   videoId,
-    user_id:    userId,
-    session_id: sessionId,
-    event_type: eventType,
-
-    // ✅ FIX: เพิ่ม category
-    category: String(data.category || data.video_category || 'unknown'),
-
-    watch_duration_seconds: Math.max(0, Math.round(Number(data.duration              || data.watch_duration_seconds || 0))),
-    total_watch_seconds:    Math.max(0, Math.round(Number(data.totalWatchTime         || data.total_watch_seconds    || 0))),
-    current_time_seconds:   Math.max(0, Math.round(Number(data.currentTime           || data.current_time_seconds   || 0))),
-    chunk_start_seconds:    Math.max(0, Math.round(Number(data.chunk_start_seconds   || 0))),
-    chunk_end_seconds:      Math.max(0, Math.round(Number(data.chunk_end_seconds     || 0))),
-    max_progress_seconds:   Math.max(0, Math.round(Number(data.max_progress_seconds  || 0))),
-
-    device_type:  String(data.device  || data.device_type  || 'unknown'),
-    country_code: String(data.country || data.country_code || 'unknown'),
-    event_time:   toClickhouseTimestamp(data.timestamp || data.event_time || data.receivedAt),
-    seek_from_seconds: Math.max(0, Math.round(Number(data.seekFrom || data.seek_from_seconds || 0))),
-seek_to_seconds:   Math.max(0, Math.round(Number(data.seekTo   || data.seek_to_seconds   || 0))),
+    event_id:              eventId,
+    video_id:              videoId,
+    user_id:               userId,
+    session_id:            sessionId,
+    event_type:            eventType,
+    category:              String(data.category || data.video_category || 'unknown'),
+    watch_duration_seconds: Math.max(0, Math.round(Number(data.duration             || data.watch_duration_seconds || 0))),
+    total_watch_seconds:    Math.max(0, Math.round(Number(data.totalWatchTime        || data.total_watch_seconds    || 0))),
+    current_time_seconds:   Math.max(0, Math.round(Number(data.currentTime          || data.current_time_seconds   || 0))),
+    chunk_start_seconds:    Math.max(0, Math.round(Number(data.chunk_start_seconds  || 0))),
+    chunk_end_seconds:      Math.max(0, Math.round(Number(data.chunk_end_seconds    || 0))),
+    max_progress_seconds:   Math.max(0, Math.round(Number(data.max_progress_seconds || 0))),
+    device_type:            String(data.device  || data.device_type  || 'unknown'),
+    country_code:           String(data.country || data.country_code || 'unknown'),
+    event_time:             toClickhouseTimestamp(data.timestamp || data.event_time || data.receivedAt),
+    seek_from_seconds:      Math.max(0, Math.round(Number(data.seekFrom || data.seek_from_seconds || 0))),
+    seek_to_seconds:        Math.max(0, Math.round(Number(data.seekTo   || data.seek_to_seconds   || 0))),
   };
 }
 
@@ -109,7 +114,6 @@ function extractItems(payload) {
   return [payload];
 }
 
-// ✅ FIX: return object เสมอ ไม่ parse สองรอบ
 function sanitizePayload(rawValue) {
   let parsed;
   try {
@@ -136,13 +140,15 @@ function sanitizePayload(rawValue) {
   return deepSanitize(parsed);
 }
 
+// ─── Worker ───────────────────────────────────────────────────────────────────
 class ClickHouseKafkaWorker {
   constructor() {
     this.MAX_RETRIES    = 3;
-    this.BATCH_SIZE     = parseInt(process.env.BATCH_SIZE     || '1000', 10);
-    this.TOPIC          = process.env.KAFKA_TOPIC             || 'video-logs';
-    this.DLQ_TOPIC      = process.env.KAFKA_DLQ_TOPIC         || 'video-logs-dlq';
+    this.BATCH_SIZE     = parseInt(process.env.BATCH_SIZE || '1000', 10);
+    this.TOPIC          = process.env.KAFKA_TOPIC         || 'video-logs';
+    this.DLQ_TOPIC      = process.env.KAFKA_DLQ_TOPIC     || 'video-logs-dlq';
     this.isShuttingDown = false;
+    this.isConnected    = false; // ✅ track Kafka connection state จริงๆ
     this._activeBatch   = null;
 
     this.kafka = new Kafka({
@@ -163,17 +169,27 @@ class ClickHouseKafkaWorker {
 
   async start() {
     try {
-      // ✅ FIX: เช็ค isOpen ก่อน connect ป้องกัน crash ถ้า connect แล้ว
-      if (!redisClient.isOpen) {
-        await redisClient.connect();
-      }
+      if (!redisClient.isOpen) await redisClient.connect();
       console.log('[Worker] Redis ready for dedupe');
 
       await clickhouse.query({ query: 'SELECT 1', format: 'JSONEachRow' });
       await this.producer.connect();
       await this.consumer.connect();
+
+      this.isConnected = true; // ✅ set หลัง connect สำเร็จเท่านั้น
+
       await this.consumer.subscribe({ topic: this.TOPIC, fromBeginning: false });
       console.log(`[Worker] Started consuming ${this.TOPIC}`);
+
+      // ✅ ถ้า Kafka disconnect กลางทาง → reset flag → Docker healthcheck detect ได้
+      this.consumer.on('consumer.disconnect', () => {
+        console.error('[Worker] Kafka consumer disconnected unexpectedly');
+        this.isConnected = false;
+      });
+      this.consumer.on('consumer.connect', () => {
+        console.log('[Worker] Kafka consumer reconnected');
+        this.isConnected = true;
+      });
 
       await this.consumer.run({
         partitionsConsumedConcurrently: 1,
@@ -190,6 +206,7 @@ class ClickHouseKafkaWorker {
       });
     } catch (err) {
       console.error('[Worker] Startup failed:', err.message);
+      this.isConnected = false; // ✅ reset ถ้า start fail
       setTimeout(() => this.start(), 5000);
     }
   }
@@ -215,7 +232,6 @@ class ClickHouseKafkaWorker {
         const rawValue = msg.value?.toString();
         if (!rawValue) throw new Error('Empty message value');
 
-        // ✅ FIX: sanitizePayload return object เลย ไม่ต้อง parse อีกรอบ
         const payload = sanitizePayload(rawValue);
         const items   = extractItems(payload);
 
@@ -233,50 +249,56 @@ class ClickHouseKafkaWorker {
       }
     }
 
-    // Redis dedupe
     const eventIds  = candidateRows.map(({ row }) => row.event_id);
     let newEventIds = new Set(eventIds);
     try {
       newEventIds = await filterNewEvents(eventIds);
+      const dupeCount = eventIds.length - newEventIds.size;
+      if (dupeCount > 0) {
+        console.log(`[Worker] Dedupe filtered ${dupeCount} duplicate event(s)`);
+      }
     } catch (redisErr) {
-      console.error(`[Worker] Redis dedupe error: ${redisErr.message}. Bypassing.`);
+      console.error(`[Worker] Redis dedupe error: ${redisErr.message}. Bypassing — CH will dedup eventually.`);
     }
 
     const rowsToInsert = candidateRows.filter(({ row }) => newEventIds.has(row.event_id));
 
-    if (rowsToInsert.length > 0) {
-      let retries    = 0;
-      let success    = false;
-      const insertData = rowsToInsert.map(({ row }) => row);
+    if (rowsToInsert.length === 0) {
+      console.log('[Worker] All events filtered by dedupe, skipping insert');
+      return;
+    }
 
-      while (retries < this.MAX_RETRIES && !success) {
-        try {
-          await clickhouse.insert({
-            table:  'video_watch_events',
-            values: insertData,
-            format: 'JSONEachRow',
-          });
-          success = true;
-          console.log(`[Worker] Inserted ${insertData.length} events successfully`);
-        } catch (err) {
-          retries++;
-          console.error(`[Worker] Insert attempt ${retries} failed: ${err.message}`);
-          if (retries < this.MAX_RETRIES) {
-            await heartbeat();
-            await new Promise(r => setTimeout(r, 1000 * retries));
-          }
+    let retries  = 0;
+    let success  = false;
+    const insertData = rowsToInsert.map(({ row }) => row);
+
+    while (retries < this.MAX_RETRIES && !success) {
+      try {
+        await clickhouse.insert({
+          table:  'video_watch_events',
+          values: insertData,
+          format: 'JSONEachRow',
+        });
+        success = true;
+        console.log(`[Worker] Inserted ${insertData.length} events successfully`);
+      } catch (err) {
+        retries++;
+        console.error(`[Worker] Insert attempt ${retries} failed: ${err.message}`);
+        if (retries < this.MAX_RETRIES) {
+          await heartbeat();
+          await new Promise(r => setTimeout(r, 1000 * retries));
         }
       }
+    }
 
-      if (!success) {
-        console.error('[Worker] FATAL: Insert failed after retries. Sending to DLQ.');
-        for (const { msg } of rowsToInsert) {
-          failedMessages.push({
-            key:     msg.key || Buffer.from('db-error'),
-            value:   msg.value,
-            headers: { error: 'ClickHouse insert failed', originalOffset: String(msg.offset) },
-          });
-        }
+    if (!success) {
+      console.error('[Worker] FATAL: Insert failed after retries. Sending to DLQ.');
+      for (const { msg } of rowsToInsert) {
+        failedMessages.push({
+          key:     msg.key || Buffer.from('db-error'),
+          value:   msg.value,
+          headers: { error: 'ClickHouse insert failed', originalOffset: String(msg.offset) },
+        });
       }
     }
 
@@ -293,11 +315,12 @@ class ClickHouseKafkaWorker {
   async shutdown() {
     if (this.isShuttingDown) return;
     this.isShuttingDown = true;
+    this.isConnected    = false; // ✅ clear ทันทีที่เริ่ม shutdown
     console.log('[Worker] Shutting down gracefully...');
     try {
       if (this._activeBatch) await this._activeBatch;
     } catch {
-      // batch อาจ fail ตอน shutdown
+      // batch อาจ fail ตอน shutdown — ไม่เป็นไร
     }
     try {
       await this.consumer.disconnect();
@@ -312,8 +335,36 @@ class ClickHouseKafkaWorker {
   }
 }
 
+// ─── Start ────────────────────────────────────────────────────────────────────
 const worker = new ClickHouseKafkaWorker();
 worker.start();
+
+// ─── Health endpoint ──────────────────────────────────────────────────────────
+//
+//  เช็คสิ่งที่ analytics-worker ใช้จริง:
+//    - isConnected: Kafka consumer connect และยัง alive อยู่ไหม
+//    - isShuttingDown: กำลัง shutdown อยู่ไหม
+//
+//  Docker healthcheck จะเรียก GET /health ทุก 30s
+//  ถ้าได้ 503 → retries 3 ครั้ง → restart container
+//
+http.createServer((req, res) => {
+  if (req.url !== '/health') {
+    res.writeHead(404).end();
+    return;
+  }
+
+  const healthy = worker.isConnected && !worker.isShuttingDown;
+
+  res.writeHead(healthy ? 200 : 503, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify({
+    status:      healthy ? 'ok' : 'unhealthy',
+    isConnected: worker.isConnected,
+    isShutdown:  worker.isShuttingDown,
+  }));
+}).listen(3098, () => {
+  console.log('[Worker] Health endpoint listening on :3098');
+});
 
 process.on('SIGINT',  () => worker.shutdown());
 process.on('SIGTERM', () => worker.shutdown());
