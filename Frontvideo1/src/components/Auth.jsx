@@ -1,9 +1,9 @@
 // Auth.jsx — Dark Cinema Theme · CineStream Design System · Cookie Auth
 import React, { useState, useEffect, memo, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useAuth } from '../AuthProvider';
+import { useAuth } from '../AuthContext';
 import videoTracker from './videoTracker';
-import { Loader, Eye, EyeOff, Film, Mail, Lock, User, Shield, ChevronRight, RefreshCw, LogOut, Clapperboard } from 'lucide-react';
+import { Loader, Eye, EyeOff, Film, Mail, Lock, User, Shield, ChevronRight,  LogOut, Clapperboard } from 'lucide-react';
 
 const API_BASE_URL = '/api';
 
@@ -240,14 +240,7 @@ const VideoAuthSystem = () => {
     }
   }, [registerForm, clearAlerts, setAuthUser, showAlert]);
 
-  const refreshToken = useCallback(async () => {
-    try {
-      // ✅ server ออก cookie ใหม่ให้ — client ไม่ต้องทำอะไร
-      await apiFetch('/auth/refresh', { method: 'POST' });
-    } catch (e) {
-      logout();
-    }
-  }, [logout]);
+
 
   /* ── Alert ── */
   const AlertBox = memo(({ alert }) => {
@@ -457,12 +450,8 @@ const VideoAuthSystem = () => {
           {currentUser?.role === 'admin' ? <Shield size={10} /> : <User size={10} />}
           {currentUser?.role}
         </div>
-        {currentUser?.id && <div className="auth-uid">ID: {currentUser.id}</div>}
       </div>
 
-      <button className="auth-outline-btn" onClick={refreshToken}>
-        <RefreshCw size={15} />รีเฟรช Session
-      </button>
       <button className="auth-submit" onClick={logout}>
         <LogOut size={16} />ออกจากระบบ
       </button>

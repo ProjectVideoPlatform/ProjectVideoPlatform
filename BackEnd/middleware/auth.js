@@ -30,7 +30,7 @@ const authenticateToken = async (req, res, next) => {
     // ✅ ถ้า token จะหมดใน 5 นาที → ต่ออายุให้เลย (silent refresh)
     const expiresIn = decoded.exp - Math.floor(Date.now() / 1000);
     if (expiresIn < 5 * 60) {
-      const newToken = jwt.sign({ userId: decoded.userId }, jwtConfig.secret, { expiresIn: '15m' });
+      const newToken = jwt.sign({ userId: decoded.userId }, jwtConfig.secret, { expiresIn: '1d' });
       res.cookie('authToken', newToken, accessCookieOptions);
     }
 
@@ -64,7 +64,7 @@ const tryRefreshAndContinue = async (req, res, next) => {
     }
 
     // ✅ ออก access token ใหม่ใส่ cookie เลย — frontend ไม่ต้องทำอะไร
-    const newToken = jwt.sign({ userId: user._id }, jwtConfig.secret, { expiresIn: '15m' });
+    const newToken = jwt.sign({ userId: user._id }, jwtConfig.secret, { expiresIn: '1d' });
     res.cookie('authToken', newToken, accessCookieOptions);
 
     req.user = user;
