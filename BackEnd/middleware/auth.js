@@ -72,7 +72,7 @@ const tryRefreshAndContinue = async (req, res, next) => {
   } catch (err) {
     // refresh token หมดอายุด้วย → force logout
     res.clearCookie('authToken',     { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'strict', path: '/' });
-    res.clearCookie('refreshToken',  { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'strict', path: '/api/auth/refresh' });
+    res.clearCookie('refreshToken',  { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'strict', path: '/api/auth/verify' });
     return res.status(401).json({ error: 'Session expired', code: 'REFRESH_EXPIRED' });
   }
 };
