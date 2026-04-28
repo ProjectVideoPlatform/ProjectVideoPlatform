@@ -10,7 +10,6 @@ const logger = require('../utils/logger');
 // ─────────────────────────────────────────────
 const authenticateToken = async (req, res, next) => {
   try {
-    // ✅ อ่านจาก cookie แทน header — JS ฝั่ง client เข้าถึงไม่ได้
     const token = req.cookies?.authToken;
 
     if (!token) {
@@ -21,11 +20,18 @@ const authenticateToken = async (req, res, next) => {
     try {
       decoded = jwt.verify(token, jwtConfig.secret);
     } catch (err) {
-      // แยก error type เพื่อ debug ง่ายขึ้น
       if (err.name === 'TokenExpiredError') {
-        return res.status(401).json({ error: 'Token expired', code: 'TOKEN_EXPIRED' });
+        // ✅ token หมดอายุ → ลอง refresh จาก refreshToken อัตโนมัติ
+        return tryRefreshAndContinue(req, res, next);
       }
       return res.status(401).json({ error: 'Invalid token', code: 'TOKEN_INVALID' });
+    }
+
+    // ✅ ถ้า token จะหมดใน 5 นาที → ต่ออายุให้เลย (silent refresh)
+    const expiresIn = decoded.exp - Math.floor(Date.now() / 1000);
+    if (expiresIn < 5 * 60) {
+      const newToken = jwt.sign({ userId: decoded.userId }, jwtConfig.secret, { expiresIn: '15m' });
+      res.cookie('authToken', newToken, accessCookieOptions);
     }
 
     const user = await User.findById(decoded.userId).select('-password');
@@ -41,6 +47,35 @@ const authenticateToken = async (req, res, next) => {
   }
 };
 
+// ── ถ้า access token หมดอายุ → เช็ค refresh token แทน ──
+const tryRefreshAndContinue = async (req, res, next) => {
+  const refreshToken = req.cookies?.refreshToken;
+
+  if (!refreshToken) {
+    return res.status(401).json({ error: 'Session expired', code: 'REFRESH_EXPIRED' });
+  }
+
+  try {
+    const decoded = jwt.verify(refreshToken, jwtConfig.refreshSecret);
+    const user    = await User.findById(decoded.userId).select('-password');
+
+    if (!user) {
+      return res.status(401).json({ error: 'User not found' });
+    }
+
+    // ✅ ออก access token ใหม่ใส่ cookie เลย — frontend ไม่ต้องทำอะไร
+    const newToken = jwt.sign({ userId: user._id }, jwtConfig.secret, { expiresIn: '15m' });
+    res.cookie('authToken', newToken, accessCookieOptions);
+
+    req.user = user;
+    next(); // ✅ ดำเนินการ request เดิมต่อได้เลย
+  } catch (err) {
+    // refresh token หมดอายุด้วย → force logout
+    res.clearCookie('authToken',     { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'strict', path: '/' });
+    res.clearCookie('refreshToken',  { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'strict', path: '/api/auth/refresh' });
+    return res.status(401).json({ error: 'Session expired', code: 'REFRESH_EXPIRED' });
+  }
+};
 // ─────────────────────────────────────────────
 // requireAdmin — ใช้ต่อจาก authenticateToken
 // ─────────────────────────────────────────────

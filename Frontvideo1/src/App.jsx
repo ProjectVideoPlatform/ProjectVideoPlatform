@@ -1,103 +1,50 @@
-
+// App.jsx
 import React, { Suspense } from 'react';
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import ErrorBoundary from './components/errorBoundary';
 import { Toaster } from 'react-hot-toast';
-import './App.css'
+import './App.css';
 import ProductHomeSection from './components/Video.jsx';
 import Admin from './components/admin.jsx';
 import Auth from './components/Auth.jsx';
 import VideoDetails from './components/VideoDetails.jsx';
-import { AuthProvider } from './AuthProvider';
+import { AuthProvider } from './AuthContext';        // ✅ เปลี่ยนจาก AuthProvider → AuthContext
 import { ProtectedRoute } from './ProtectedRoute';
 import ForYouPage from './components/ForYou';
 import UserProfile from './components/UserProfile.jsx';
-import { NotifProvider } from './NotifContext'; // ✅ import context provider
-import GlobalNotification from './components/GlobalNotification'; // ✅ import global notification component
+import { NotifProvider } from './NotifContext';
+import GlobalNotification from './components/GlobalNotification';
+
+const Fallback = () => <div>กำลังโหลด...</div>;
+
+const wrap = (Component) => (
+  <ErrorBoundary>
+    <Suspense fallback={<Fallback />}>
+      <Component />
+    </Suspense>
+  </ErrorBoundary>
+);
+
 function App() {
   return (
-    <AuthProvider>
-       <NotifProvider> {/* ✅ เพิ่มตรงนี้ */}
-      <Router>
-        <Toaster position="top-center" />
-        <GlobalNotification /> {/* ✅ เพิ่มตรงนี้ */}
-        <Routes>
-          <Route path="/"
-           element={
-            <ProtectedRoute>
-                <ErrorBoundary>
-                  <Suspense fallback={<div>กำลังโหลด...</div>}>
-                     <ProductHomeSection />
-                  </Suspense>
-                </ErrorBoundary>
-              </ProtectedRoute>
-        } />
-          
-          <Route
-            path="/admin"
-            element={
-              <ProtectedRoute>
-                <ErrorBoundary>
-                  <Suspense fallback={<div>กำลังโหลด...</div>}>
-                    <Admin />
-                  </Suspense>
-                </ErrorBoundary>
-              </ProtectedRoute>
-            }
-          />
-          
-          <Route
-            path="/login"
-            element={
-              <ErrorBoundary>
-                <Suspense fallback={<div>กำลังโหลด...</div>}>
-                  <Auth />
-                </Suspense>
-              </ErrorBoundary>
-            }
-          />
- <Route
-            path="/UserProfile"
-            element={
-              <ProtectedRoute>
-                <ErrorBoundary>
-                  <Suspense fallback={<div>กำลังโหลด...</div>}>
-                    <UserProfile />
-                  </Suspense>
-                </ErrorBoundary>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/videoDetails/:id"
-            element={
-              <ProtectedRoute>
-                <ErrorBoundary>
-                  <Suspense fallback={<div>กำลังโหลด...</div>}>
-                    <VideoDetails />
-                  </Suspense>
-                </ErrorBoundary>
-              </ProtectedRoute>
-            }
-          />
-        </Routes>
-        <Routes> {/* เพิ่มเส้นทางสำหรับ ForYouPage */}
-          <Route
-            path="/foryou"   
-            element={
-              <ProtectedRoute>
-                <ErrorBoundary>
-                  <Suspense fallback={<div>กำลังโหลด...</div>}>
-                    <ForYouPage />
-                  </Suspense>
-                </ErrorBoundary>
-              </ProtectedRoute>
-            }
-          />
-         </Routes>
-      </Router>
-      </NotifProvider>
-    </AuthProvider>
-  )
+    <Router>                {/* ✅ Router ต้องอยู่นอกสุด */}
+      <AuthProvider>        {/* ✅ AuthProvider อยู่ใน Router เพื่อให้ useNavigate ทำงานได้ */}
+        <NotifProvider>
+          <Toaster position="top-center" />
+          <GlobalNotification />
+          <Routes>          {/* ✅ Routes อันเดียว */}
+            <Route path="/login"       element={wrap(Auth)} />
+
+            <Route path="/"            element={<ProtectedRoute>{wrap(ProductHomeSection)}</ProtectedRoute>} />
+            <Route path="/admin"       element={<ProtectedRoute>{wrap(Admin)}</ProtectedRoute>} />
+            <Route path="/UserProfile" element={<ProtectedRoute>{wrap(UserProfile)}</ProtectedRoute>} />
+            <Route path="/foryou"      element={<ProtectedRoute>{wrap(ForYouPage)}</ProtectedRoute>} />
+            <Route path="/videoDetails/:id" element={<ProtectedRoute>{wrap(VideoDetails)}</ProtectedRoute>} />
+          </Routes>
+        </NotifProvider>
+      </AuthProvider>
+    </Router>
+  );
 }
-export default App
+
+export default App;

@@ -111,7 +111,35 @@ class RedisClient {
     if (!this.isConnected) await this.connect();
     return this.publisher.lrange(key, start, stop);
   }
+  // ใน redisClient.js — เพิ่มใต้ lRange
 
+async zRange(key, start, stop, options = {}) {
+  if (!this.isConnected) await this.connect();
+  // ioredis: zrange key start stop [WITHSCORES] [REV]
+  if (options.REV && options.withScores) {
+    return this.publisher.zrange(key, start, stop, 'REV', 'WITHSCORES');
+  } else if (options.REV) {
+    return this.publisher.zrange(key, start, stop, 'REV');
+  } else if (options.withScores) {
+    return this.publisher.zrange(key, start, stop, 'WITHSCORES');
+  }
+  return this.publisher.zrange(key, start, stop);
+}
+
+async zAdd(key, score, member) {
+  if (!this.isConnected) await this.connect();
+  return this.publisher.zadd(key, score, member);
+}
+
+async zScore(key, member) {
+  if (!this.isConnected) await this.connect();
+  return this.publisher.zscore(key, member);
+}
+
+async zRevRange(key, start, stop) {
+  if (!this.isConnected) await this.connect();
+  return this.publisher.zrevrange(key, start, stop);
+}
   // ---------- PUB/SUB ----------
 
   async publish(channel, message) {
@@ -125,7 +153,7 @@ class RedisClient {
     this.messageHandlers.set(channel, handler);
     return this.subscriber.subscribe(channel);
   }
-
+ 
   // ---------- PIPELINE / MULTI ----------
 
  pipeline() {
