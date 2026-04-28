@@ -1,13 +1,13 @@
 // workers/trendingWorker.js
 'use strict';
 
-const cron        = require('node-cron');
+const cron           = require('node-cron');
 const { clickhouse } = require('../config/clickhouse');
 const redisClient    = require('../config/redis');
 const logger         = require('../utils/logger');
 
-const REDIS_KEY    = 'global:trending:videos';
-const REDIS_TTL    = 3600;        // 1 ชม.
+const REDIS_KEY      = 'global:trending:videos';
+const REDIS_TTL      = 3600;
 const TRENDING_LIMIT = 50;
 
 async function refreshTrending() {
@@ -24,7 +24,7 @@ async function refreshTrending() {
           AND watch_duration_seconds > 0
         GROUP BY video_id
         ORDER BY completions DESC, unique_viewers DESC
-        LIMIT ${TRENDING_LIMIT}
+        LIMIT 50
       `,
       format: 'JSONEachRow',
     });
@@ -32,19 +32,18 @@ async function refreshTrending() {
     const data     = await resultSet.json();
     const videoIds = data.map(r => r.video_id);
 
-    if (videoIds.length === 0) {
+    if (!videoIds.length) {
       logger.info('[Trending] No data in last 24h, skipping.');
       return;
     }
 
-    // ✅ เช็ค isOpen ก่อน — ป้องกัน connect ซ้ำ
     if (!redisClient.isOpen) {
       await redisClient.connect();
     }
 
     const multi = redisClient.multi();
     multi.del(REDIS_KEY);
-    multi.rPush(REDIS_KEY, videoIds);  // ✅ node-redis v4 ใช้ rPush (camelCase) + array โดยตรง
+    multi.rPush(REDIS_KEY, videoIds);
     multi.expire(REDIS_KEY, REDIS_TTL);
     await multi.exec();
 
@@ -52,6 +51,7 @@ async function refreshTrending() {
 
   } catch (err) {
     logger.error('❌ [Trending] Refresh failed:', err);
+    // ไม่ throw → caller จัดการเอง
   }
 }
 
@@ -61,11 +61,17 @@ async function startWorker() {
       await redisClient.connect();
     }
 
+    // รันทันทีตอนเริ่ม
     await refreshTrending();
 
+    // ✅ ครอบ try/catch ใน cron — crash แล้วรอบต่อไปยังทำงาน
     cron.schedule('*/10 * * * *', async () => {
-      logger.info('[Trending] Scheduled refresh...');
-      await refreshTrending();
+      try {
+        logger.info('[Trending] Scheduled refresh...');
+        await refreshTrending();
+      } catch (err) {
+        logger.error('[Trending] Cron crashed:', err);
+      }
     });
 
     logger.info('🚀 Trending worker ready.');

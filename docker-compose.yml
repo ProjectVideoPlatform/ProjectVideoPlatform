@@ -464,6 +464,23 @@ services:
       - ml-model-cache:/app/model-cache   # ✅ cache model ข้าม restart
     networks:
       - secure-video-network
+  # docker-compose เพิ่ม
+  ml-worker-user-vector:
+    build:
+      context: ./ml-worker/user-vector
+      dockerfile: Dockerfile
+    container_name: secure-video-ml-user-vector
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      - REDIS_HOST=redis
+      - PYTHONUNBUFFERED=1
+    env_file:
+      - ./BackEnd/.env
+    networks:
+      - secure-video-network
   # Kafka UI
   kafka-ui:
     image: provectuslabs/kafka-ui:latest

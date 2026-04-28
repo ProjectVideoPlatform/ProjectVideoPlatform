@@ -1,103 +1,152 @@
 // recommendation.service.js
+'use strict';
+
 const { Pinecone } = require('@pinecone-database/pinecone');
-const redisClient  = require('../config/redis'); 
+const redisClient  = require('../config/redis');
 const Video        = require('../models/Video');
+const WatchHistory = require('../models/WatchHistory');
 
 const pc    = new Pinecone({ apiKey: process.env.PINECONE_API_KEY });
 const index = pc.index('video-catalog');
 
-// ─── 1. Trending fallback (ดึงจาก Redis ตามที่เราคุยกัน) ────────────────────────
+const PINECONE_FETCH_LIMIT = 50;
+const SEED_LIMIT           = 10;
+
+function averageVectors(vectors) {
+  if (!vectors.length) return null;
+  const dim    = vectors[0].length;
+  const result = new Array(dim).fill(0);
+  for (const vec of vectors) {
+    for (let i = 0; i < dim; i++) result[i] += vec[i];
+  }
+  return result.map(v => v / vectors.length);
+}
+
+// ── get user vector (cache first) ────────────────────────
+async function getUserVector(userId) {
+  // 1. ลองดึงจาก Redis cache ก่อน (pre-computed)
+  const cached = await redisClient.get(`user:vector:${userId}`);
+  if (cached) {
+    console.log(`[recommendation] cache hit: user_vector ${userId}`);
+    return JSON.parse(cached);
+  }
+
+  // 2. cache miss → คำนวณ real-time (fallback)
+  console.log(`[recommendation] cache miss: computing real-time ${userId}`);
+  const history = await WatchHistory.find(
+    { userId },
+    { videoId: 1, _id: 0 }
+  )
+    .sort({ watchedAt: -1 })
+    .limit(SEED_LIMIT)
+    .lean();
+
+  if (!history.length) return null;
+
+  const seedIds       = history.map(h => h.videoId);
+  const fetchResponse = await index.fetch(seedIds);
+  const records       = fetchResponse.records ?? {};
+  const vectors       = seedIds.map(id => records[id]?.values).filter(Boolean);
+
+  if (!vectors.length) return null;
+
+  const userVector = averageVectors(vectors);
+
+  // เก็บ cache ไว้ 2 ชั่วโมง
+  await redisClient.set(
+    `user:vector:${userId}`,
+    JSON.stringify(userVector),
+    { EX: 60 * 60 * 2 }
+  );
+
+  return userVector;
+}
+
+// ─── Trending ─────────────────────────────────────────────
 async function getTrendingVideos(limit = 12) {
   try {
     const trendingIds = await redisClient.lRange('global:trending:videos', 0, limit - 1);
-    
-    if (!trendingIds || trendingIds.length === 0) {
-      // Fallback ถ้า Redis พังหรือ Cronjob ยังไม่ทำงาน
+
+    if (!trendingIds?.length) {
       return Video.find({ uploadStatus: 'completed' })
-        .sort({ createdAt: -1 }) 
+        .sort({ createdAt: -1 })
         .limit(limit)
         .lean();
     }
 
     const videos = await Video.find({
-      _id: { $in: trendingIds },
-      uploadStatus: 'completed'
+      id: { $in: trendingIds }, uploadStatus: 'completed',
     }).lean();
 
-    const orderMap = Object.fromEntries(trendingIds.map((id, i) => [id.toString(), i]));
-    return videos.sort((a, b) => (orderMap[a._id.toString()] ?? 99) - (orderMap[b._id.toString()] ?? 99));
+    const orderMap = Object.fromEntries(trendingIds.map((id, i) => [id, i]));
+    return videos.sort((a, b) => (orderMap[a.id] ?? 99) - (orderMap[b.id] ?? 99));
 
-  } catch (error) {
-    console.error('[recommendation] trending error:', error);
+  } catch (err) {
+    console.error('[recommendation] trending error:', err);
     return [];
   }
 }
 
-// ─── 2. Personalized recommendations (🔥 ใช้ Video Vector ล้วนๆ) ────────────────
+// ─── Personalized ─────────────────────────────────────────
 async function getRecommendedVideos(userId, limit = 12) {
   try {
-    // 1. ดึงประวัติที่เคยดูจาก Redis เพื่อหา "คลิปล่าสุด" และทำ post-filter
-    const watchedRaw = await redisClient.lRange(`user:history:${userId}`, 0, -1);
-    const watchedSet = new Set(watchedRaw);
+    // 1. watched set สำหรับ filter (Redis + MongoDB)
+    const [watchedIds, fullHistory] = await Promise.all([
+      redisClient.zRange(`user:watched:${userId}`, 0, -1, { REV: true }),
+      WatchHistory.find({ userId }, { videoId: 1, _id: 0 }).lean(),
+    ]);
 
-    // ❄️ ถ้ายูสเซอร์ใหม่เอี่ยม ไม่มีประวัติเลย (Cold Start) ส่ง Trending ไปเลย
-    if (watchedRaw.length === 0) {
-      return { videos: await getTrendingVideos(limit), source: 'trending (cold start)' };
+    const watchedSet = new Set([
+      ...watchedIds,
+      ...fullHistory.map(h => h.videoId),
+    ]);
+
+    if (!watchedSet.size) {
+      return { videos: await getTrendingVideos(limit), source: 'trending_cold_start' };
     }
 
-    // 🎯 2. ใช้ "คลิปล่าสุด" เป็นตัวตั้งต้น (Seed Video)
-    // สมมติว่า lpush เข้ามา ตัวที่ 0 คือล่าสุด
-    const seedVideoId = watchedRaw[0]; 
+    // 2. ดึง user vector (cache → real-time fallback)
+    const userVector = await getUserVector(userId);
 
-    // 3. Similarity search — ยิงหา Pinecone ด้วย ID วิดีโอได้เลย! (ไม่ต้องส่ง Vector)
-    // Pinecone จะไปหา Vector ของ seedVideoId ในระบบมันเอง แล้วหาตัวที่คล้ายมาให้
+    if (!userVector) {
+      return { videos: await getTrendingVideos(limit), source: 'trending_no_vector' };
+    }
+
+    // 3. query Pinecone ด้วย user vector
+    const topK = Math.min(limit + watchedSet.size, PINECONE_FETCH_LIMIT);
     const queryResponse = await index.query({
-      id:              seedVideoId, 
-      topK:            limit + watchedSet.size, // ดึงเผื่อตัวที่เคยดูแล้ว
+      vector:          userVector,
+      topK,
       includeMetadata: true,
     });
 
-    // ถ้าหาวิดีโอตั้งต้นใน Pinecone ไม่เจอ (เช่นเพิ่งอัปโหลด Vector ยังไม่เข้า) หรือไม่มีคลิปคล้าย
-    if (!queryResponse.matches || queryResponse.matches.length === 0) {
-      return { videos: await getTrendingVideos(limit), source: 'trending (pinecone fallback)' };
+    if (!queryResponse.matches?.length) {
+      return { videos: await getTrendingVideos(limit), source: 'trending_no_matches' };
     }
 
-    // 4. กรองวิดีโอที่เคยดูแล้วออก
+    // 4. กรองที่เคยดูแล้วออก
     const recommendedIds = [];
     for (const match of queryResponse.matches) {
-      // Pinecone จะคืนตัวมันเอง (seedVideoId) กลับมาด้วย เราต้องกรองออก
-      const videoId = match.id;
-      if (!watchedSet.has(videoId)) {
-        recommendedIds.push(videoId);
-      }
-      if (recommendedIds.length === limit) break; // ได้ครบแล้วหยุด
+      if (!watchedSet.has(match.id)) recommendedIds.push(match.id);
+      if (recommendedIds.length >= limit) break;
     }
 
-    // ถ้ากรองไปกรองมา ไม่เหลือคลิปใหม่เลย
     if (!recommendedIds.length) {
-      return { videos: await getTrendingVideos(limit), source: 'trending (all watched)' };
+      return { videos: await getTrendingVideos(limit), source: 'trending_all_watched' };
     }
 
-    // 5. ดึงรายละเอียดจาก MongoDB ด้วย IDs ที่ผ่านการคัดกรองแล้ว
     const videos = await Video.find({
-      _id:          { $in: recommendedIds },
-      uploadStatus: 'completed',
+      id: { $in: recommendedIds }, uploadStatus: 'completed',
     }).lean();
 
-    // 6. เรียงตาม similarity score จาก Pinecone
-    const orderMap = Object.fromEntries(
-      recommendedIds.map((id, i) => [id.toString(), i])
-    );
-    videos.sort(
-      (a, b) => (orderMap[a._id.toString()] ?? 99) - (orderMap[b._id.toString()] ?? 99)
-    );
+    const orderMap = Object.fromEntries(recommendedIds.map((id, i) => [id, i]));
+    videos.sort((a, b) => (orderMap[a.id] ?? 99) - (orderMap[b.id] ?? 99));
 
     return { videos, source: 'personalized' };
 
   } catch (err) {
     console.error('[recommendation] error:', err);
-    // Error ปุ๊บ ส่ง Trending กลับไปทันที ระบบไม่ล่ม
-    return { videos: await getTrendingVideos(limit), source: 'trending (error fallback)' };
+    return { videos: await getTrendingVideos(limit), source: 'trending_error' };
   }
 }
 
