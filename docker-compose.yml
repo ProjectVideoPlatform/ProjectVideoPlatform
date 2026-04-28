@@ -421,11 +421,11 @@ services:
       - secure-video-network
 
   # ML Worker
-  ml-worker-kafka:
+  ml-worker-history:
     build:
       context: ./ml-worker/history
       dockerfile: Dockerfile
-    container_name: secure-video-ml-worker-kafka
+    container_name: secure-video-ml-worker-history
     restart: unless-stopped
     depends_on:
       kafka:

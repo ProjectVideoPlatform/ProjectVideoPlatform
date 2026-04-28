@@ -268,6 +268,7 @@ const VideoPlayer = ({ manifestUrl, onClose, videoId, videoCategory }) => {
     let cancelled = false;
 
     fetchVideoProgress(videoId).then((result) => {
+       fetchPendingRef.current = false; // ← unblock ตรงนี้
       if (cancelled || !result) return;
       if (!result.owned) { isOwnedRef.current = false; return; }
 
@@ -362,7 +363,10 @@ const VideoPlayer = ({ manifestUrl, onClose, videoId, videoCategory }) => {
         log('play IGNORED — restoring progress');
         return;
       }
-
+if (fetchPendingRef.current) {
+  log('play IGNORED — fetch still pending');
+  return;
+}
       // FIX 3: sync lastVideoTimeRef (หลัง restore check)
       lastVideoTimeRef.current = ct;
 
@@ -489,7 +493,6 @@ videoAnalytics.trackVideoEvent(makePayload({
   seek_to_seconds:      Math.round(dest),          // ✅ ตรงกับ column ใหม่
   current_time_seconds: Math.round(dest),
 }));
-       console.log('🔍 seek payload before track:', JSON.stringify(payload));  // ← เพิ่มตรงนี้
       }
 
       if (isRestoringProgressRef.current) {
@@ -531,7 +534,7 @@ videoAnalytics.trackVideoEvent(makePayload({
       // --------------------------------------------------------
 
       lastVideoTimeRef.current = ct;
-
+if (fetchPendingRef.current) return; // ← เพิ่มตรงนี้
       if (chunkStartVideoTime.current === null) {
         log('timeupdate — no active chunk, starting', { ct: ct.toFixed(2) });
         startChunk(ct);

@@ -11,7 +11,7 @@ HISTORY_MAX    = 50
 REDIS_HOST     = os.environ.get('REDIS_HOST', 'redis')
 KAFKA_BROKER   = os.environ.get('KAFKA_BROKERS', 'kafka:9092')
 REDIS_PASSWORD = os.environ.get('REDIS_PASSWORD')
-MONGO_URI      = os.environ.get('MONGO_URI', 'mongodb://mongodb:27017/app_db')
+MONGO_URI      = os.environ.get('MONGO_URI')
 TTL_SECONDS    = 60 * 60 * 24 * 30
 
 # ── Redis ─────────────────────────────────────────────────

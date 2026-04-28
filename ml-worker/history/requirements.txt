@@ -1,3 +1,4 @@
 # requirements-kafka.txt
 confluent-kafka==2.3.0
 redis==5.0.1
+pymongo==4.6.1
