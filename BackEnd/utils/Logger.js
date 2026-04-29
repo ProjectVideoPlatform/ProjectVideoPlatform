@@ -53,13 +53,13 @@ const logger = winston.createLogger({
 });
 
 // ถ้าไม่ใช่ production ให้ log ไป console ด้วย
-if (process.env.NODE_ENV !== 'production') {
+// if (process.env.NODE_ENV !== 'production') {
   logger.add(
     new winston.transports.Console({
       format: consoleFormat,
     })
   );
-}
+// }
 
 // Morgan integration สำหรับ HTTP logs
 logger.stream = {

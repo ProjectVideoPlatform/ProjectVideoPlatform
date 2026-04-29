@@ -98,7 +98,6 @@ def process_message(ch, method, properties, body):
                 },
                
             ],
-              namespace="__default__"  # ✅ true default — fetch/query ไม่ต้องระบุ namespace
         )
         print(f"✅ Successfully indexed Video: {video_id}")
 
