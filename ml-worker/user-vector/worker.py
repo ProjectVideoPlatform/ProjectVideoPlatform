@@ -21,7 +21,7 @@ PINECONE_KEY    = os.environ.get('PINECONE_API_KEY')
 SEED_LIMIT       = 10
 USER_VECTOR_TTL  = 60 * 60 * 2
 BATCH_SIZE       = 100
-REFRESH_INTERVAL = 60 
+REFRESH_INTERVAL = 60 * 10 
 
 if not PINECONE_KEY:
     raise ValueError("PINECONE_API_KEY is required")
