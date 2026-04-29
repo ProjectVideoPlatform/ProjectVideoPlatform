@@ -122,7 +122,7 @@ def compute_user_vector(user_id: str) -> list | None:
         seed_ids = [h['videoId'] for h in history]
         print(f"🌱 seed_ids={seed_ids}")
 
-        fetch_response = index.fetch(ids=seed_ids, namespace="__default__")
+        fetch_response = index.fetch(ids=seed_ids)
         records = fetch_response.vectors or {}
         print(f"📦 Pinecone fetched={len(records)} records out of {len(seed_ids)} requested")
 
