@@ -21,7 +21,7 @@ PINECONE_KEY    = os.environ.get('PINECONE_API_KEY')
 SEED_LIMIT       = 10
 USER_VECTOR_TTL  = 60 * 60 * 2
 BATCH_SIZE       = 100
-REFRESH_INTERVAL = 60 * 60
+REFRESH_INTERVAL = 60 
 
 if not PINECONE_KEY:
     raise ValueError("PINECONE_API_KEY is required")
@@ -113,14 +113,23 @@ def compute_user_vector(user_id: str) -> list | None:
             .max_time_ms(5000)
         )
 
+        print(f"🔍 user={user_id} | history={len(history)} docs | collection={state.history_col.full_name}")
+
         if not history:
+            print(f"⚠️ No history found for user={user_id}")
             return None
 
         seed_ids = [h['videoId'] for h in history]
+        print(f"🌱 seed_ids={seed_ids}")
 
-        fetch_response = index.fetch(seed_ids)
-        # ✅ รองรับทั้ง object และ dict
+        fetch_response = index.fetch(seed_ids, namespace="_default_")
         records = getattr(fetch_response, 'records', None) or {}
+        print(f"📦 Pinecone fetched={len(records)} records out of {len(seed_ids)} requested")
+
+        # ✅ log แต่ละ id ว่าเจอใน Pinecone ไหม
+        for vid in seed_ids:
+            found = vid in records
+            print(f"   {'✅' if found else '❌'} videoId={vid} in Pinecone: {found}")
 
         vectors = [
             records[vid].values
@@ -129,12 +138,17 @@ def compute_user_vector(user_id: str) -> list | None:
         ]
 
         if not vectors:
+            print(f"⚠️ No vectors found in Pinecone for user={user_id}")
             return None
 
-        return np.mean(vectors, axis=0).tolist()
+        result = np.mean(vectors, axis=0).tolist()
+        print(f"✅ user_vector computed | dims={len(result)} | user={user_id}")
+        return result
 
     except Exception as e:
         print(f"❌ compute_user_vector failed for {user_id}: {e}")
+        import traceback
+        traceback.print_exc()
         return None
 
 def refresh_active_users():

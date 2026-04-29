@@ -12,6 +12,7 @@ REDIS_HOST     = os.environ.get('REDIS_HOST', 'redis')
 KAFKA_BROKER   = os.environ.get('KAFKA_BROKERS', 'kafka:9092')
 REDIS_PASSWORD = os.environ.get('REDIS_PASSWORD')
 MONGO_URI      = os.environ.get('MONGO_URI')
+MONGO_REPLICA  = os.environ.get('MONGO_REPLICA_SET', 'rs0')
 TTL_SECONDS    = 60 * 60 * 24 * 30
 
 # ── Redis ─────────────────────────────────────────────────
@@ -21,10 +22,31 @@ r = redis.Redis(
 )
 
 # ── MongoDB ───────────────────────────────────────────────
-mongo      = pymongo.MongoClient(MONGO_URI)
-db         = mongo['app_db']
-history_col = db['watchhistories']
+mongo = pymongo.MongoClient(
+    MONGO_URI,
+    replicaSet=MONGO_REPLICA,
+    w='majority',
+    readPreference='primaryPreferred',
+    serverSelectionTimeoutMS=10000,
+    connectTimeoutMS=5000,
+)
 
+# ✅ เช็คการเชื่อมต่อตอน startup
+try:
+    mongo.admin.command('ping')
+    print(f"✅ MongoDB connected | replica={MONGO_REPLICA}")
+
+except Exception as e:
+    print(f"❌ MongoDB connection failed: {e}")
+    raise
+
+db          = mongo['secure-video']
+history_col = db['watchhistories']
+print(f"📦 Collection: {history_col.full_name}")
+    # เพิ่มหลัง mongo connect
+print(f"📋 Databases: {mongo.list_database_names()}")
+print(f"📋 Collections in app_db: {db.list_collection_names()}")
+print(f"📋 Doc count: {history_col.count_documents({})}")
 # index ป้องกันซ้ำ + query เร็ว
 history_col.create_index(
     [('userId', 1), ('videoId', 1)],
@@ -71,14 +93,16 @@ def handle_user_activity(data):
 
     # 2. MongoDB — full history ไม่จำกัด
     try:
-        history_col.update_one(
+        result = history_col.update_one(
             { 'userId': user_id, 'videoId': video_id },
-            { '$set': { 'watchedAt': time.time() } },
-            upsert=True   # ✅ ไม่ซ้ำ — update watchedAt ถ้ามีอยู่แล้ว
+            { '$set': { 'watchedAt': now } },  # ✅ ใช้ now ตัวเดียวกัน
+            upsert=True
         )
+        print(f"✅ MongoDB: matched={result.matched_count} modified={result.modified_count} upserted={result.upserted_id}")
     except Exception as e:
         print(f"⚠️ MongoDB write failed: {e}")
-        # ไม่ raise — Redis สำเร็จแล้ว MongoDB fail ไม่ทำให้ระบบพัง
+        import traceback
+        traceback.print_exc()
 
     print(f"📖 History: user={user_id}, video={video_id}")
 

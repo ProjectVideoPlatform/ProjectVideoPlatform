@@ -566,7 +566,7 @@ const VideoStreamingApp = () => {
     try {
       const r = await api.playVideo(video.id);
       currentUserIdRef.current = r.userId || null;
-      setPlayer({ manifestUrl: r.manifestUrl, videoId: video._id, videoCategory: video.tags });
+      setPlayer({ manifestUrl: r.manifestUrl, videoId: video.id, videoCategory: video.tags });
     } catch (e) { alert('Playback failed: ' + e.message); }
     finally { setActionLoading(null); }
   };

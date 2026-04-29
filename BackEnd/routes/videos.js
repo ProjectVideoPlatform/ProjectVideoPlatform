@@ -468,14 +468,13 @@ router.post('/:id/play', authenticateToken, async (req, res) => {
 
     // Set cookies in response
     setCookiesInResponse(res, cookies);
-     console.log(cookies);
+
     res.json({
       success: true,
       manifestUrl: `https://${config.cloudFrontDomain}/videos/${video.id}/original.m3u8`,
       expiresIn,
-          videoId: video._id.toString(), // ← เพิ่มบรรทัดนี้
-      message: 'Playback access granted',
-      cookies: cookies
+      videoId: video._id.toString(), // ← เพิ่มบรรทัดนี้
+      message: 'Playback access granted'
     });
 
   } catch (error) {

@@ -433,9 +433,11 @@ services:
   # Promtail
   promtail:
     image: grafana/promtail:latest
+    container_name: promtail
     volumes:
-      - ./logs:/var/log/app_logs
       - ./promtail-config.yaml:/etc/promtail/config.yaml
+      - /var/run/docker.sock:/var/run/docker.sock  # ✅ ต้องมีตรงนี้
+      - /var/log/app_logs:/var/log/app_logs
     command: -config.file=/etc/promtail/config.yaml
     networks:
       - secure-video-network

@@ -1,29 +1,40 @@
 'use strict';
 
-const http        = require('http');
-const cron        = require('node-cron');
+const http           = require('http');
 const { clickhouse } = require('../config/clickhouse');
-const redisClient = require('../config/redis');
-const logger      = require('../utils/logger');
+const redisClient    = require('../config/redis');
+const logger         = require('../utils/logger');
 
 const REDIS_KEY      = 'global:trending:videos';
 const REDIS_TTL      = 3600;
 const TRENDING_LIMIT = 50;
 
-// ─── State ────────────────────────────────────────────────────────────────────
-//
-//  health endpoint เช็คสิ่งที่ trendingWorker ใช้จริง:
-//    - lastRunSuccess: cron รอบล่าสุด success ไหม
-//    - lastRunAt:      รอบล่าสุดรันเมื่อไหร่ (ถ้าเกิน 15 นาที = stale = unhealthy)
-//    - isShuttingDown: กำลัง shutdown อยู่ไหม
-//
 let lastRunSuccess = false;
 let lastRunAt      = null;
 let isShuttingDown = false;
+let isRunning      = false;
+let totalRuns      = 0;      // ✅ นับรอบทั้งหมด
+let totalSuccess   = 0;      // ✅ นับรอบที่สำเร็จ
+let totalFailed    = 0;      // ✅ นับรอบที่ fail
 
 // ─── Core logic ───────────────────────────────────────────────────────────────
 async function refreshTrending() {
+  if (isRunning) {
+    logger.warn('[Trending] Previous run still in progress, skipping...');
+    return;
+  }
+
+  isRunning = true;
+  totalRuns++;
+  const runId     = totalRuns;
+  const startTime = Date.now();
+
+  logger.info(`[Trending] ▶ Run #${runId} starting...`);
+
   try {
+    // ── ClickHouse query ──────────────────────────────────
+    logger.info(`[Trending] #${runId} Querying ClickHouse (limit=${TRENDING_LIMIT}, window=24h)...`);
+
     const resultSet = await clickhouse.query({
       query: `
         SELECT
@@ -39,80 +50,114 @@ async function refreshTrending() {
         LIMIT ${TRENDING_LIMIT}
       `,
       format: 'JSONEachRow',
+      query_params: {},
+      clickhouse_settings: { max_execution_time: 30 },
     });
 
     const data     = await resultSet.json();
     const videoIds = data.map(r => r.video_id);
+    const queryMs  = Date.now() - startTime;
+
+    logger.info(`[Trending] #${runId} ClickHouse done in ${queryMs}ms | rows=${data.length} | videoIds=${videoIds.length}`);
+
+    // log top 5 เพื่อ debug
+    data.slice(0, 5).forEach((row, i) => {
+      logger.info(`[Trending] #${runId}   top${i + 1}: video=${row.video_id} plays=${row.plays} completions=${row.completions} viewers=${row.unique_viewers}`);
+    });
 
     if (!videoIds.length) {
-      logger.info('[Trending] No data in last 24h, skipping Redis update.');
-      // ไม่ update Redis แต่ยัง mark success เพราะ query ทำงานปกติ
+      logger.warn(`[Trending] #${runId} No data in last 24h — Redis not updated`);
       lastRunSuccess = true;
       lastRunAt      = Date.now();
+      totalSuccess++;
       return;
     }
 
+    // ── Redis update ──────────────────────────────────────
+    logger.info(`[Trending] #${runId} Updating Redis key="${REDIS_KEY}" TTL=${REDIS_TTL}s...`);
+
     if (!redisClient.isOpen) {
+      logger.warn(`[Trending] #${runId} Redis not open — reconnecting...`);
       await redisClient.connect();
+      logger.info(`[Trending] #${runId} Redis reconnected`);
     }
 
-    // atomic: del + push + expire ใน transaction เดียว
     const multi = redisClient.multi();
     multi.del(REDIS_KEY);
     multi.rPush(REDIS_KEY, videoIds);
     multi.expire(REDIS_KEY, REDIS_TTL);
-    await multi.exec();
+    const multiResult = await multi.exec();
+
+    logger.info(`[Trending] #${runId} Redis multi result: ${JSON.stringify(multiResult)}`);
+
+    // verify ว่าเซฟจริง
+    const savedCount = await redisClient.lLen(REDIS_KEY);
+    logger.info(`[Trending] #${runId} Redis verify: lLen=${savedCount} (expected ${videoIds.length})`);
 
     lastRunSuccess = true;
     lastRunAt      = Date.now();
+    totalSuccess++;
 
-    logger.info(`✅ [Trending] Refreshed ${videoIds.length} videos`);
+    const totalMs = Date.now() - startTime;
+    logger.info(`[Trending] #${runId} ✅ Done in ${totalMs}ms | success=${totalSuccess} failed=${totalFailed} total=${totalRuns}`);
+
   } catch (err) {
+    totalFailed++;
     lastRunSuccess = false;
-    lastRunAt      = Date.now(); // ✅ update เวลาแม้ fail — เพื่อให้รู้ว่า cron ยังรันอยู่
-    logger.error('❌ [Trending] Refresh failed:', err);
-    // ไม่ throw → cron รอบต่อไปยังทำงาน
+    lastRunAt      = Date.now();
+
+    const totalMs = Date.now() - startTime;
+    logger.error(`[Trending] #${runId} ❌ Failed after ${totalMs}ms | success=${totalSuccess} failed=${totalFailed} total=${totalRuns}`);
+    logger.error(`[Trending] #${runId} Error:`, err);
+  } finally {
+    isRunning = false;
   }
 }
 
 // ─── Start ────────────────────────────────────────────────────────────────────
 async function startWorker() {
   try {
+    logger.info('[Trending] Starting worker...');
+    logger.info(`[Trending] Config: REDIS_KEY=${REDIS_KEY} TTL=${REDIS_TTL}s LIMIT=${TRENDING_LIMIT}`);
+
     if (!redisClient.isOpen) {
+      logger.info('[Trending] Connecting to Redis...');
       await redisClient.connect();
+      logger.info('[Trending] Redis connected');
     }
 
-    // รันทันทีตอนเริ่ม
+    // ping ClickHouse ก่อนเริ่ม
+    try {
+      await clickhouse.query({ query: 'SELECT 1', format: 'JSONEachRow' });
+      logger.info('[Trending] ClickHouse connected ✅');
+    } catch (err) {
+      logger.error('[Trending] ClickHouse connection failed:', err.message);
+      throw err;
+    }
+
     await refreshTrending();
 
-    // cron ทุก 10 นาที — ครอบ try/catch แยกต่างหาก
-    // crash ใน cron 1 รอบ ไม่ kill process ทั้งหมด
-    cron.schedule('*/10 * * * *', async () => {
+    const INTERVAL_MS = 10 * 60 * 1000;
+    setInterval(async () => {
+      logger.info('[Trending] ⏰ Interval triggered');
       try {
-        logger.info('[Trending] Scheduled refresh...');
         await refreshTrending();
       } catch (err) {
-        // refreshTrending ไม่ throw แต่ถ้า cron framework throw เอง catch ไว้ที่นี่
-        logger.error('[Trending] Cron crashed unexpectedly:', err);
+        logger.error('[Trending] Interval crashed unexpectedly:', err);
         lastRunSuccess = false;
+        isRunning      = false;
       }
-    });
+    }, INTERVAL_MS);
 
-    logger.info('🚀 Trending worker ready.');
+    logger.info(`[Trending] 🚀 Worker ready | interval=${INTERVAL_MS / 1000 / 60}min`);
   } catch (err) {
-    logger.error('❌ Failed to start trending worker:', err);
+    logger.error('[Trending] ❌ Failed to start:', err);
     process.exit(1);
   }
 }
 
 // ─── Health endpoint ──────────────────────────────────────────────────────────
-//
-//  unhealthy เมื่อ:
-//    1. กำลัง shutdown
-//    2. รันครั้งล่าสุดแล้ว fail
-//    3. ไม่ได้รันมานานกว่า 15 นาที (cron หยุดทำงานโดยไม่รู้ตัว)
-//
-const STALE_THRESHOLD_MS = 15 * 60 * 1000; // 15 นาที
+const STALE_THRESHOLD_MS = 15 * 60 * 1000;
 
 http.createServer((req, res) => {
   if (req.url !== '/health') {
@@ -131,7 +176,9 @@ http.createServer((req, res) => {
     lastRunAt:     lastRunAt ? new Date(lastRunAt).toISOString() : null,
     lastRunSuccess,
     isStale,
+    isRunning,
     isShuttingDown,
+    stats: { totalRuns, totalSuccess, totalFailed }, // ✅ stats สะสม
   }));
 }).listen(3099, () => {
   logger.info('[Trending] Health endpoint listening on :3099');
@@ -141,9 +188,10 @@ http.createServer((req, res) => {
 async function shutdown() {
   if (isShuttingDown) return;
   isShuttingDown = true;
-  logger.info('[Trending] Shutting down gracefully...');
+  logger.info(`[Trending] Shutting down | stats: runs=${totalRuns} success=${totalSuccess} failed=${totalFailed}`);
   try {
     if (redisClient.isOpen) await redisClient.quit();
+    logger.info('[Trending] Redis disconnected');
     process.exit(0);
   } catch (err) {
     logger.error('[Trending] Shutdown error:', err.message);

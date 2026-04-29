@@ -118,6 +118,7 @@ async function getRecommendedVideos(userId, limit = 12) {
       vector:          userVector,
       topK,
       includeMetadata: true,
+      namespace:  '_default_'  
     });
 
     if (!queryResponse.matches?.length) {
