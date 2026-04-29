@@ -98,6 +98,7 @@ def process_message(ch, method, properties, body):
                 },
                
             ],
+             namespace="__default__"
         )
         print(f"✅ Successfully indexed Video: {video_id}")
 

@@ -1,5 +1,5 @@
-# requirements.txt — embedder
-pika==1.3.2
+# requirements.txt — user-vector worker
 pinecone==5.4.2
-sentence-transformers==2.7.0
-numpy<2.0.0
+redis==5.0.1
+pymongo==4.6.1
+numpy==1.26.4
