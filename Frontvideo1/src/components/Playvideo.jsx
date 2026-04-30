@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import VideoPlayer from "./VideoPlayer";
+import { apiFetch } from '../utils/apiClient';
 
 export default function WatchPage() {
   const { videoId } = useParams(); // <-- รับ videoId จาก URL
@@ -9,11 +10,9 @@ export default function WatchPage() {
   useEffect(() => {
     if (!videoId) return;
 
-    fetch(`/api/videos/${videoId}/play`, {
+    apiFetch(`/videos/${videoId}/play`, {
       method: "POST",
-      credentials: "include", // สำคัญ ถ้า backend ส่ง cookie
     })
-      .then((res) => res.json())
       .then((data) => setVideoData(data))
       .catch(console.error);
   }, [videoId]);

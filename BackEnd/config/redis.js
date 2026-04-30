@@ -112,7 +112,11 @@ class RedisClient {
     return this.publisher.lrange(key, start, stop);
   }
   // ใน redisClient.js — เพิ่มใต้ lRange
-
+// เพิ่มใต้ lRange
+async lLen(key) {
+  if (!this.isConnected) await this.connect();
+  return this.publisher.llen(key);
+}
 async zRange(key, start, stop, options = {}) {
   if (!this.isConnected) await this.connect();
   // ioredis: zrange key start stop [WITHSCORES] [REV]

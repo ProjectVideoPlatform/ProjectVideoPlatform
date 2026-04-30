@@ -34,7 +34,6 @@ function App() {
           <GlobalNotification />
           <Routes>          {/* ✅ Routes อันเดียว */}
             <Route path="/login"       element={wrap(Auth)} />
-
             <Route path="/"            element={<ProtectedRoute>{wrap(ProductHomeSection)}</ProtectedRoute>} />
             <Route path="/admin"       element={<ProtectedRoute>{wrap(Admin)}</ProtectedRoute>} />
             <Route path="/UserProfile" element={<ProtectedRoute>{wrap(UserProfile)}</ProtectedRoute>} />

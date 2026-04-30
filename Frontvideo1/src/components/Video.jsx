@@ -8,6 +8,7 @@ import {
 import { useNavigate } from 'react-router-dom';
 import VideoPlayer from './VideoPlayer';
 import { useNotif } from '../NotifContext';
+import { apiFetch } from '../utils/apiClient';
 
 const API_BASE = '/api';
 
@@ -170,55 +171,42 @@ const styles = `
 `;
 
 /* ─── API ─────────────────────────────────────────────────── */
-// ✅ ลบ Authorization header ทั้งหมด — ใช้แค่ credentials:'include'
-//    browser ส่ง httpOnly cookie ไปอัตโนมัติ
+// ✅ ใช้ apiFetch จาก apiClient.js
 const api = {
   getVideos: (params = {}) => {
     const query = new URLSearchParams(params).toString();
-    return fetch(`${API_BASE}/videos?${query}`, { credentials: 'include' })
-      .then(r => { if (!r.ok) throw new Error('Failed to fetch videos'); return r.json(); });
+    return apiFetch(`/videos?${query}`);
   },
   purchaseVideo: (id) =>
-    fetch(`${API_BASE}/videos/${id}/purchase`, {
+    apiFetch(`/videos/${id}/purchase`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'include',
-    }).then(r => { if (!r.ok) throw new Error('Failed to purchase video'); return r.json(); }),
+    }),
 
   playVideo: (id) =>
-    fetch(`${API_BASE}/videos/${id}/play`, {
+    apiFetch(`/videos/${id}/play`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'include',
-    }).then(r => { if (!r.ok) throw new Error('Failed to get playback URL'); return r.json(); }),
+    }),
 
   getPurchasedVideos: (params = {}) => {
     const query = new URLSearchParams(params).toString();
-    return fetch(`${API_BASE}/videos/purchased/list?${query}`, { credentials: 'include' })
-      .then(r => { if (!r.ok) throw new Error('Failed to fetch purchased videos'); return r.json(); });
+    return apiFetch(`/videos/purchased/list?${query}`);
   },
   initializeUpload: (data) =>
-    fetch(`${API_BASE}/videos/upload/initialize`, {
+    apiFetch(`/videos/upload/initialize`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'include',
       body: JSON.stringify(data),
-    }).then(r => { if (!r.ok) throw new Error('Failed to initialize upload'); return r.json(); }),
+    }),
 
   completeUpload: (id) =>
-    fetch(`${API_BASE}/videos/upload/${id}/complete`, {
+    apiFetch(`/videos/upload/${id}/complete`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'include',
-    }).then(r => { if (!r.ok) throw new Error('Failed to complete upload'); return r.json(); }),
+    }),
 
   failUpload: (id, error) =>
-    fetch(`${API_BASE}/videos/upload/${id}/failed`, {
+    apiFetch(`/videos/upload/${id}/failed`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'include',
       body: JSON.stringify({ error }),
-    }).then(r => { if (!r.ok) throw new Error('Failed to record upload failure'); return r.json(); }),
+    }),
 };
 
 /* ─── Payment Modal ───────────────────────────────────────── */
@@ -231,15 +219,11 @@ const PaymentModal = ({ video, onClose, onSuccess }) => {
   const createQRPayment = async () => {
     setLoading(true); setError(null);
     try {
-      // ✅ ไม่ต้องส่ง Authorization — cookie จัดการให้
-      const res = await fetch('/api/payment/create', {
+      // ✅ ใช้ apiFetch แทน fetch
+      const data = await apiFetch('/payment/create', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
         body: JSON.stringify({ amount: video.price * 100, orderId: `VIDEO-${video.id}-${Date.now()}`, videoId: video.id }),
       });
-      if (!res.ok) throw new Error('Failed to create payment');
-      const data = await res.json();
       setQrImageUrl(data.qrImageUrl);
       setStatus('checking');
       setTimeout(() => {

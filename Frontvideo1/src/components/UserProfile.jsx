@@ -5,11 +5,11 @@ import {
   MapPin, Video, Clock, TrendingUp, Award
 } from 'lucide-react';
 import { useNotif } from '../NotifContext';
-
+import { apiFetch } from '../utils/apiClient';
+import { useAuth } from '../AuthContext';
 const UserProfile = () => {
   const { notifications, videoNotifications, addNotification } = useNotif();
-
-  const apiBaseUrl = '';
+const { logout } = useAuth();
   const [activeTab, setActiveTab] = useState('overview');
 
   // ✅ fix UI: แยก showPassword ให้แต่ละ field — toggle ช่องเดียวไม่กระทบช่องอื่น
@@ -42,64 +42,36 @@ const UserProfile = () => {
     }
   ]);
 
-  // ✅ fix Security: ไม่ส่ง token ผ่าน Authorization header ใน localStorage
-  //    ให้ใช้ httpOnly cookie แทน (credentials: 'include')
-  //    — ฝั่ง backend ต้องตั้ง cookie แบบ httpOnly ด้วย
-  const authHeaders = {
-    'Content-Type': 'application/json'
-    // ไม่ต้องส่ง Authorization header เมื่อใช้ cookie
-  };
-
-  const handleLogout = async () => {
-    try {
-      // ✅ fix Security: logout ผ่าน API เพื่อให้ server ลบ cookie ฝั่ง backend ด้วย
-      await fetch(`${apiBaseUrl}/api/auth/logout`, {
-        method: 'POST',
-        credentials: 'include'
-      });
-    } catch (_) {
-      // ไม่ block ถ้า request ล้มเหลว ให้ redirect ต่อได้เลย
-    }
-
+ const handleLogout = async () => {
     addNotification({
       title: 'ออกจากระบบสำเร็จ',
       message: 'แล้วเจอกันใหม่นะ!',
       type: 'info'
     });
-
-    setTimeout(() => {
-      window.location.href = '/login';
-    }, 1000);
+    await logout(); // ← ใช้ตัวเดียวกับ Navbar และ apiClient
   };
+
 
   const fetchData = useCallback(async () => {
     setPageLoading(true);
 
     try {
-      // ✅ fix Security: ใช้แค่ credentials: 'include' โดยไม่ต้องส่ง header ซ้ำ
+      // ✅ fix Security: ใช้ apiFetch จาก apiClient.js
       const [profileRes, historyRes, statsRes] = await Promise.all([
-        fetch(`${apiBaseUrl}/api/user/profile`,    { credentials: 'include' }),
-        fetch(`${apiBaseUrl}/api/purchase/history`, { credentials: 'include' }),
-        fetch(`${apiBaseUrl}/api/purchase/stats`,   { credentials: 'include' })
+        apiFetch('/user/profile'),
+        apiFetch('/purchase/history'),
+        apiFetch('/purchase/stats')
       ]);
 
-      if (profileRes.ok) {
-        const profileData = await profileRes.json();
-        setUserData(profileData);
+      setUserData(profileRes);
+      
+      // ✅ fix Bug: backend ส่งกลับ { success, data: { purchases, pagination } }
+      //    ไม่ใช่ { videos } — แก้ให้ตรง schema จริง
+      setPurchaseHistory(historyRes.data?.purchases || []);
+      
+      setStats(statsRes);
       }
-
-      if (historyRes.ok) {
-        const historyData = await historyRes.json();
-        // ✅ fix Bug: backend ส่งกลับ { success, data: { purchases, pagination } }
-        //    ไม่ใช่ { videos } — แก้ให้ตรง schema จริง
-        setPurchaseHistory(historyData.data?.purchases || []);
-      }
-
-      if (statsRes.ok) {
-        const statsData = await statsRes.json();
-        setStats(statsData);
-      }
-    } catch (error) {
+     catch (error) {
       console.error('Fetch error:', error);
       addNotification({
         title: 'เกิดข้อผิดพลาด',
@@ -130,16 +102,11 @@ const UserProfile = () => {
 
     setLoading(true);
     try {
-      // ✅ fix Security: ใช้ credentials: 'include' แทน localStorage token
-      const response = await fetch(`${apiBaseUrl}/api/user/change-password`, {
+      // ✅ fix Security: ใช้ apiFetch จาก apiClient.js
+      const data = await apiFetch(`/user/change-password`, {
         method: 'POST',
-        headers: authHeaders,
-        credentials: 'include',
         body: JSON.stringify({ oldPassword: currentPassword, newPassword })
       });
-
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || 'เปลี่ยนรหัสผ่านไม่สำเร็จ');
 
       addNotification({ title: 'สำเร็จ', message: 'เปลี่ยนรหัสผ่านเรียบร้อยแล้ว', type: 'success' });
       setPasswordForm({ currentPassword: '', newPassword: '', confirmPassword: '' });

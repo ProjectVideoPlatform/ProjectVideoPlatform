@@ -2,12 +2,11 @@
 import React, { useState, useEffect, memo, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../AuthContext';
-import videoTracker from './videoTracker';
-import { Loader, Eye, EyeOff, Film, Mail, Lock, User, Shield, ChevronRight,  LogOut, Clapperboard } from 'lucide-react';
+import { Loader, Eye, EyeOff, Film, Mail, Lock, User, Shield, ChevronRight, LogOut, Clapperboard } from 'lucide-react';
+import { apiFetch } from '../utils/apiClient';
+import { useNotif } from '../NotifContext';
 
-const API_BASE_URL = '/api';
-
-/* ─── Styles (unchanged — design system intact) ──────────── */
+/* ─── Styles ──────────────────────────────────────────────── */
 const styles = `
   @import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;1,9..40,300&display=swap');
 
@@ -97,10 +96,6 @@ const styles = `
   .auth-pw-toggle { position: absolute; right: 12px; top: 50%; transform: translateY(-50%); background: none; border: none; color: var(--muted); cursor: pointer; padding: 4px; border-radius: 6px; transition: color .2s; display: flex; align-items: center; }
   .auth-pw-toggle:hover { color: var(--text); }
 
-  .auth-select { width: 100%; padding: 12px 14px 12px 40px; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; color: var(--text); font-family: 'DM Sans', sans-serif; font-size: 14px; outline: none; cursor: pointer; transition: border-color .2s, box-shadow .2s; appearance: none; -webkit-appearance: none; }
-  .auth-select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(232,68,90,.12); }
-  .auth-select option { background: var(--surface); color: var(--text); }
-
   .auth-submit { width: 100%; padding: 14px; border-radius: 14px; background: linear-gradient(135deg, var(--accent), var(--accent2)); color: #fff; font-family: 'DM Sans', sans-serif; font-size: 15px; font-weight: 700; border: none; cursor: pointer; margin-top: 8px; display: flex; align-items: center; justify-content: center; gap: 8px; transition: opacity .2s, transform .2s, box-shadow .2s; box-shadow: 0 6px 24px rgba(232,68,90,.35); letter-spacing: .3px; }
   .auth-submit:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 10px 32px rgba(232,68,90,.5); }
   .auth-submit:active:not(:disabled) { transform: translateY(0); }
@@ -131,27 +126,211 @@ const styles = `
   .auth-nav-btn:hover { border-color: var(--accent); color: var(--accent); background: rgba(232,68,90,.06); }
 `;
 
-/* ─── API helper — ใช้ credentials:'include' ทุก request ───── */
-// ✅ ไม่มี Authorization header เลย — browser ส่ง cookie ให้อัตโนมัติ
-const apiFetch = async (endpoint, options = {}) => {
-  const response = await fetch(`${API_BASE_URL}${endpoint}`, {
-    headers: { 'Content-Type': 'application/json', ...options.headers },
-    credentials: 'include', // ✅ ส่ง httpOnly cookie ไปกับทุก request
-    ...options,
-  });
-  let data = {};
-  try { data = await response.json(); } catch (e) {
-    if (!response.ok) throw new Error(`Server error: ${response.status}`);
-    return {};
-  }
-  if (!response.ok) throw new Error(data.message || data.error || `Error ${response.status}`);
-  return data;
-};
+/* ─── Sub-components (defined outside to prevent re-creation on render) ─────── */
+
+const AlertBox = memo(({ alert }) => {
+  if (!alert) return null;
+  return (
+    <div className={`auth-alert auth-alert-${alert.type}`}>
+      <div className="auth-alert-dot" />
+      <span>{alert.message}</span>
+    </div>
+  );
+});
+
+const LoginForm = memo(({ loginForm, setLoginForm, showPw, setShowPw, alerts, loading, currentlyFocusedField, setFocused, onLogin, onSwitchToRegister }) => {
+  const emailRef   = useRef(null);
+  const pwRef      = useRef(null);
+  const hasFocused = useRef(false);
+
+  useEffect(() => {
+    if (hasFocused.current) return;
+    const ref = currentlyFocusedField === 'email' ? emailRef : pwRef;
+    if (ref.current) {
+      ref.current.focus();
+      const l = ref.current.value.length;
+      ref.current.setSelectionRange(l, l);
+    }
+    hasFocused.current = true;
+  }, []);
+
+  const handleKeyDown = useCallback((e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      if (currentlyFocusedField === 'email') setFocused('password');
+      else onLogin();
+    } else if (e.key === 'Tab') {
+      e.preventDefault();
+      setFocused(f => f === 'email' ? 'password' : 'email');
+    }
+  }, [currentlyFocusedField, setFocused, onLogin]);
+
+  return (
+    <>
+      <AlertBox alert={alerts.login} />
+      <div className="auth-field">
+        <label className="auth-label"><Mail size={12} />Email</label>
+        <div className="auth-input-wrap">
+          <Mail className="auth-input-icon" />
+          <input
+            ref={emailRef}
+            type="text"
+            value={loginForm.email}
+            onChange={e => setLoginForm(p => ({ ...p, email: e.target.value }))}
+            onKeyDown={handleKeyDown}
+            onFocus={() => setFocused('email')}
+            className={`auth-input ${currentlyFocusedField === 'email' ? 'focused' : ''}`}
+            placeholder="you@example.com"
+            autoComplete="email"
+          />
+        </div>
+      </div>
+      <div className="auth-field">
+        <label className="auth-label"><Lock size={12} />Password</label>
+        <div className="auth-input-wrap">
+          <Lock className="auth-input-icon" />
+          <input
+            ref={pwRef}
+            type={showPw.login ? 'text' : 'password'}
+            value={loginForm.password}
+            onChange={e => setLoginForm(p => ({ ...p, password: e.target.value }))}
+            onKeyDown={handleKeyDown}
+            onFocus={() => setFocused('password')}
+            className={`auth-input ${currentlyFocusedField === 'password' ? 'focused' : ''}`}
+            placeholder="••••••••"
+            autoComplete="current-password"
+            style={{ paddingRight: 42 }}
+          />
+          <button className="auth-pw-toggle" type="button" onClick={() => setShowPw(p => ({ ...p, login: !p.login }))}>
+            {showPw.login ? <EyeOff size={16} /> : <Eye size={16} />}
+          </button>
+        </div>
+      </div>
+      <button className="auth-submit" onClick={onLogin} disabled={loading.login}>
+        {loading.login
+          ? <Loader size={17} style={{ animation: 'spin 1s linear infinite' }} />
+          : <><Film size={16} />เข้าสู่ระบบ</>}
+      </button>
+      <div className="auth-divider">หรือ</div>
+      <div className="auth-switch">
+        ยังไม่มีบัญชี?{' '}
+        <button className="auth-link" onClick={onSwitchToRegister}>สมัครสมาชิก →</button>
+      </div>
+    </>
+  );
+});
+
+const RegisterForm = memo(({ registerForm, setRegisterForm, showPw, setShowPw, alerts, loading, currentlyFocusedField, setFocused, onRegister, onSwitchToLogin }) => {
+  const emailRef = useRef(null);
+  const pwRef    = useRef(null);
+
+  useEffect(() => {
+    const map = { email: emailRef, password: pwRef };
+    const ref = map[currentlyFocusedField];
+    if (ref?.current) ref.current.focus();
+  }, []);
+
+  const handleKeyDown = useCallback((e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      if (currentlyFocusedField === 'email') setFocused('password');
+      else onRegister();
+    } else if (e.key === 'Tab') {
+      e.preventDefault();
+      setFocused(f => f === 'email' ? 'password' : 'email');
+    }
+  }, [currentlyFocusedField, setFocused, onRegister]);
+
+  return (
+    <>
+      <AlertBox alert={alerts.register} />
+      <div className="auth-field">
+        <label className="auth-label"><Mail size={12} />Email</label>
+        <div className="auth-input-wrap">
+          <Mail className="auth-input-icon" />
+          <input
+            ref={emailRef}
+            type="text"
+            value={registerForm.email}
+            onChange={e => setRegisterForm(p => ({ ...p, email: e.target.value }))}
+            onKeyDown={handleKeyDown}
+            onFocus={() => setFocused('email')}
+            className={`auth-input ${currentlyFocusedField === 'email' ? 'focused' : ''}`}
+            placeholder="you@example.com"
+            autoComplete="email"
+          />
+        </div>
+      </div>
+      <div className="auth-field">
+        <label className="auth-label"><Lock size={12} />Password</label>
+        <div className="auth-input-wrap">
+          <Lock className="auth-input-icon" />
+          <input
+            ref={pwRef}
+            type={showPw.register ? 'text' : 'password'}
+            value={registerForm.password}
+            onChange={e => setRegisterForm(p => ({ ...p, password: e.target.value }))}
+            onKeyDown={handleKeyDown}
+            onFocus={() => setFocused('password')}
+            className={`auth-input ${currentlyFocusedField === 'password' ? 'focused' : ''}`}
+            placeholder="••••••••"
+            autoComplete="new-password"
+            style={{ paddingRight: 42 }}
+          />
+          <button className="auth-pw-toggle" type="button" onClick={() => setShowPw(p => ({ ...p, register: !p.register }))}>
+            {showPw.register ? <EyeOff size={16} /> : <Eye size={16} />}
+          </button>
+        </div>
+      </div>
+      <button className="auth-submit" onClick={onRegister} disabled={loading.register}>
+        {loading.register
+          ? <Loader size={17} style={{ animation: 'spin 1s linear infinite' }} />
+          : <><User size={16} />สมัครสมาชิก</>}
+      </button>
+      <div className="auth-divider">หรือ</div>
+      <div className="auth-switch">
+        มีบัญชีแล้ว?{' '}
+        <button className="auth-link" onClick={onSwitchToLogin}>เข้าสู่ระบบ →</button>
+      </div>
+    </>
+  );
+});
+
+const UserProfile = memo(({ currentUser, onLogout, onNavigate, onNavigateAdmin }) => (
+  <>
+    <div className="auth-profile-info">
+      <div className="auth-profile-avatar">
+        {currentUser?.email?.[0]?.toUpperCase() ?? <User size={28} />}
+      </div>
+      <div className="auth-profile-email">{currentUser?.email}</div>
+      <div className={`auth-role-badge ${currentUser?.role === 'admin' ? 'auth-role-admin' : 'auth-role-user'}`}>
+        {currentUser?.role === 'admin' ? <Shield size={10} /> : <User size={10} />}
+        {currentUser?.role}
+      </div>
+    </div>
+
+    <button className="auth-submit" onClick={onLogout}>
+      <LogOut size={16} />ออกจากระบบ
+    </button>
+
+    <div className="auth-nav-links">
+      <button className="auth-nav-btn" onClick={onNavigate}>
+        <Film size={14} />วิดีโอ<ChevronRight size={13} />
+      </button>
+      {currentUser?.role === 'admin' && (
+        <button className="auth-nav-btn" onClick={onNavigateAdmin}>
+          <Shield size={14} />Admin<ChevronRight size={13} />
+        </button>
+      )}
+    </div>
+  </>
+));
 
 /* ─── Main Component ──────────────────────────────────────── */
 const VideoAuthSystem = () => {
   const navigate = useNavigate();
-  const { setUser: setAuthUser } = useAuth();
+  const { setUser: setAuthUser, logout } = useAuth();
+  const { addNotification } = useNotif();
 
   const [currentView, setCurrentView]       = useState('login');
   const [currentUser, setCurrentUser]       = useState(null);
@@ -160,7 +339,7 @@ const VideoAuthSystem = () => {
   const [currentlyFocusedField, setFocused] = useState('email');
   const [showPw, setShowPw]                 = useState({ login: false, register: false });
   const [loginForm, setLoginForm]           = useState({ email: '', password: '' });
-  const [registerForm, setRegisterForm]     = useState({ email: '', password: '', role: 'user' });
+  const [registerForm, setRegisterForm]     = useState({ email: '', password: '' });
 
   const showAlert = useCallback((type, message, alertType = 'error') => {
     setAlerts(prev => ({ ...prev, [type]: { message, type: alertType } }));
@@ -170,22 +349,19 @@ const VideoAuthSystem = () => {
     setAlerts({ login: null, register: null });
   }, []);
 
-  // ✅ logout: เรียก API ให้ server clear cookie — localStorage.removeItem ไม่จำเป็นแล้ว
-  const logout = useCallback(async () => {
-    try {
-      await apiFetch('/auth/logout', { method: 'POST' });
-    } catch (_) {
-      // ถ้า request ล้มเหลวก็ยังต้อง clear state ฝั่ง client
-    }
+  const handleLogout = useCallback(async () => {
+    addNotification({
+      title: 'ออกจากระบบสำเร็จ',
+      message: 'แล้วเจอกันใหม่นะ!',
+      type: 'info',
+    });
+    await logout();
     setCurrentUser(null);
-    setAuthUser(null);
     setCurrentView('login');
-    videoTracker.updateUserId(null);
-    clearAlerts();
-    setFocused('email');
-  }, [setAuthUser, clearAlerts]);
+    setLoginForm({ email: '', password: '' });
+    setRegisterForm({ email: '', password: '' });
+  }, [logout, addNotification]);
 
-  // ✅ verify จาก cookie — ไม่อ่าน localStorage
   const getCurrentUser = useCallback(async () => {
     try {
       const r = await apiFetch('/auth/verify');
@@ -193,25 +369,26 @@ const VideoAuthSystem = () => {
       setAuthUser(r.user);
       setCurrentView('profile');
     } catch {
-      // Cookie หมดอายุหรือไม่มี — แสดงหน้า login ปกติ
       setCurrentView('login');
     }
   }, [setAuthUser]);
 
-  // ✅ ตรวจ session จาก cookie ทันทีที่โหลดหน้า — ไม่ต้องอ่าน localStorage
   useEffect(() => { getCurrentUser(); }, [getCurrentUser]);
 
   const handleLogin = useCallback(async () => {
     setLoading(p => ({ ...p, login: true }));
     clearAlerts();
     try {
-      // ✅ server จะ set cookie ใน response — client ไม่ต้องเก็บ token เอง
-      const r = await apiFetch('/auth/login', {
+      const res = await fetch('/api/auth/login', {
         method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify(loginForm),
       });
-      setCurrentUser(r.user);
-      setAuthUser(r.user);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || `Error ${res.status}`);
+      setCurrentUser(data.user);
+      setAuthUser(data.user);
       showAlert('login', 'เข้าสู่ระบบสำเร็จ!', 'success');
       setTimeout(() => setCurrentView('profile'), 900);
     } catch (e) {
@@ -240,234 +417,8 @@ const VideoAuthSystem = () => {
     }
   }, [registerForm, clearAlerts, setAuthUser, showAlert]);
 
-
-
-  /* ── Alert ── */
-  const AlertBox = memo(({ alert }) => {
-    if (!alert) return null;
-    return (
-      <div className={`auth-alert auth-alert-${alert.type}`}>
-        <div className="auth-alert-dot" />
-        <span>{alert.message}</span>
-      </div>
-    );
-  });
-
-  /* ── Login Form ── */
-  const LoginForm = memo(() => {
-    const emailRef   = useRef(null);
-    const pwRef      = useRef(null);
-    const hasFocused = useRef(false);
-
-    useEffect(() => {
-      if (hasFocused.current) return;
-      const ref = currentlyFocusedField === 'email' ? emailRef : pwRef;
-      if (ref.current) {
-        ref.current.focus();
-        const l = ref.current.value.length;
-        ref.current.setSelectionRange(l, l);
-      }
-      hasFocused.current = true;
-    }, []);
-
-    const handleKeyDown = useCallback((e) => {
-      if (e.key === 'Enter') {
-        e.preventDefault();
-        if (currentlyFocusedField === 'email') setFocused('password');
-        else handleLogin();
-      } else if (e.key === 'Tab') {
-        e.preventDefault();
-        setFocused(f => f === 'email' ? 'password' : 'email');
-      }
-    }, []);
-
-    return (
-      <>
-        <AlertBox alert={alerts.login} />
-        <div className="auth-field">
-          <label className="auth-label"><Mail size={12} />Email</label>
-          <div className="auth-input-wrap">
-            <Mail className="auth-input-icon" />
-            <input
-              ref={emailRef}
-              type="text"
-              value={loginForm.email}
-              onChange={e => setLoginForm(p => ({ ...p, email: e.target.value }))}
-              onKeyDown={handleKeyDown}
-              onFocus={() => setFocused('email')}
-              className={`auth-input ${currentlyFocusedField === 'email' ? 'focused' : ''}`}
-              placeholder="you@example.com"
-              autoComplete="email"
-            />
-          </div>
-        </div>
-        <div className="auth-field">
-          <label className="auth-label"><Lock size={12} />Password</label>
-          <div className="auth-input-wrap">
-            <Lock className="auth-input-icon" />
-            <input
-              ref={pwRef}
-              type={showPw.login ? 'text' : 'password'}
-              value={loginForm.password}
-              onChange={e => setLoginForm(p => ({ ...p, password: e.target.value }))}
-              onKeyDown={handleKeyDown}
-              onFocus={() => setFocused('password')}
-              className={`auth-input ${currentlyFocusedField === 'password' ? 'focused' : ''}`}
-              placeholder="••••••••"
-              autoComplete="current-password"
-              style={{ paddingRight: 42 }}
-            />
-            <button className="auth-pw-toggle" type="button" onClick={() => setShowPw(p => ({ ...p, login: !p.login }))}>
-              {showPw.login ? <EyeOff size={16} /> : <Eye size={16} />}
-            </button>
-          </div>
-        </div>
-        <button className="auth-submit" onClick={handleLogin} disabled={loading.login}>
-          {loading.login
-            ? <Loader size={17} style={{ animation: 'spin 1s linear infinite' }} />
-            : <><Film size={16} />เข้าสู่ระบบ</>}
-        </button>
-        <div className="auth-divider">หรือ</div>
-        <div className="auth-switch">
-          ยังไม่มีบัญชี?{' '}
-          <button className="auth-link" onClick={() => { setCurrentView('register'); setFocused('email'); }}>
-            สมัครสมาชิก →
-          </button>
-        </div>
-      </>
-    );
-  });
-
-  /* ── Register Form ── */
-  const RegisterForm = memo(() => {
-    const emailRef = useRef(null);
-    const pwRef    = useRef(null);
-    const roleRef  = useRef(null);
-
-    useEffect(() => {
-      const map = { email: emailRef, password: pwRef, role: roleRef };
-      const ref = map[currentlyFocusedField];
-      if (ref?.current) ref.current.focus();
-    }, []);
-
-    const handleKeyDown = useCallback((e) => {
-      if (e.key === 'Enter') {
-        e.preventDefault();
-        if (currentlyFocusedField === 'email') setFocused('password');
-        else if (currentlyFocusedField === 'password') setFocused('role');
-        else handleRegister();
-      } else if (e.key === 'Tab') {
-        e.preventDefault();
-        const order = ['email', 'password', 'role'];
-        const idx = order.indexOf(currentlyFocusedField);
-        setFocused(order[(idx + 1) % order.length]);
-      }
-    }, []);
-
-    return (
-      <>
-        <AlertBox alert={alerts.register} />
-        <div className="auth-field">
-          <label className="auth-label"><Mail size={12} />Email</label>
-          <div className="auth-input-wrap">
-            <Mail className="auth-input-icon" />
-            <input
-              ref={emailRef}
-              type="text"
-              value={registerForm.email}
-              onChange={e => setRegisterForm(p => ({ ...p, email: e.target.value }))}
-              onKeyDown={handleKeyDown}
-              onFocus={() => setFocused('email')}
-              className={`auth-input ${currentlyFocusedField === 'email' ? 'focused' : ''}`}
-              placeholder="you@example.com"
-              autoComplete="email"
-            />
-          </div>
-        </div>
-        <div className="auth-field">
-          <label className="auth-label"><Lock size={12} />Password</label>
-          <div className="auth-input-wrap">
-            <Lock className="auth-input-icon" />
-            <input
-              ref={pwRef}
-              type={showPw.register ? 'text' : 'password'}
-              value={registerForm.password}
-              onChange={e => setRegisterForm(p => ({ ...p, password: e.target.value }))}
-              onKeyDown={handleKeyDown}
-              onFocus={() => setFocused('password')}
-              className={`auth-input ${currentlyFocusedField === 'password' ? 'focused' : ''}`}
-              placeholder="••••••••"
-              autoComplete="new-password"
-              style={{ paddingRight: 42 }}
-            />
-            <button className="auth-pw-toggle" type="button" onClick={() => setShowPw(p => ({ ...p, register: !p.register }))}>
-              {showPw.register ? <EyeOff size={16} /> : <Eye size={16} />}
-            </button>
-          </div>
-        </div>
-        <div className="auth-field">
-          <label className="auth-label"><Shield size={12} />Role</label>
-          <div className="auth-input-wrap">
-            <Shield className="auth-input-icon" />
-            <select
-              ref={roleRef}
-              value={registerForm.role}
-              onChange={e => setRegisterForm(p => ({ ...p, role: e.target.value }))}
-              onFocus={() => setFocused('role')}
-              onKeyDown={handleKeyDown}
-              className={`auth-select ${currentlyFocusedField === 'role' ? 'focused' : ''}`}
-            >
-              <option value="user">User</option>
-              <option value="admin">Admin</option>
-            </select>
-          </div>
-        </div>
-        <button className="auth-submit" onClick={handleRegister} disabled={loading.register}>
-          {loading.register
-            ? <Loader size={17} style={{ animation: 'spin 1s linear infinite' }} />
-            : <><User size={16} />สมัครสมาชิก</>}
-        </button>
-        <div className="auth-divider">หรือ</div>
-        <div className="auth-switch">
-          มีบัญชีแล้ว?{' '}
-          <button className="auth-link" onClick={() => { setCurrentView('login'); setFocused('email'); }}>
-            เข้าสู่ระบบ →
-          </button>
-        </div>
-      </>
-    );
-  });
-
-  /* ── Profile ── */
-  const UserProfile = memo(() => (
-    <>
-      <div className="auth-profile-info">
-        <div className="auth-profile-avatar">
-          {currentUser?.email?.[0]?.toUpperCase() ?? <User size={28} />}
-        </div>
-        <div className="auth-profile-email">{currentUser?.email}</div>
-        <div className={`auth-role-badge ${currentUser?.role === 'admin' ? 'auth-role-admin' : 'auth-role-user'}`}>
-          {currentUser?.role === 'admin' ? <Shield size={10} /> : <User size={10} />}
-          {currentUser?.role}
-        </div>
-      </div>
-
-      <button className="auth-submit" onClick={logout}>
-        <LogOut size={16} />ออกจากระบบ
-      </button>
-
-      <div className="auth-nav-links">
-        <button className="auth-nav-btn" onClick={() => currentUser && navigate('/')}>
-          <Film size={14} />วิดีโอ<ChevronRight size={13} />
-        </button>
-        {currentUser?.role === 'admin' && (
-          <button className="auth-nav-btn" onClick={() => navigate('/admin')}>
-            <Shield size={14} />Admin<ChevronRight size={13} />
-          </button>
-        )}
-      </div>
-    </>
-  ));
+  const switchToRegister = useCallback(() => { setCurrentView('register'); setFocused('email'); clearAlerts(); }, [clearAlerts]);
+  const switchToLogin    = useCallback(() => { setCurrentView('login');    setFocused('email'); clearAlerts(); }, [clearAlerts]);
 
   const isProfile = currentView === 'profile';
 
@@ -505,19 +456,52 @@ const VideoAuthSystem = () => {
             <div className="auth-tabs">
               <button
                 className={`auth-tab ${currentView === 'login' ? 'active' : ''}`}
-                onClick={() => { setCurrentView('login'); setFocused('email'); clearAlerts(); }}
+                onClick={switchToLogin}
               >เข้าสู่ระบบ</button>
               <button
                 className={`auth-tab ${currentView === 'register' ? 'active' : ''}`}
-                onClick={() => { setCurrentView('register'); setFocused('email'); clearAlerts(); }}
+                onClick={switchToRegister}
               >สมัครสมาชิก</button>
             </div>
           )}
 
           <div className="auth-body">
-            {currentView === 'login'    && <LoginForm />}
-            {currentView === 'register' && <RegisterForm />}
-            {currentView === 'profile'  && <UserProfile />}
+            {currentView === 'login' && (
+              <LoginForm
+                loginForm={loginForm}
+                setLoginForm={setLoginForm}
+                showPw={showPw}
+                setShowPw={setShowPw}
+                alerts={alerts}
+                loading={loading}
+                currentlyFocusedField={currentlyFocusedField}
+                setFocused={setFocused}
+                onLogin={handleLogin}
+                onSwitchToRegister={switchToRegister}
+              />
+            )}
+            {currentView === 'register' && (
+              <RegisterForm
+                registerForm={registerForm}
+                setRegisterForm={setRegisterForm}
+                showPw={showPw}
+                setShowPw={setShowPw}
+                alerts={alerts}
+                loading={loading}
+                currentlyFocusedField={currentlyFocusedField}
+                setFocused={setFocused}
+                onRegister={handleRegister}
+                onSwitchToLogin={switchToLogin}
+              />
+            )}
+            {currentView === 'profile' && (
+              <UserProfile
+                currentUser={currentUser}
+                onLogout={handleLogout}
+                onNavigate={() => navigate('/')}
+                onNavigateAdmin={() => navigate('/admin')}
+              />
+            )}
           </div>
         </div>
       </div>

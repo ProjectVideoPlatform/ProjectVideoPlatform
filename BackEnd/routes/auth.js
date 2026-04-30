@@ -31,7 +31,7 @@ const refreshCookieOptions = {
   secure:   process.env.NODE_ENV === 'production',
   sameSite: 'strict',
   maxAge:   7 * 24 * 60 * 60 * 1000, // 7 วัน
-  path:     '/api/auth/verify',       // ส่งเฉพาะ path นี้
+  path:     '/api/auth/refresh',       // ส่งเฉพาะ path นี้
 };
 
 // ─────────────────────────────────────────────
@@ -41,7 +41,7 @@ const setAuthCookies = (res, userId) => {
   const accessToken = jwt.sign(
     { userId },
     jwtConfig.secret,
-    { expiresIn: '1d' }
+    { expiresIn: '2m' }
   );
   const refreshToken = jwt.sign(
     { userId },
@@ -150,7 +150,7 @@ router.post('/refresh', async (req, res) => {
     const newAccessToken = jwt.sign(
       { userId: user._id },
       jwtConfig.secret,
-      { expiresIn: '15m' }
+      { expiresIn: '2m' }
     );
     res.cookie(COOKIE_NAME, newAccessToken, accessCookieOptions);
 

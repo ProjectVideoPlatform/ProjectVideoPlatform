@@ -15,23 +15,37 @@ const redisClient = require('../config/redis');
   const QUEUES = require('../services/rabbitmq/queues');
 const router = express.Router();
 const { broadcast } = require('../websocket');
+// ⚠️ อย่าลืม import โมเดล Video ไว้ด้านบนของไฟล์ด้วยนะครับ (ถ้ายังไม่มี)
+// const Video = require('../models/Video'); 
+
+// GET - ดึง progress ปัจจุบัน
 router.get('/video-progress', authenticateToken, async (req, res) => {
   try {
-    const { videoId } = req.query;
+    const { videoId } = req.query; // รับ UUID มาจาก Frontend
     if (!videoId) {
       return res.status(400).json({ error: 'videoId is required' });
     }
- 
+
+    // 1️⃣ แปลง UUID ให้เป็น ObjectId ของ Video ก่อน
+    // 💡 หมายเหตุ: ถ้าใน Schema Video ของพี่ตั้งชื่อฟิลด์ UUID เป็นอย่างอื่น (เช่น publicId, uuid) ให้แก้ตรง { id: ... } ด้วยนะครับ
+    const video = await Video.findOne({ id: videoId }); 
+    
+    // ถ้าไม่เจอวิดีโอ ก็ถือว่ายังไม่ได้ซื้อ/ไม่มีข้อมูล
+    if (!video) {
+      return res.json({ lastTime: 0, owned: false });
+    }
+
+    // 2️⃣ เอา ObjectId ที่หามาได้ ไปหาใน Purchase ต่อ
     const purchase = await Purchase.findOne({
       userId: req.user._id,
-      videoId: videoId,
+      videoId: video._id, // ✅ ตรงนี้ส่ง ObjectId ถูกต้องตามที่ Mongoose ต้องการแล้ว
     });
- 
+
     // ถ้าไม่มี purchase record → user ไม่ได้ซื้อ ไม่ต้อง restore progress
     if (!purchase) {
       return res.json({ lastTime: 0, owned: false });
     }
- 
+
     return res.json({
       lastTime: purchase.lastTime || 0,
       owned: true,
@@ -41,33 +55,39 @@ router.get('/video-progress', authenticateToken, async (req, res) => {
     return res.status(500).json({ error: 'Server error' });
   }
 });
- 
+
 // POST - บันทึก progress (เฉพาะวิดีโอที่ซื้อแล้ว เท่านั้น)
 router.post('/video-progress', authenticateToken, async (req, res) => {
   try {
-    const { videoId, currentTime } = req.body;
- 
+    const { videoId, currentTime } = req.body; // รับ UUID มาจาก Frontend
+
     if (!videoId || currentTime == null) {
       return res.status(400).json({ error: 'videoId and currentTime are required' });
     }
     if (typeof currentTime !== 'number' || currentTime < 0) {
       return res.status(400).json({ error: 'currentTime must be a non-negative number' });
     }
- 
-    // findOne ก่อน — ถ้าไม่มี purchase record = ไม่ได้ซื้อ ไม่ save
+
+    // 1️⃣ แปลง UUID ให้เป็น ObjectId ของ Video ก่อน
+    const video = await Video.findOne({ id: videoId });
+    if (!video) {
+      return res.json({ success: false, reason: 'video_not_found' });
+    }
+
+    // 2️⃣ เอา ObjectId ไปเช็คสิทธิ์ใน Purchase
     const purchase = await Purchase.findOne({
       userId: req.user._id,
-      videoId: videoId,
+      videoId: video._id, // ✅ ใช้ ObjectId ในการค้นหา
     });
- 
+
     if (!purchase) {
       // ไม่ error แต่ silent ignore (free video หรือ admin ไม่มี record)
       return res.json({ success: false, reason: 'not_purchased' });
     }
- 
+
     purchase.lastTime = Math.floor(currentTime);
     await purchase.save();
- 
+
     return res.json({ success: true, lastTime: purchase.lastTime });
   } catch (err) {
     console.error('[VideoProgress] POST error:', err);
@@ -715,7 +735,7 @@ router.post('/simulate-purchase/:videoId', authenticateToken, async (req, res) =
 
     // ✅ หา video
     const video = await Video.findOne({ 
-      _id: videoId,
+      id: videoId,
       uploadStatus: 'completed',
       isActive: true 
     });

@@ -1,5 +1,7 @@
 'use strict';
 
+import { apiFetch } from '../utils/apiClient';
+
 // ── constants ──────────────────────────────────────────────────────────────────
 const VALID_EVENT_TYPES = new Set([
   'play',  'watch_chunk', 'pause', 'seek', 'completed', 'close', 'error',
@@ -278,14 +280,10 @@ class VideoAnalytics {
     const events = this.buffer.splice(0);
 
     try {
-      const res = await fetch(this.analyticsUrl, {
-        method:    'POST',
-        headers:   { 'Content-Type': 'application/json' },
-        body:      JSON.stringify({ events }),
-        keepalive: true,
-        credentials: 'include',
+      await apiFetch('/public/analytics/video', {
+        method: 'POST',
+        body: JSON.stringify({ events }),
       });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
     } catch (err) {
       console.error('[VideoAnalytics] flush failed:', err.message);
       this.buffer.unshift(...events);

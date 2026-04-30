@@ -82,13 +82,14 @@ async function refreshTrending() {
       logger.info(`[Trending] #${runId} Redis reconnected`);
     }
 
-    const multi = redisClient.multi();
-    multi.del(REDIS_KEY);
-    multi.rPush(REDIS_KEY, videoIds);
-    multi.expire(REDIS_KEY, REDIS_TTL);
-    const multiResult = await multi.exec();
+   const pipeline = redisClient.pipeline();
+pipeline.del(REDIS_KEY);
+pipeline.rpush(REDIS_KEY, ...videoIds);  // ioredis ใช้ lowercase + spread
+pipeline.expire(REDIS_KEY, REDIS_TTL);
+const multiResult = await pipeline.exec();
 
-    logger.info(`[Trending] #${runId} Redis multi result: ${JSON.stringify(multiResult)}`);
+logger.info(`[Trending] #${runId} Redis multi result: ${JSON.stringify(multiResult)}`);
+
 
     // verify ว่าเซฟจริง
     const savedCount = await redisClient.lLen(REDIS_KEY);

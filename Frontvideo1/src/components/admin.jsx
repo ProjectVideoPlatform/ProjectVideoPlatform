@@ -6,8 +6,9 @@ import {
   PlayCircle, CheckCircle, AlertCircle, XCircle, RefreshCw, Loader,
   LayoutDashboard, ShoppingBag, X, Film, TrendingUp, Clapperboard
 } from 'lucide-react';
+import { apiFetch } from '../utils/apiClient';
 
-const API_BASE = '/api/admin';
+const API_BASE = '/admin';
 
 const styles = `
   @import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@300;400;500;600&display=swap');
@@ -103,25 +104,21 @@ const styles = `
 `;
 
 /* ── API ── */
-// ✅ ลบ Authorization header ทั้งหมด — ใช้แค่ credentials:'include'
+// ✅ ใช้ apiFetch จาก apiClient.js
 const api = {
   get: (ep) =>
-    fetch(`${API_BASE}${ep}`, { credentials: 'include' })
-      .then(r => { if (!r.ok) throw new Error('failed'); return r.json(); }),
+    apiFetch(`${API_BASE}${ep}`),
 
   put: (ep, data) =>
-    fetch(`${API_BASE}${ep}`, {
+    apiFetch(`${API_BASE}${ep}`, {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'include',
       body: JSON.stringify(data),
-    }).then(r => { if (!r.ok) throw new Error('failed'); return r.json(); }),
+    }),
 
   delete: (ep) =>
-    fetch(`${API_BASE}${ep}`, {
+    apiFetch(`${API_BASE}${ep}`, {
       method: 'DELETE',
-      credentials: 'include',
-    }).then(r => { if (!r.ok) throw new Error('failed'); return r.json(); }),
+    }),
 };
 
 /* ── Status badge ── */

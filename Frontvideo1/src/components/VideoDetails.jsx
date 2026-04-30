@@ -3,39 +3,24 @@ import { Play, Clock, CheckCircle, ArrowLeft, Share2, Download, AlertCircle, Sho
 import { useParams } from 'react-router-dom';
 import Hls from 'hls.js';
 import { useNavigate } from 'react-router-dom';
+import { apiFetch } from '../utils/apiClient';
 // API service (เหมือนกับ VideoStreamingApp)
 const API_BASE = '/api';
 const api = {
   getVideo: async (id) => {
-    const response = await fetch(`${API_BASE}/videos/${id}`, {
-      headers: { 'Authorization': `Bearer ${localStorage.getItem('authToken')}` },     credentials: 'include'
-    });
-    if (!response.ok) throw new Error('Failed to fetch video');
-    return response.json();
+    return apiFetch(`/videos/${id}`);
   },
   
   purchaseVideo: async (id) => {
-    const response = await fetch(`${API_BASE}/videos/${id}/purchase`, {
+    return apiFetch(`/videos/${id}/purchase`, {
       method: 'POST',
-      headers: { 
-        'Authorization': `Bearer ${localStorage.getItem('authToken')}`,
-        'Content-Type': 'application/json'
-      },     credentials: 'include'
     });
-    if (!response.ok) throw new Error('Failed to purchase video');
-    return response.json();
   },
   
   playVideo: async (id) => {
-    const response = await fetch(`${API_BASE}/videos/${id}/play`, {
+    return apiFetch(`/videos/${id}/play`, {
       method: 'POST',
-      headers: { 
-        'Authorization': `Bearer ${localStorage.getItem('authToken')}`,
-        'Content-Type': 'application/json'
-      },     credentials: 'include'
     });
-    if (!response.ok) throw new Error('Failed to get playback URL');
-    return response.json();
   }
 };
 
