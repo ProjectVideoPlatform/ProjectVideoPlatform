@@ -190,8 +190,7 @@ async function getRecommendedVideos(userId, limit = 12) {
     const queryResponse = await index.query({
       vector:          userVector,
       topK,
-      includeMetadata: true,
-      namespace:       '_default_',
+      includeMetadata: true
     });
 
     if (!queryResponse.matches?.length) {

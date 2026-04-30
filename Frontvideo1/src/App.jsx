@@ -35,6 +35,7 @@ function App() {
           <Routes>          {/* ✅ Routes อันเดียว */}
             <Route path="/login"       element={wrap(Auth)} />
             <Route path="/"            element={<ProtectedRoute>{wrap(ProductHomeSection)}</ProtectedRoute>} />
+            <Route path="/purchased" element={<ProtectedRoute>{wrap(ProductHomeSection)}</ProtectedRoute>} />
             <Route path="/admin"       element={<ProtectedRoute>{wrap(Admin)}</ProtectedRoute>} />
             <Route path="/UserProfile" element={<ProtectedRoute>{wrap(UserProfile)}</ProtectedRoute>} />
             <Route path="/foryou"      element={<ProtectedRoute>{wrap(ForYouPage)}</ProtectedRoute>} />

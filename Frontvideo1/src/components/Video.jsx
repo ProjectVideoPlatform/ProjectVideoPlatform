@@ -5,7 +5,7 @@ import {
   Clock, Tag, CheckCircle, AlertCircle,
   QrCode, Loader, X, Home, BookOpen, Flame, ChevronLeft, ChevronRight, Sparkles
 } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import VideoPlayer from './VideoPlayer';
 import { useNotif } from '../NotifContext';
 import { apiFetch } from '../utils/apiClient';
@@ -512,10 +512,12 @@ const UploadModal = ({ isOpen, onClose, onUpload }) => {
 const VideoStreamingApp = () => {
   const { startWatching } = useNotif();
   const navigate = useNavigate();
-
+  const location = useLocation();  // ← เพิ่ม
   const [videos, setVideos]               = useState([]);
   const [purchasedVideos, setPurchased]   = useState([]);
-  const [currentView, setView]            = useState('all');
+  const [currentView, setView] = useState(
+    location.pathname === '/purchased' ? 'purchased' : 'all'
+  );
   const [loading, setLoading]             = useState(false);
   const [actionLoading, setActionLoading] = useState(null);
   const [searchQuery, setSearch]          = useState('');

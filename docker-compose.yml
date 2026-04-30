@@ -519,13 +519,16 @@ services:
 # ── Apache Flink (Stream Processing) ──────────────────────
   # Flink Master Node & Web UI
   flink-jobmanager:
-    image: flink:1.18.1-java11
+    build:
+      context: ./flink-analytics    # ← ต้องชี้ไปที่ folder ที่มี Dockerfile
+      dockerfile: Dockerfile
+    image: flink-analytics:latest
     container_name: secure-video-flink-jobmanager
     restart: unless-stopped
     expose:
-      - "6123" # RPC port สำหรับ TaskManager มาคุย
+      - "6123"
     ports:
-      - "8082:8081" # Web UI ของ Flink (เปลี่ยนเป็น 8082 เพราะ 8081 อาจจะชนกับ Mongo Express)
+      - "8082:8081"  # Flink Web UI
     command: jobmanager
     environment:
       - |
@@ -536,36 +539,38 @@ services:
     depends_on:
       kafka:
         condition: service_healthy
-  # Flink Worker Node
+
+  # 2. Flink TaskManager (ใช้ image เดียวกัน)
   flink-taskmanager:
-      image: flink:1.18.1-java11
-      container_name: secure-video-flink-taskmanager
-      restart: unless-stopped
-      depends_on:
-        flink-jobmanager:
-          condition: service_started
-        kafka:
-          condition: service_healthy
-      command: taskmanager
-      # เพิ่มส่วน Resource Limit เพื่อความเสถียร
-      deploy:
-        resources:
-          limits:
-            memory: 2G
-      environment:
-        - |
-          FLINK_PROPERTIES=
-          jobmanager.rpc.address: flink-jobmanager
-          taskmanager.numberOfTaskSlots: 4
-          taskmanager.memory.process.size: 1728m # แบ่งให้ Flink จัดการ (น้อยกว่าขีดจำกัด Docker เล็กน้อย)
-      # เพิ่มการทำ Healthcheck ให้ตัวมันเอง
-      healthcheck:
-        test: ["CMD", "curl", "-f", "http://localhost:8081"] # เช็คผ่าน API ของ JobManager หรือเช็คโปรเซส
-        interval: 30s
-        timeout: 10s
-        retries: 3
-      networks:
-        - secure-video-network
+    build:
+      context: ./flink-analytics
+      dockerfile: Dockerfile
+    image: flink-analytics:latest
+    container_name: secure-video-flink-taskmanager
+    restart: unless-stopped
+    depends_on:
+      flink-jobmanager:
+        condition: service_started
+      kafka:
+        condition: service_healthy
+    command: taskmanager
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+    environment:
+      - |
+        FLINK_PROPERTIES=
+        jobmanager.rpc.address: flink-jobmanager
+        taskmanager.numberOfTaskSlots: 4
+        taskmanager.memory.process.size: 1728m
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8081"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - secure-video-network
 networks:
   secure-video-network:
     driver: bridge
