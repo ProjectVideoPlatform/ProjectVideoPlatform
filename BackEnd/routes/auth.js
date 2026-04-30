@@ -41,7 +41,7 @@ const setAuthCookies = (res, userId) => {
   const accessToken = jwt.sign(
     { userId },
     jwtConfig.secret,
-    { expiresIn: '2m' }
+    { expiresIn: '15m' }
   );
   const refreshToken = jwt.sign(
     { userId },
@@ -150,7 +150,7 @@ router.post('/refresh', async (req, res) => {
     const newAccessToken = jwt.sign(
       { userId: user._id },
       jwtConfig.secret,
-      { expiresIn: '2m' }
+      { expiresIn: '15m' }
     );
     res.cookie(COOKIE_NAME, newAccessToken, accessCookieOptions);
 
