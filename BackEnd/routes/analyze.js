@@ -76,6 +76,21 @@ router.post('/analytics/video', authenticateToken, async (req, res) => {
           }),
         }))
       );
+          await kafkaService.sendBatch(
+        TOPICS.USER_,
+        mlEvents.map(e => ({
+          key:   userId,
+          value: JSON.stringify({
+            userId:    userId,
+            videoId:   String(e.video_id || e.videoId),
+            eventType: e.event_type || e.eventType,
+            category:  Array.isArray(e.video_category)
+                         ? e.video_category
+                         : [e.video_category || 'unknown'],
+            timestamp: e.receivedAt,
+          }),
+        }))
+      );
     }
 
     return res.status(202).json({ queued: valid.length });

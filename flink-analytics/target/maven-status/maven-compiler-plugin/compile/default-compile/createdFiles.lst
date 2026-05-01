@@ -1,0 +1,5 @@
+com\securevideo\FlinkBehaviorJob$CategoryBoostProcessor.class
+com\securevideo\FlinkBehaviorJob.class
+com\securevideo\FlinkBehaviorJob$VideoEvent.class
+com\securevideo\FlinkBehaviorJob$CoWatchProcessor.class
+com\securevideo\FlinkBehaviorJob$ParseEventMap.class

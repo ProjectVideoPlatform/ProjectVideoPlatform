@@ -487,20 +487,55 @@ services:
     networks:
       - secure-video-network
   # docker-compose เพิ่ม
-  ml-worker-user-vector:
+  user-vector-producer:
     build:
       context: ./ml-worker/user-vector
       dockerfile: Dockerfile
-    container_name: secure-video-ml-user-vector
+    container_name: user-vector-producer
     restart: unless-stopped
-    depends_on:
-      redis:
-        condition: service_healthy
-    environment:
-      - REDIS_HOST=redis
-      - PYTHONUNBUFFERED=1
+    command: python user-vector-producer.py
     env_file:
-      - ./BackEnd/.env
+      - ./Backend/.env
+    environment:
+      KAFKA_BROKERS: kafka:9092
+      KAFKA_TOPIC: user-vector-refresh
+    depends_on:
+      kafka:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: "512M"
+    networks:
+      - secure-video-network
+  # ── Workers (scale ได้) ────────────────────────────────
+  user-vector-worker:
+    build:
+      context: ./ml-worker/user-vector
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    command: python user-vector-worker.py
+    env_file:
+      - ./Backend/.env
+    environment:
+      KAFKA_BROKERS:    kafka:9092
+      KAFKA_TOPIC:      user-vector-refresh
+      KAFKA_GROUP:      vector-workers
+      WORKER_ID:        "worker-{{.Task.Slot}}"  # unique per replica
+      SEED_LIMIT:       "10"
+      USER_VECTOR_TTL:  "7200"
+      THREAD_WORKERS:   "8"      # threads ต่อ 1 process
+      MAX_POLL_RECORDS: "50"
+    depends_on:
+      kafka:
+        condition: service_healthy
+    deploy:
+      replicas: 5        # เริ่มที่ 10 workers
+      resources:
+        limits:
+          cpus: "1"
+          memory: "1G"
     networks:
       - secure-video-network
   # Kafka UI
@@ -520,7 +555,7 @@ services:
   # Flink Master Node & Web UI
   flink-jobmanager:
     build:
-      context: ./flink-analytics    # ← ต้องชี้ไปที่ folder ที่มี Dockerfile
+      context: ./flink-analytics
       dockerfile: Dockerfile
     image: flink-analytics:latest
     container_name: secure-video-flink-jobmanager
@@ -528,19 +563,16 @@ services:
     expose:
       - "6123"
     ports:
-      - "8082:8081"  # Flink Web UI
+      - "8082:8081"
     command: jobmanager
-    environment:
-      - |
-        FLINK_PROPERTIES=
-        jobmanager.rpc.address: flink-jobmanager
+    env_file:
+      - flink.env  # ดึงค่าจากไฟล์โดยตรง
     networks:
       - secure-video-network
     depends_on:
       kafka:
         condition: service_healthy
 
-  # 2. Flink TaskManager (ใช้ image เดียวกัน)
   flink-taskmanager:
     build:
       context: ./flink-analytics
@@ -558,17 +590,8 @@ services:
       resources:
         limits:
           memory: 2G
-    environment:
-      - |
-        FLINK_PROPERTIES=
-        jobmanager.rpc.address: flink-jobmanager
-        taskmanager.numberOfTaskSlots: 4
-        taskmanager.memory.process.size: 1728m
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8081"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
+    env_file:
+      - flink.env  # ใช้ไฟล์เดียวกันเพื่อให้มั่นใจว่า rpc.address ตรงกัน
     networks:
       - secure-video-network
 networks:

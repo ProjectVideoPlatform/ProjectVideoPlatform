@@ -1,18 +1,19 @@
-# Dockerfile
-FROM python:3.11-slim
+FROM python:3.12-slim
 
 WORKDIR /app
 
-# pymongo ต้องการ gcc
+# ── System deps ───────────────────────────────────────────
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     && rm -rf /var/lib/apt/lists/*
 
+# ── Python deps ───────────────────────────────────────────
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY worker.py .
+# ── App code ──────────────────────────────────────────────
+COPY user-vector-producer.py .
+COPY user-vector-worker.py .
 
-ENV PYTHONUNBUFFERED=1
-
-CMD ["python", "-u", "worker.py"]
+# Default: worker (override ใน docker-compose command:)
+CMD ["python", "user-vector-worker.py"]

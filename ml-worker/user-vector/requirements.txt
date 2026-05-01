@@ -1,5 +1,14 @@
-# requirements.txt — user-vector worker
-pinecone==5.4.2
-redis==5.0.1
-pymongo==4.6.1
-numpy==1.26.4
+# ── Core Libraries ────────────────────────────────────────
+pinecone>=5.4.2
+redis>=5.0.4
+pymongo>=4.6.1
+numpy>=1.26.4
+
+# ── Kafka: แก้ปัญหา Python 3.12 Error ──────────────────────
+# ใช้ kafka-python-ng แทนตัวเดิมเพื่อรองรับ Python 3.12+
+kafka-python-ng==2.2.2
+
+# ── Optimization & Reliability (เพิ่มเติมที่แนะนำ) ────────────
+# ช่วยให้จัดการเรื่องเวลาและ JSON ในระบบ Vector ได้แม่นยำขึ้น
+python-dotenv==1.0.1
+orjson==3.10.1
