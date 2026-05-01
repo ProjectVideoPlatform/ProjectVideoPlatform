@@ -565,8 +565,15 @@ services:
     ports:
       - "8082:8081"
     command: jobmanager
-    env_file:
-      - flink.env  # ดึงค่าจากไฟล์โดยตรง
+    environment:
+    - REDIS_HOST=redis
+    - REDIS_PASSWORD=redispassword123
+    - KAFKA_BROKERS=kafka:9092
+    - |
+      FLINK_PROPERTIES=
+      jobmanager.rpc.address: flink-jobmanager
+      jobmanager.rpc.port: 6123
+      rest.port: 8081
     networks:
       - secure-video-network
     depends_on:
@@ -585,13 +592,23 @@ services:
         condition: service_started
       kafka:
         condition: service_healthy
-    command: taskmanager
+    command:
+      - taskmanager
+    environment:
+    - REDIS_HOST=redis
+    - REDIS_PASSWORD=redispassword123
+    - KAFKA_BROKERS=kafka:9092
+    - |
+      FLINK_PROPERTIES=
+      jobmanager.rpc.address: flink-jobmanager
+      jobmanager.rpc.port: 6123
+      taskmanager.numberOfTaskSlots: 4
+      taskmanager.memory.process.size: 1728m
+      taskmanager.rpc.port: 6122
     deploy:
       resources:
         limits:
           memory: 2G
-    env_file:
-      - flink.env  # ใช้ไฟล์เดียวกันเพื่อให้มั่นใจว่า rpc.address ตรงกัน
     networks:
       - secure-video-network
 networks:

@@ -171,9 +171,9 @@ router.get('/foryou', authenticateToken, async (req, res) => {
   try {
     const userId = req.user._id;
 
-    const { videos, source } = await getRecommendedVideos(userId);
+    const { videos, source, boostCategory } = await getRecommendedVideos(userId);
 
-    res.json({ videos: videos, source }); // source: 'personalized' | 'trending'
+    res.json({ videos: videos, source, boostCategory   }); // source: 'personalized' | 'trending'
   } catch (error) {
     console.error('[/foryou]', error);
     res.status(500).json({ message: 'Internal server error' });

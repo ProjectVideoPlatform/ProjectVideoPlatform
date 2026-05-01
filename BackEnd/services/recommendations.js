@@ -141,7 +141,7 @@ function applyBoost(videos, boostCategory) {
   const remaining = [];
 
   for (const v of videos) {
-    const cat = v.category ?? v.videoCategory ?? '';
+   const cat = v.tags ?? v.categories ?? v.videoCategory ?? [];
     const match = Array.isArray(cat)
       ? cat.includes(boostCategory)
       : cat === boostCategory;
@@ -207,11 +207,11 @@ async function getRecommendedVideos(userId, limit = 12) {
     if (!recommendedIds.length) {
       return { videos: await getTrendingVideos(limit), source: 'trending_all_watched' };
     }
-
+  console.log(`[recommendation] user ${userId} got ${recommendedIds.length} recommendations (boost: ${boostCategory || 'none'})`);
     const videos = await Video.find({
       id: { $in: recommendedIds }, uploadStatus: 'completed',
     }).lean();
-
+ console.log(`[recommendation] fetched ${videos.length} video details from DB for user ${userId}`);
     const orderMap = Object.fromEntries(recommendedIds.map((id, i) => [id, i]));
     videos.sort((a, b) => (orderMap[a.id] ?? 99) - (orderMap[b.id] ?? 99));
 
