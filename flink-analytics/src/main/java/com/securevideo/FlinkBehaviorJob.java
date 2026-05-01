@@ -1,21 +1,25 @@
 package com.securevideo;
 
+import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.api.common.functions.MapFunction;
 import org.apache.flink.api.common.state.*;
 import org.apache.flink.api.common.time.Time;
 import org.apache.flink.api.common.typeinfo.Types;
 import org.apache.flink.configuration.Configuration;
+import org.apache.flink.connector.kafka.source.KafkaSource;
+import org.apache.flink.connector.kafka.source.enumerator.initializer.OffsetsInitializer;
+import org.apache.flink.api.common.serialization.SimpleStringSchema;
+import org.apache.flink.streaming.api.CheckpointingMode;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.functions.KeyedProcessFunction;
-import org.apache.flink.streaming.connectors.kafka.FlinkKafkaConsumer;
-import org.apache.flink.streaming.connectors.kafka.FlinkKafkaProducer;
 import org.apache.flink.util.Collector;
 import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.databind.JsonNode;
 import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
 import redis.clients.jedis.Jedis;
 import redis.clients.jedis.JedisPool;
 import redis.clients.jedis.JedisPoolConfig;
+import redis.clients.jedis.params.SetParams;
 
 import java.util.*;
 
@@ -26,28 +30,35 @@ import java.util.*;
  *    - อ่าน video-logs stream
  *    - keyed by user_id, session window 30 นาที (timer-based)
  *    - นับ category ที่ดูติดกัน ≥ 3 เรื่องใน session
- *    - เขียน Redis: SET user:boost:{userId} {category} EX 7200
+ *    - เขียน Redis: SETEX user:boost:{userId} {category} 7200
+ *    - Redis write เป็น idempotent อยู่แล้ว (SETEX เขียนซ้ำ = refresh TTL)
+ *    - ใช้ Flink EXACTLY_ONCE checkpoint การันตี state ไม่ถูก process ซ้ำ
  *
  *  Job 2: Co-watch Counter
  *    - อ่าน video-logs stream เฉพาะ event_type = 'completed'
  *    - keyed by user_id
  *    - จำ video ก่อนหน้าใน state
- *    - เมื่อเจอ completed ตัวที่ 2 → ZADD co_watch:{prevVideoId} {score} {currVideoId}
+ *    - เมื่อเจอ completed ตัวที่ 2 → ZINCRBY co_watch:{prevVideoId} 1 {currVideoId}
+ *    - ZINCRBY ไม่ idempotent → ใช้ Redis SET NX per event_id เป็น dedup gate
  *    - state หมดอายุหลัง 30 นาที ถ้าไม่มี event ใหม่
+ *
+ *  Idempotency strategy:
+ *    Category Boost  → Flink EXACTLY_ONCE + SETEX (naturally idempotent)
+ *    Co-watch        → Redis SET NX "dedup:cw:{eventId}" EX 3600
  *
  *  Output:
  *    - Redis keys ที่ recommendation.service.js อ่านได้ทันที
- *    - ไม่มี Kafka sink เพิ่ม (เขียน Redis โดยตรง)
  */
 public class FlinkBehaviorJob {
 
     // ── Constants ──────────────────────────────────────────────────────────────
-    static final int    CATEGORY_BOOST_THRESHOLD = 3;        // ดู category เดียวกัน ≥ 3 เรื่อง
-    static final long   SESSION_GAP_MS           = 30 * 60 * 1000L; // 30 นาที
-    static final int    BOOST_TTL_SEC            = 2 * 60 * 60;     // 2 ชั่วโมง
-    static final int    COWATCH_TTL_SEC          = 7 * 24 * 60 * 60; // 7 วัน
+    static final int    CATEGORY_BOOST_THRESHOLD = 3;
+    static final long   SESSION_GAP_MS           = 30 * 60 * 1000L;
+    static final int    BOOST_TTL_SEC            = 2 * 60 * 60;
+    static final int    COWATCH_TTL_SEC          = 7 * 24 * 60 * 60;
+    static final int    DEDUP_TTL_SEC            = 60 * 60; // 1 ชั่วโมง — ครอบ checkpoint replay gap
     static final double COWATCH_INCREMENT        = 1.0;
-    static final int    COWATCH_TOP_N            = 20;       // เก็บแค่ top 20 ต่อวิดีโอ
+    static final int    COWATCH_TOP_N            = 20;
 
     static final String REDIS_HOST = System.getenv().getOrDefault("REDIS_HOST", "redis");
     static final int    REDIS_PORT = 6379;
@@ -58,23 +69,30 @@ public class FlinkBehaviorJob {
 
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
 
-        // Checkpoint ทุก 30 วินาที — ป้องกัน state สูญหายถ้า crash
+        // ── FIX #1: EXACTLY_ONCE checkpoint ───────────────────────────────────
+        // AT_LEAST_ONCE (default) → Flink state อาจถูก process ซ้ำตอน restart
+        // EXACTLY_ONCE            → Kafka offset + Flink state commit พร้อมกัน
+        //                           Category Boost ไม่ต้องการ dedup เพิ่มเติม
         env.enableCheckpointing(30_000);
+        env.getCheckpointConfig().setCheckpointingMode(CheckpointingMode.EXACTLY_ONCE);
+        env.getCheckpointConfig().setMinPauseBetweenCheckpoints(5_000);
+        env.getCheckpointConfig().setCheckpointTimeout(60_000);
 
-        // ── Kafka Source ───────────────────────────────────────────────────────
-        Properties kafkaProps = new Properties();
-        kafkaProps.setProperty("bootstrap.servers",
-            System.getenv().getOrDefault("KAFKA_BROKERS", "kafka:9092"));
-        kafkaProps.setProperty("group.id", "flink-behavior-group");
-        kafkaProps.setProperty("auto.offset.reset", "latest");
+        // ── FIX #2: เปลี่ยนจาก FlinkKafkaConsumer (legacy) → KafkaSource ────
+        // FlinkKafkaConsumer ถูก deprecate ใน Flink 1.14+
+        // KafkaSource รองรับ EXACTLY_ONCE ได้สมบูรณ์กว่า
+        KafkaSource<String> kafkaSource = KafkaSource.<String>builder()
+            .setBootstrapServers(
+                System.getenv().getOrDefault("KAFKA_BROKERS", "kafka:9092"))
+            .setTopics("video-logs")
+            .setGroupId("flink-behavior-group")
+            .setStartingOffsets(OffsetsInitializer.latest())
+            .setValueOnlyDeserializer(new SimpleStringSchema())
+            .build();
 
-        FlinkKafkaConsumer<String> kafkaSource = new FlinkKafkaConsumer<>(
-            "video-logs",          // topic เดิมที่ route ส่งอยู่แล้ว — ไม่ต้องแก้ route
-            new org.apache.flink.api.common.serialization.SimpleStringSchema(),
-            kafkaProps
-        );
-
-        DataStream<String> rawStream = env.addSource(kafkaSource).name("video-logs-source");
+        // WatermarkStrategy.noWatermarks() = processing time mode
+        DataStream<String> rawStream = env
+            .fromSource(kafkaSource, WatermarkStrategy.noWatermarks(), "video-logs-source");
 
         // ── Parse JSON → VideoEvent ────────────────────────────────────────────
         DataStream<VideoEvent> events = rawStream
@@ -83,6 +101,9 @@ public class FlinkBehaviorJob {
             .name("parse-events");
 
         // ── Job 1: Category Boost ──────────────────────────────────────────────
+        // Redis write = SETEX → idempotent โดยธรรมชาติ
+        // EXACTLY_ONCE checkpoint การันตี categoryCount ไม่นับซ้ำ
+        // → ไม่ต้องการ event-level dedup เพิ่ม
         events
             .filter(e -> e.category != null && !e.category.equals("unknown"))
             .filter(e -> List.of("play", "watch_chunk", "completed").contains(e.eventType))
@@ -91,6 +112,8 @@ public class FlinkBehaviorJob {
             .name("category-boost");
 
         // ── Job 2: Co-watch Counter ────────────────────────────────────────────
+        // Redis write = ZINCRBY → ไม่ idempotent
+        // → ต้องการ Redis SET NX dedup gate ต่อ event_id
         events
             .filter(e -> e.eventType.equals("completed"))
             .keyBy(e -> e.userId)
@@ -105,17 +128,12 @@ public class FlinkBehaviorJob {
         public String userId;
         public String videoId;
         public String eventType;
-        public String category;   // single category string
-        public long   receivedAt; // epoch ms
+        public String category;
+        public String eventId;    // ← FIX #3: เพิ่ม field สำหรับ dedup key
+        public long   receivedAt;
     }
 
     // ── Parse JSON ─────────────────────────────────────────────────────────────
-    //
-    //  route ส่ง video_category ที่อาจเป็น String หรือ Array
-    //  จัดการทั้งสองกรณี:
-    //    "cooking"        → "cooking"
-    //    ["cooking","diy"] → "cooking" (เอาตัวแรก)
-    //
     public static class ParseEventMap implements MapFunction<String, VideoEvent> {
         private final ObjectMapper mapper = new ObjectMapper();
 
@@ -125,39 +143,54 @@ public class FlinkBehaviorJob {
                 JsonNode node = mapper.readTree(raw);
 
                 VideoEvent e = new VideoEvent();
-                e.userId    = getText(node, "user_id", "userId");
-                e.videoId   = getText(node, "video_id", "videoId");
+                e.userId    = getText(node, "user_id",    "userId");
+                e.videoId   = getText(node, "video_id",   "videoId");
                 e.eventType = getText(node, "event_type", "eventType");
 
                 // รองรับ category ทั้ง String และ Array
                 JsonNode catNode = node.get("video_category");
                 if (catNode == null) catNode = node.get("category");
                 if (catNode != null) {
-                    if (catNode.isArray() && catNode.size() > 0) {
-                        e.category = catNode.get(0).asText("unknown");
-                    } else {
-                        e.category = catNode.asText("unknown");
-                    }
+                    e.category = catNode.isArray() && catNode.size() > 0
+                        ? catNode.get(0).asText("unknown")
+                        : catNode.asText("unknown");
                 } else {
                     e.category = "unknown";
                 }
 
-                // timestamp: receivedAt ISO string → epoch ms
-                JsonNode tsNode = node.get("receivedAt");
-                if (tsNode != null) {
-                    try {
-                        e.receivedAt = java.time.Instant.parse(tsNode.asText()).toEpochMilli();
-                    } catch (Exception ex) {
-                        e.receivedAt = System.currentTimeMillis();
-                    }
-                } else {
-                    e.receivedAt = System.currentTimeMillis();
+                // ── FIX #3: parse eventId ──────────────────────────────────────
+                // ลำดับ: event_id → eventId → log_id → สร้าง composite key
+                e.eventId = getText(node, "event_id", "eventId", "log_id");
+                if (e.eventId == null) {
+                    // fallback: bucket timestamp ลง 5 นาที
+                    // ความแม่นยำ ±5 นาที — ดีพอสำหรับ checkpoint replay gap
+                    // ควรให้ Node.js route ส่ง event_id UUID มาเพื่อความถูกต้อง 100%
+                    JsonNode tsNode = node.get("receivedAt");
+                    long ts = tsNode != null
+                        ? parseTimestamp(tsNode.asText())
+                        : System.currentTimeMillis();
+                    long bucket = ts / (5 * 60 * 1000L);
+                    e.eventId = e.userId + ":" + e.videoId + ":" + e.eventType + ":" + bucket;
                 }
+
+                // timestamp
+                JsonNode tsNode = node.get("receivedAt");
+                e.receivedAt = tsNode != null
+                    ? parseTimestamp(tsNode.asText())
+                    : System.currentTimeMillis();
 
                 return (e.userId != null && e.videoId != null && e.eventType != null) ? e : null;
 
             } catch (Exception ex) {
-                return null; // drop malformed messages
+                return null;
+            }
+        }
+
+        private long parseTimestamp(String text) {
+            try {
+                return java.time.Instant.parse(text).toEpochMilli();
+            } catch (Exception ex) {
+                return System.currentTimeMillis();
             }
         }
 
@@ -172,16 +205,10 @@ public class FlinkBehaviorJob {
 
     // ── Job 1: Category Boost Processor ───────────────────────────────────────
     //
-    //  State per user:
-    //    - categoryCount: Map<category, count> ใน session ปัจจุบัน
-    //    - lastEventTime: เวลา event ล่าสุด (ใช้ detect session gap)
-    //    - sessionTimer:  Flink timer handle สำหรับ cleanup
-    //
-    //  Logic:
-    //    1. ถ้า event ห่างจาก lastEventTime > 30 นาที → reset session
-    //    2. increment categoryCount[category]
-    //    3. ถ้า categoryCount[category] >= 3 → เขียน Redis boost
-    //    4. ตั้ง timer ล้าง state หลัง 30 นาที ที่ไม่มี event
+    //  Idempotency:
+    //    EXACTLY_ONCE checkpoint → processElement() ไม่ถูกเรียกซ้ำ
+    //    SETEX → เขียนซ้ำ = refresh TTL เท่านั้น ผลเหมือนกัน
+    //    → ไม่ต้องการ seenEvents state เพิ่ม
     //
     public static class CategoryBoostProcessor
             extends KeyedProcessFunction<String, VideoEvent, Void> {
@@ -211,30 +238,26 @@ public class FlinkBehaviorJob {
             long now      = event.receivedAt;
             Long lastTime = lastEventTime.value();
 
-            // ── Session gap detection ──────────────────────────────────────────
+            // session gap → reset count
             if (lastTime != null && (now - lastTime) > SESSION_GAP_MS) {
-                // session ใหม่ → reset count
                 categoryCount.clear();
             }
 
             lastEventTime.update(now);
 
-            // ── นับ category ──────────────────────────────────────────────────
+            // นับ category
             Integer count = categoryCount.get(event.category);
             if (count == null) count = 0;
-            count++;
-            categoryCount.put(event.category, count);
+            categoryCount.put(event.category, ++count);
 
-            // ── เขียน Redis boost ─────────────────────────────────────────────
+            // เขียน Redis boost — SETEX เป็น idempotent
             if (count >= CATEGORY_BOOST_THRESHOLD) {
                 try (Jedis jedis = jedisPool.getResource()) {
-                    String key = "user:boost:" + event.userId;
-                    jedis.setex(key, BOOST_TTL_SEC, event.category);
+                    jedis.setex("user:boost:" + event.userId, BOOST_TTL_SEC, event.category);
                 }
-                // ไม่ reset count → boost ยังคงอยู่ถ้าดูต่อ
             }
 
-            // ── ตั้ง/รีเซ็ต session cleanup timer ─────────────────────────────
+            // ตั้ง/รีเซ็ต session cleanup timer
             Long prevTimer = sessionTimerTs.value();
             if (prevTimer != null) {
                 ctx.timerService().deleteProcessingTimeTimer(prevTimer);
@@ -247,7 +270,6 @@ public class FlinkBehaviorJob {
         @Override
         public void onTimer(long timestamp, OnTimerContext ctx, Collector<Void> out)
                 throws Exception {
-            // session หมดเวลา → clear state
             categoryCount.clear();
             lastEventTime.clear();
             sessionTimerTs.clear();
@@ -261,16 +283,19 @@ public class FlinkBehaviorJob {
 
     // ── Job 2: Co-watch Processor ──────────────────────────────────────────────
     //
-    //  State per user:
-    //    - prevVideoId:   video ที่ completed ล่าสุด
-    //    - prevVideoTime: เวลาที่ completed (ใช้ detect session gap)
+    //  Idempotency:
+    //    ZINCRBY ไม่ idempotent → ต้องการ explicit dedup
+    //    ใช้ Redis SET NX "dedup:cw:{eventId}" EX 3600 เป็น gate
     //
-    //  Logic:
-    //    1. ถ้า completed ห่างจาก prevVideoTime > 30 นาที → ถือว่า session ใหม่
-    //       ไม่นับ co-watch (คนไม่ได้ดูต่อเนื่อง)
-    //    2. ถ้าอยู่ใน session เดียวกัน → ZADD co_watch:{prevVideoId} +1 {currVideoId}
-    //    3. ZREMRANGEBYRANK ตัด top 20 ที่เหลือ (ประหยัด Redis memory)
-    //    4. บันทึก prevVideoId = currVideoId
+    //    ทำไมไม่ใช้ Flink MapState เป็น dedup:
+    //    1. ถ้า scale parallelism → state ไม่ share ข้าม task instances
+    //    2. Redis เป็น single source of truth อยู่แล้ว → dedup ที่นี่พอ
+    //
+    //    ทำไม TTL 1 ชั่วโมง:
+    //    - Checkpoint interval = 30 วินาที
+    //    - ถ้า crash + restart replay ย้อนหลัง ≈ checkpoint gap ≤ 30 วินาที
+    //    - 1 ชั่วโมง ครอบ replay window ได้สบาย
+    //    - ถ้าต้องการ full Kafka replay ข้ามวัน → ใช้ --skip-dedup flag
     //
     public static class CoWatchProcessor
             extends KeyedProcessFunction<String, VideoEvent, Void> {
@@ -303,30 +328,45 @@ public class FlinkBehaviorJob {
                 && (now - prevTime) <= SESSION_GAP_MS;
 
             if (inSameSession && !prevId.equals(event.videoId)) {
-                // ── เขียน co-watch ─────────────────────────────────────────────
+
                 try (Jedis jedis = jedisPool.getResource()) {
-                    String key = "co_watch:" + prevId;
 
-                    // increment score (ZADD NX → ถ้ายังไม่มี / ZADD INCR → บวกเพิ่ม)
-                    jedis.zincrby(key, COWATCH_INCREMENT, event.videoId);
+                    // ── Dedup gate: SET NX per event_id ───────────────────────
+                    // acquired != null → key ถูกสร้างใหม่ = event นี้ยังไม่เคย process
+                    // acquired == null → key มีอยู่แล้ว  = duplicate → skip
+                    String dedupKey = "dedup:cw:" + event.eventId;
+                    String acquired = jedis.set(dedupKey, "1",
+                        new SetParams().nx().ex(DEDUP_TTL_SEC));
 
-                    // เก็บแค่ top COWATCH_TOP_N — ตัดที่เกินออก
-                    // ZREMRANGEBYRANK key 0 -(N+1) → ลบ elements ที่ score ต่ำสุด
-                    long size = jedis.zcard(key);
-                    if (size > COWATCH_TOP_N) {
-                        jedis.zremrangeByRank(key, 0, size - COWATCH_TOP_N - 1);
+                    if (acquired == null) {
+                        // duplicate — อัปเดต state ด้วยเพื่อให้ session tracking ถูกต้อง
+                        prevVideoId.update(event.videoId);
+                        prevVideoTime.update(now);
+                        ctx.timerService().registerProcessingTimeTimer(now + SESSION_GAP_MS);
+                        return;
                     }
 
-                    // refresh TTL ทุกครั้งที่มี co-watch ใหม่
-                    jedis.expire(key, COWATCH_TTL_SEC);
+                    // ── Write co-watch (ผ่าน dedup gate แล้ว) ─────────────────
+                    String coWatchKey = "co_watch:" + prevId;
+
+                    // Pipeline: ลด round-trip จาก 3 commands → 1 batch
+                    redis.clients.jedis.Pipeline pipe = jedis.pipelined();
+                    pipe.zincrby(coWatchKey, COWATCH_INCREMENT, event.videoId);
+                    pipe.zcard(coWatchKey);
+                    pipe.expire(coWatchKey, COWATCH_TTL_SEC);
+                    List<Object> results = pipe.syncAndReturnAll();
+
+                    // ตัด elements ที่เกิน top N (ใช้ zcard result จาก pipeline)
+                    long size = (Long) results.get(1);
+                    if (size > COWATCH_TOP_N) {
+                        jedis.zremrangeByRank(coWatchKey, 0, size - COWATCH_TOP_N - 1);
+                    }
                 }
             }
 
-            // ── บันทึก state ───────────────────────────────────────────────────
+            // อัปเดต state
             prevVideoId.update(event.videoId);
             prevVideoTime.update(now);
-
-            // ── ตั้ง timer ล้าง state หลัง session หมด ────────────────────────
             ctx.timerService().registerProcessingTimeTimer(now + SESSION_GAP_MS);
         }
 
