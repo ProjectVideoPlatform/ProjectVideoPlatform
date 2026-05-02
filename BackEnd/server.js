@@ -1,6 +1,6 @@
 require('dotenv').config();
 const express = require('express');
-const http = require('http'); // ✅ เพิ่ม
+const http = require('http');
 const cors = require('cors');
 const connectDB = require('./config/database');
 const redisClient = require('./config/redis');
@@ -10,13 +10,17 @@ const adminRoutes = require('./routes/admin');
 const UserRoute = require('./routes/user');
 const paymentRoutes = require('./routes/payment');
 const purchaseRoutes = require('./routes/Purchase');
+
+// ✅ 1. Import Webhook Route เข้ามา
+const webhookRoutes = require('./stripeWebhook'); 
+
 const { startRedisSubscriber } = require('./services/redisSubscriber');
-const cookieParser = require('cookie-parser'); // ✅ 1. เพิ่มตัวนี้
-const { initWebSocket } = require('./websocket'); // ✅ import ตรงๆ เลย
+const cookieParser = require('cookie-parser');
+const { initWebSocket } = require('./websocket');
 const client = require('prom-client');
 
 const app = express();
-const server = http.createServer(app); // ✅ สร้าง http server ก่อน
+const server = http.createServer(app);
 app.use(cookieParser());
 client.collectDefaultMetrics();
 
@@ -32,6 +36,12 @@ app.use(cors({
   allowedHeaders: ['Content-Type', 'Authorization'],
   credentials: true
 }));
+
+// ✅ 2. ประกาศ Webhook Route **ก่อน** express.json()
+// เพื่อให้ express.raw() ใน webhook.js ทำงานได้โดยไม่ถูกกวน
+app.use('/webhooks', webhookRoutes); 
+
+// จากนั้นค่อยเปิดใช้งาน JSON parser สำหรับ Route อื่นๆ
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
@@ -43,11 +53,12 @@ app.use('/api/admin', adminRoutes);
 app.use('/api/user', UserRoute);
 app.use('/api/payment', paymentRoutes);
 app.use('/api/public', require('./routes/analyze'));
+// app.use('/api/payment', paymentRoutes); // ❌ ลบอันนี้ออก (คุณประกาศไปแล้วด้านบน)
 
 app.get('/api/health', (req, res) => {
   res.json({ status: 'OK', timestamp: new Date().toISOString() });
 });
-
+  
 // ====== ERROR HANDLING ======
 app.use((error, req, res, next) => {
   console.error('Error:', error);
@@ -65,12 +76,10 @@ const startServer = async () => {
     await redisClient.connect();
     await startRedisSubscriber();
 
-    // ✅ ใช้ server.listen แทน app.listen
     server.listen(PORT, () => {
       console.log(`Server running on port ${PORT}`);
     });
 
-    // ✅ init WebSocket กับ http server เดียวกัน
     initWebSocket(server);
     console.log('WebSocket initialized');
 

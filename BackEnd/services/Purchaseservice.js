@@ -1,744 +1,720 @@
+'use strict';
+
+// services/PurchaseService.js
+//
+// Flow:
+//   purchaseVideo(userId, videoId, { currency })            → authorize → return { requiresAction, clientSecret, intentId }
+//   purchaseVideo(userId, videoId, { paymentIntentId })     → capture  → return { success, purchase, payment }
+//
+//   bulkPurchaseVideos(userId, videoIds, { currency })          → authorize
+//   bulkPurchaseVideos(userId, videoIds, { paymentIntentId })   → capture + save
+
 const mongoose = require('mongoose');
 const Purchase = require('../models/Purchase');
-const Video = require('../models/Video');
-const User = require('../models/User');
-const PaymentService = require('./paymentController');
-const logger = require('../utils/logger');
+const Video    = require('../models/Video');
+const User     = require('../models/User');
+const PaymentService = require('./PaymentService');
+const logger   = require('../utils/logger');
 const { generateIdempotencyKey } = require('../utils/idempotency');
 
 class PurchaseService {
-  constructor() {
-    // Initialize any dependencies
-  }
 
-  async purchaseVideo(userId, videoId, paymentData) {
-    const session = await mongoose.startSession();
-    let purchase = null;
-    
-    try {
-      await session.startTransaction();
-      
-      // 1. Validate video
-      const video = await Video.findOne({ 
-        _id: videoId, 
-        isActive: true 
-      }).session(session);
-      
-      if (!video) {
-        throw new Error('Video not found or inactive');
-      }
-      
-      // 2. Check existing access
-      const existingPurchase = await Purchase.findOne({
-        userId,
-        videoId,
-        status: 'completed',
-        $or: [
-          { expiresAt: null },
-          { expiresAt: { $gt: new Date() } }
-        ]
-      }).session(session);
-      
-      if (existingPurchase) {
-        await session.abortTransaction();
-        return { 
-          success: true, 
-          purchase: existingPurchase,
-          message: 'Already has access',
-          alreadyOwned: true
-        };
-      }
-      
-      // 3. Process payment
-      const paymentResult = await PaymentService.processPayment({
-        ...paymentData,
-        amount: video.price,
-        description: `Purchase video: ${video.title}`,
-        customerId: userId,
-        metadata: { videoId, videoTitle: video.title }
+  // ──────────────────────────────────────────────────────────────────────────
+  // purchaseVideo
+  // ──────────────────────────────────────────────────────────────────────────
+  async purchaseVideo(userId, videoId, paymentData = {}) {
+    const { paymentIntentId, currency = 'thb' } = paymentData;
+
+    // ════════════════════════════════════════════════════════════════════
+    // STEP 1: ไม่มี intentId → authorize อายัดวงเงิน, ส่ง clientSecret
+    // ════════════════════════════════════════════════════════════════════
+    if (!paymentIntentId) {
+      const video = await Video.findOne({ _id: videoId, isActive: true });
+      if (!video)                       throw new Error('Video not found or inactive');
+      if (video.accessType === 'free')  throw new Error('This video is free, no purchase needed');
+
+      // เช็ค existing ก่อน authorize (ประหยัด Stripe call)
+      const existing = await Purchase.findOne({
+        userId, videoId, status: 'completed',
+        $or: [{ expiresAt: null }, { expiresAt: { $gt: new Date() } }]
       });
-      
-      if (!paymentResult.success) {
-        throw new Error(`Payment failed: ${paymentResult.reason}`);
+      if (existing) {
+        return { success: true, purchase: existing, alreadyOwned: true };
       }
-      
-      // 4. Create purchase record
-      purchase = new Purchase({
-        userId,
-        videoId,
-        amount: video.price,
-        currency: 'THB',
-        paymentMethod: paymentResult.method,
-        transactionId: paymentResult.id,
-        gatewayTransactionId: paymentResult.gatewayId,
-        status: 'completed',
-        purchaseDate: new Date(),
-        expiresAt: video.accessDuration ? 
-          new Date(Date.now() + video.accessDuration) : null,
+
+      // Authorize — อายัดวงเงิน ยังไม่ตัดเงิน
+      const authResult = await PaymentService.authorize({
+        amount:     video.price,
+        currency:   currency.toLowerCase(),
+        customerId: userId,
         metadata: {
-          gateway: paymentResult.gateway,
-          capturedAt: paymentResult.capturedAt,
-          paymentMethod: paymentResult.method,
-          rawResponse: paymentResult.rawResponse || {}
+          videoId:    videoId.toString(),
+          videoTitle: video.title,
+          userId:     userId.toString()
         }
       });
-      
-      await purchase.save({ session });
-         if (!paymentResult.success) {
-            await session.abortTransaction();
-        throw new Error(`Payment failed: ${paymentResult.reason}`);
+
+      logger.info(`Payment authorized for video ${videoId}`, {
+        userId, intentId: authResult.intentId, amount: video.price
+      });
+
+      return {
+        success:        false,
+        requiresAction: true,
+        clientSecret:   authResult.clientSecret,
+        intentId:       authResult.intentId,
+        amount:         video.price,
+        currency:       currency.toUpperCase(),
+        message:        'Please confirm payment on client'
+      };
+    }
+
+    // ════════════════════════════════════════════════════════════════════
+    // STEP 2: มี intentId → verify + capture + บันทึก DB
+    // ════════════════════════════════════════════════════════════════════
+    const session = await mongoose.startSession();
+
+    try {
+      await session.startTransaction();
+
+      const video = await Video.findOne({ _id: videoId, isActive: true }).session(session);
+      if (!video) throw new Error('Video not found or inactive');
+
+      // ป้องกัน race condition — เช็คซ้ำใน transaction
+      const existing = await Purchase.findOne({
+        userId, videoId, status: 'completed',
+        $or: [{ expiresAt: null }, { expiresAt: { $gt: new Date() } }]
+      }).session(session);
+
+      if (existing) {
+        await session.abortTransaction();
+        return { success: true, purchase: existing, alreadyOwned: true };
       }
-      // 5. Update user
+
+      // Verify intent เป็นของ user/video นี้จริง
+      const intent = await PaymentService.retrieveIntent(paymentIntentId);
+
+      if (intent.metadata.userId !== userId.toString()) {
+        await session.abortTransaction();
+        throw new Error('PaymentIntent does not belong to this user');
+      }
+      if (intent.metadata.videoId !== videoId.toString()) {
+        await session.abortTransaction();
+        throw new Error('PaymentIntent does not match this video');
+      }
+
+      // Capture — ตัดเงินจริง
+      const captureResult = await PaymentService.capture(paymentIntentId);
+
+      // บันทึก Purchase
+      const purchase = new Purchase({
+        userId,
+        videoId,
+        amount:               video.price,
+        currency:             (currency || 'THB').toUpperCase(),
+        paymentMethod:        captureResult.method,
+        transactionId:        captureResult.id,
+        gatewayTransactionId: captureResult.gatewayId,
+        status:               'completed',
+        purchaseDate:         new Date(),
+        expiresAt:            video.accessDuration
+          ? new Date(Date.now() + video.accessDuration)
+          : null,
+        metadata: {
+          gateway:    captureResult.gateway,
+          capturedAt: captureResult.capturedAt
+        }
+      });
+
+      await purchase.save({ session });
+
       await User.updateOne(
         { _id: userId },
         {
           $addToSet: { purchasedVideos: videoId },
-          $inc: { totalSpent: video.price },
-          $set: { updatedAt: new Date() }
+          $inc:      { totalSpent: video.price },
+          $set:      { updatedAt: new Date() }
         },
         { session }
       );
-      
-      // 6. Update video purchase count
+
       await Video.updateOne(
         { _id: videoId },
         { $inc: { purchaseCount: 1 } },
         { session }
       );
-      
+
       await session.commitTransaction();
-      
-      logger.info(`Purchase completed: ${purchase._id}`, { 
-        userId, 
-        videoId,
-        amount: video.price,
-        transactionId: paymentResult.id 
+
+      logger.info(`Purchase completed: ${purchase._id}`, {
+        userId, videoId, amount: video.price, transactionId: captureResult.id
       });
-      
-      // 7. Post-purchase actions (outside transaction)
+
       await this.afterPurchaseActions(userId, videoId, purchase);
-      
-      return { 
-        success: true, 
+
+      return {
+        success:  true,
         purchase,
         payment: {
-          id: paymentResult.id,
-          gateway: paymentResult.gateway,
-          status: 'completed'
+          id:      captureResult.id,
+          gateway: captureResult.gateway,
+          status:  'completed'
         }
       };
-      
+
     } catch (error) {
       await session.abortTransaction();
-      
-      logger.error(`Purchase failed: ${error.message}`, { 
-        userId, 
-        videoId, 
-        error: error.message,
-        stack: error.stack 
-      });
-      
-      // Compensating action - try to refund if payment was successful
-      if (purchase) {
-        try {
-          await PaymentService.refundIfNeeded({
-            transactionId: purchase.transactionId,
-            amount: purchase.amount,
-            reason: `Purchase rollback: ${error.message}`
-          });
-        } catch (refundError) {
-          logger.error('Refund attempt failed:', refundError);
-        }
+
+      logger.error(`Purchase (capture) failed: ${error.message}`, { userId, videoId });
+
+      // Compensating refund ถ้า capture สำเร็จแต่ DB fail
+      // (ตรวจจากว่า intent ถูก captured แล้วหรือยัง)
+      try {
+        await PaymentService.refundIfNeeded({
+          transactionId: paymentIntentId,
+          reason:        `Purchase rollback: ${error.message}`
+        });
+      } catch (refundError) {
+        logger.error('Compensating refund failed:', refundError);
       }
-      
+
       throw new Error(`Purchase failed: ${error.message}`);
     } finally {
       session.endSession();
     }
   }
-  
-  async bulkPurchaseVideos(userId, videoIds, paymentData) {
-    // Validate input
-    if (!videoIds || !Array.isArray(videoIds) || videoIds.length === 0) {
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // bulkPurchaseVideos
+  // ──────────────────────────────────────────────────────────────────────────
+  async bulkPurchaseVideos(userId, videoIds, paymentData = {}) {
+    if (!Array.isArray(videoIds) || videoIds.length === 0) {
       throw new Error('Invalid videoIds array');
     }
-    
     if (videoIds.length > 1000) {
       throw new Error('Maximum 1000 videos per bulk purchase');
     }
-    
+
+    const { paymentIntentId, currency = 'thb' } = paymentData;
     const BATCH_SIZE = 100;
-    const idempotencyKey = generateIdempotencyKey(userId, paymentData.transactionId, videoIds);
-    
-    // Check idempotency
-    const existing = await this.checkIdempotency(idempotencyKey);
-    if (existing) {
-      logger.info(`Idempotent request detected: ${idempotencyKey}`);
-      return existing;
-    }
-    
-    const session = await mongoose.startSession();
-    
-    try {
-      await session.startTransaction();
-      
-      // Create processing record
-      await this.createProcessingRecord(idempotencyKey, userId, videoIds, session);
-      
-      // Get all videos in one query
+
+    // ════════════════════════════════════════════════════════════════════
+    // STEP 1: ไม่มี intentId → คำนวณราคา + authorize
+    // ════════════════════════════════════════════════════════════════════
+    if (!paymentIntentId) {
       const videos = await Video.find({
-        _id: { $in: videoIds },
-        isActive: true
-      }).session(session);
-      
-      if (videos.length === 0) {
-        throw new Error('No active videos found');
-      }
-      
-      // Create video map
-      const videoMap = new Map();
-      videos.forEach(video => {
-        videoMap.set(video._id.toString(), video);
+        _id:        { $in: videoIds },
+        isActive:   true,
+        accessType: 'paid'
       });
-      
-      // Check existing purchases
+
+      if (videos.length === 0) throw new Error('No active paid videos found');
+
       const existingPurchases = await Purchase.find({
         userId,
         videoId: { $in: videoIds },
-        status: 'completed',
-        $or: [
-          { expiresAt: null },
-          { expiresAt: { $gt: new Date() } }
-        ]
-      }).session(session);
-      
-      const existingSet = new Set(
-        existingPurchases.map(p => p.videoId.toString())
-      );
-      
-      // Filter out videos to purchase
-      const videosToPurchase = videos.filter(video => 
-        !existingSet.has(video._id.toString())
-      );
-      
+        status:  'completed',
+        $or: [{ expiresAt: null }, { expiresAt: { $gt: new Date() } }]
+      });
+
+      const existingSet      = new Set(existingPurchases.map(p => p.videoId.toString()));
+      const videosToPurchase = videos.filter(v => !existingSet.has(v._id.toString()));
+
       if (videosToPurchase.length === 0) {
-        await session.abortTransaction();
-        return { 
-          success: true, 
-          message: 'All videos already purchased',
+        return {
+          success:      true,
           alreadyOwned: true,
-          bulkId: idempotencyKey
+          message:      'All videos already purchased'
         };
       }
-      
-      // Calculate total amount
-      const totalAmount = videosToPurchase.reduce((sum, video) => sum + video.price, 0);
-      
-      // Process payment for total amount
-      const paymentResult = await PaymentService.processPayment({
-        ...paymentData,
-        amount: totalAmount,
-        description: `Bulk purchase: ${videosToPurchase.length} videos`,
+
+      const totalAmount = videosToPurchase.reduce((sum, v) => sum + v.price, 0);
+
+      const authResult = await PaymentService.authorize({
+        amount:     totalAmount,
+        currency:   currency.toLowerCase(),
         customerId: userId,
-        metadata: { 
-          videoCount: videosToPurchase.length,
-          videoIds: videosToPurchase.map(v => v._id)
+        metadata: {
+          userId:     userId.toString(),
+          videoCount: videosToPurchase.length.toString(),
+          videoIds:   videosToPurchase.map(v => v._id.toString()).join(',')
         }
       });
-      
-      if (!paymentResult.success) {
-        throw new Error(`Bulk payment failed: ${paymentResult.reason}`);
+
+      logger.info(`Bulk payment authorized`, {
+        userId, intentId: authResult.intentId,
+        videoCount: videosToPurchase.length, totalAmount
+      });
+
+      return {
+        success:        false,
+        requiresAction: true,
+        clientSecret:   authResult.clientSecret,
+        intentId:       authResult.intentId,
+        totalAmount,
+        videoCount:     videosToPurchase.length,
+        currency:       currency.toUpperCase(),
+        message:        'Please confirm payment on client'
+      };
+    }
+
+    // ════════════════════════════════════════════════════════════════════
+    // STEP 2: มี intentId → verify + capture + บันทึก DB
+    // ════════════════════════════════════════════════════════════════════
+    const idempotencyKey = generateIdempotencyKey(userId, paymentIntentId, videoIds);
+
+    const existing = await this.checkIdempotency(idempotencyKey);
+    if (existing) {
+      logger.info(`Idempotent bulk request detected: ${idempotencyKey}`);
+      return existing;
+    }
+
+    // Verify intent เป็นของ user นี้จริง
+    const intent = await PaymentService.retrieveIntent(paymentIntentId);
+    if (intent.metadata.userId !== userId.toString()) {
+      throw new Error('PaymentIntent does not belong to this user');
+    }
+
+    const session = await mongoose.startSession();
+
+    try {
+      await session.startTransaction();
+
+      await this.createProcessingRecord(idempotencyKey, userId, videoIds, session);
+
+      const videos = await Video.find({
+        _id:        { $in: videoIds },
+        isActive:   true,
+        accessType: 'paid'
+      }).session(session);
+
+      if (videos.length === 0) throw new Error('No active paid videos found');
+
+      const existingPurchases = await Purchase.find({
+        userId,
+        videoId: { $in: videoIds },
+        status:  'completed',
+        $or: [{ expiresAt: null }, { expiresAt: { $gt: new Date() } }]
+      }).session(session);
+
+      const existingSet      = new Set(existingPurchases.map(p => p.videoId.toString()));
+      const videosToPurchase = videos.filter(v => !existingSet.has(v._id.toString()));
+
+      if (videosToPurchase.length === 0) {
+        await session.abortTransaction();
+        return {
+          success:      true,
+          alreadyOwned: true,
+          message:      'All videos already purchased',
+          bulkId:       idempotencyKey
+        };
       }
-      
-      // Create purchases in batches
-      const results = [];
+
+      const totalAmount = videosToPurchase.reduce((sum, v) => sum + v.price, 0);
+
+      // Capture — ตัดเงินจริง
+      const captureResult = await PaymentService.capture(paymentIntentId);
+
+      // บันทึก Purchase ทีละ batch
+      const results            = [];
       const successfulVideoIds = [];
-      const purchases = [];
-      
+      const purchases          = [];
+
       for (let i = 0; i < videosToPurchase.length; i += BATCH_SIZE) {
-        const batch = videosToPurchase.slice(i, i + BATCH_SIZE);
+        const batch          = videosToPurchase.slice(i, i + BATCH_SIZE);
         const batchPurchases = [];
-        
+
         for (const video of batch) {
           try {
-            const purchase = new Purchase({
+            const p = new Purchase({
               userId,
-              videoId: video._id,
-              bulkId: idempotencyKey,
-              amount: video.price,
-              currency: 'THB',
-              paymentMethod: paymentResult.method,
-              transactionId: `${paymentResult.id}:${video._id.toString()}`,
-              gatewayTransactionId: paymentResult.gatewayId,
-              status: 'completed',
-              purchaseDate: new Date(),
-              expiresAt: video.accessDuration ? 
-                new Date(Date.now() + video.accessDuration) : null,
+              videoId:              video._id,
+              bulkId:               idempotencyKey,
+              amount:               video.price,
+              currency:             (currency || 'THB').toUpperCase(),
+              paymentMethod:        captureResult.method,
+              transactionId:        `${captureResult.id}:${video._id}`,
+              gatewayTransactionId: captureResult.gatewayId,
+              status:               'completed',
+              purchaseDate:         new Date(),
+              expiresAt:            video.accessDuration
+                ? new Date(Date.now() + video.accessDuration)
+                : null,
               metadata: {
-                gateway: paymentResult.gateway,
-                capturedAt: paymentResult.capturedAt,
-                isBulk: true,
-                bulkIndex: purchases.length + batchPurchases.length
+                gateway:    captureResult.gateway,
+                capturedAt: captureResult.capturedAt,
+                isBulk:     true,
+                bulkIndex:  purchases.length + batchPurchases.length
               }
             });
-            
-            batchPurchases.push(purchase);
+
+            batchPurchases.push(p);
             successfulVideoIds.push(video._id);
-            results.push({ 
-              videoId: video._id, 
-              status: 'success', 
-              amount: video.price 
-            });
-            
-          } catch (error) {
-            results.push({ 
-              videoId: video._id, 
-              status: 'error', 
-              error: error.message 
-            });
+            results.push({ videoId: video._id, status: 'success', amount: video.price });
+          } catch (err) {
+            results.push({ videoId: video._id, status: 'error', error: err.message });
           }
         }
-        
-        // Save batch
+
         if (batchPurchases.length > 0) {
           await Purchase.insertMany(batchPurchases, { session });
           purchases.push(...batchPurchases);
         }
       }
-      
+
       if (successfulVideoIds.length === 0) {
         throw new Error('No videos were purchased successfully');
       }
-      
-      // Update user
+
       await User.updateOne(
         { _id: userId },
         {
           $addToSet: { purchasedVideos: { $each: successfulVideoIds } },
-          $inc: { totalSpent: totalAmount },
-          $set: { updatedAt: new Date() }
+          $inc:      { totalSpent: totalAmount },
+          $set:      { updatedAt: new Date() }
         },
         { session }
       );
-      
-      // Update video purchase counts
+
       await Video.updateMany(
         { _id: { $in: successfulVideoIds } },
         { $inc: { purchaseCount: 1 } },
         { session }
       );
-      
-      // Update processing record
+
       await this.updateProcessingRecord(
-        idempotencyKey, 
-        'completed', 
-        { 
-          results, 
-          totalAmount,
-          purchasedCount: successfulVideoIds.length,
-          paymentId: paymentResult.id
-        },
+        idempotencyKey, 'completed',
+        { results, totalAmount, purchasedCount: successfulVideoIds.length, paymentId: captureResult.id },
         session
       );
-      
+
       await session.commitTransaction();
-      
+
       logger.info(`Bulk purchase completed: ${idempotencyKey}`, {
         userId,
-        totalVideos: videoIds.length,
         purchasedCount: successfulVideoIds.length,
         totalAmount
       });
-      
-      // Post-purchase actions
+
       await this.afterBulkPurchaseActions(userId, successfulVideoIds, purchases);
-      
+
       return {
-        success: true,
-        bulkId: idempotencyKey,
+        success:           true,
+        bulkId:            idempotencyKey,
         totalAmount,
-        purchasedCount: successfulVideoIds.length,
-        failedCount: results.filter(r => r.status === 'error').length,
+        purchasedCount:    successfulVideoIds.length,
+        failedCount:       results.filter(r => r.status === 'error').length,
         alreadyOwnedCount: existingPurchases.length,
         results,
         payment: {
-          id: paymentResult.id,
-          gateway: paymentResult.gateway,
-          status: 'completed'
+          id:      captureResult.id,
+          gateway: captureResult.gateway,
+          status:  'completed'
         }
       };
-      
+
     } catch (error) {
       await session.abortTransaction();
-      
-      // Update processing record as failed
-      await this.updateProcessingRecord(
-        idempotencyKey, 
-        'failed', 
-        { error: error.message }
-      );
-      
-      logger.error(`Bulk purchase failed: ${error.message}`, {
-        userId,
-        videoIdsCount: videoIds.length,
-        error: error.message
-      });
-      
+      await this.updateProcessingRecord(idempotencyKey, 'failed', { error: error.message });
+      logger.error(`Bulk purchase (capture) failed: ${error.message}`, { userId });
+
+      // Compensating refund
+      try {
+        await PaymentService.refundIfNeeded({
+          transactionId: paymentIntentId,
+          reason:        `Bulk purchase rollback: ${error.message}`
+        });
+      } catch (refundError) {
+        logger.error('Bulk compensating refund failed:', refundError);
+      }
+
       throw error;
     } finally {
       session.endSession();
     }
   }
-  
+
+  // ── Webhook handlers ────────────────────────────────────────────────────────
+
+  async handlePaymentCompleted(data) {
+    const { transactionId, gatewayId, metadata } = data;
+
+    const purchase = await Purchase.findOneAndUpdate(
+      { transactionId },
+      {
+        status:                       'completed',
+        gatewayTransactionId:         gatewayId,
+        'metadata.paymentVerifiedAt': new Date(),
+        'metadata.webhookData':       data
+      },
+      { new: true }
+    );
+
+    if (purchase) {
+      await this.afterPurchaseActions(purchase.userId, purchase.videoId, purchase);
+    }
+
+    return purchase;
+  }
+
+  async handlePaymentFailed(data) {
+    const { transactionId, reason } = data;
+
+    const purchase = await Purchase.findOneAndUpdate(
+      { transactionId, status: { $ne: 'completed' } },
+      {
+        status:                   'failed',
+        'metadata.failureReason': reason,
+        'metadata.failedAt':      new Date()
+      },
+      { new: true }
+    );
+
+    if (purchase) {
+      logger.warn('[PurchaseService] Payment failed recorded', {
+        purchaseId: purchase._id, transactionId, reason
+      });
+    }
+
+    return purchase;
+  }
+
+  async handleRefundProcessed(data) {
+    const { transactionId, refundId, amountRefunded } = data;
+
+    const purchase = await Purchase.findOneAndUpdate(
+      { transactionId },
+      {
+        status:                    'refunded',
+        refundedAt:                new Date(),
+        'metadata.refundId':       refundId,
+        'metadata.amountRefunded': amountRefunded
+      },
+      { new: true }
+    );
+
+    if (purchase) {
+      await User.updateOne(
+        { _id: purchase.userId },
+        {
+          $pull: { purchasedVideos: purchase.videoId },
+          $inc:  { totalSpent: -amountRefunded }
+        }
+      );
+
+      logger.info('[PurchaseService] Refund processed', {
+        purchaseId: purchase._id, transactionId, amountRefunded
+      });
+    }
+
+    return purchase;
+  }
+
+  // ── Idempotency helpers ─────────────────────────────────────────────────────
+
   async checkIdempotency(idempotencyKey) {
     try {
-      // Check in a dedicated collection or in purchase records
-      const existingRecord = await mongoose.connection.db.collection('idempotency_keys')
+      const rec = await mongoose.connection.db
+        .collection('idempotency_keys')
         .findOne({ _id: idempotencyKey, status: 'completed' });
-      
-      if (existingRecord) {
-        return existingRecord.result;
-      }
-      return null;
-    } catch (error) {
-      logger.error('Idempotency check failed:', error);
+      return rec ? rec.result : null;
+    } catch (err) {
+      logger.error('Idempotency check failed:', err);
       return null;
     }
   }
-  
+
   async createProcessingRecord(idempotencyKey, userId, videoIds, session) {
     try {
-      await mongoose.connection.db.collection('idempotency_keys').insertOne({
-        _id: idempotencyKey,
-        userId,
-        videoIds,
-        status: 'processing',
-        createdAt: new Date(),
-        updatedAt: new Date()
-      }, { session });
-    } catch (error) {
-      // If duplicate key error, it's okay - idempotency is working
-      if (error.code !== 11000) {
-        throw error;
-      }
+      await mongoose.connection.db.collection('idempotency_keys').insertOne(
+        {
+          _id: idempotencyKey, userId, videoIds,
+          status: 'processing', createdAt: new Date(), updatedAt: new Date()
+        },
+        { session }
+      );
+    } catch (err) {
+      if (err.code !== 11000) throw err; // 11000 = duplicate key (ok)
     }
   }
-  
+
   async updateProcessingRecord(idempotencyKey, status, data, session = null) {
-    const updateDoc = {
-      status,
-      updatedAt: new Date(),
-      ...data
-    };
-    
-    const options = session ? { session } : {};
-    
     await mongoose.connection.db.collection('idempotency_keys').updateOne(
       { _id: idempotencyKey },
-      { $set: updateDoc },
-      options
+      { $set: { status, updatedAt: new Date(), ...data } },
+      session ? { session } : {}
     );
   }
-  
+
+  // ── Post-purchase actions ───────────────────────────────────────────────────
+
   async afterPurchaseActions(userId, videoId, purchase) {
-    try {
-      // Execute async actions in parallel, don't block response
-      setImmediate(async () => {
-        try {
-          await Promise.allSettled([
-            this.sendPurchaseNotification(userId, videoId, purchase.amount),
-            this.updateAnalytics(videoId),
-            this.invalidateUserCache(userId),
-            this.sendPurchaseEmail(userId, purchase)
-          ]);
-          
-          logger.info('Post-purchase actions completed', { userId, videoId });
-        } catch (error) {
-          logger.error('Post-purchase actions failed:', error);
-        }
-      });
-    } catch (error) {
-      logger.error('Failed to schedule post-purchase actions:', error);
-    }
+    setImmediate(async () => {
+      try {
+        await Promise.allSettled([
+          this.sendPurchaseNotification(userId, videoId, purchase.amount),
+          this.updateAnalytics(videoId),
+          this.invalidateUserCache(userId),
+          this.sendPurchaseEmail(userId, purchase)
+        ]);
+      } catch (err) {
+        logger.error('Post-purchase actions failed:', err);
+      }
+    });
   }
-  
+
   async afterBulkPurchaseActions(userId, videoIds, purchases) {
     setImmediate(async () => {
       try {
         const totalAmount = purchases.reduce((sum, p) => sum + p.amount, 0);
-        
         await Promise.allSettled([
           this.sendBulkPurchaseNotification(userId, videoIds.length, totalAmount),
           this.updateBulkAnalytics(videoIds),
           this.invalidateUserCache(userId),
           this.sendBulkPurchaseEmail(userId, purchases)
         ]);
-        
-        logger.info('Bulk post-purchase actions completed', { 
-          userId, 
-          videoCount: videoIds.length 
-        });
-      } catch (error) {
-        logger.error('Bulk post-purchase actions failed:', error);
+      } catch (err) {
+        logger.error('Bulk post-purchase actions failed:', err);
       }
     });
   }
-  
-  // Mock implementations for notification methods
-  async sendPurchaseNotification(userId, videoId, amount) {
-    logger.info('Sending purchase notification', { userId, videoId, amount });
-    // Implement actual notification logic
-  }
-  
-  async sendBulkPurchaseNotification(userId, videoCount, totalAmount) {
-    logger.info('Sending bulk purchase notification', { userId, videoCount, totalAmount });
-    // Implement actual notification logic
-  }
-  
-  async updateAnalytics(videoId) {
-    logger.info('Updating analytics', { videoId });
-    // Implement analytics update
-  }
-  
-  async updateBulkAnalytics(videoIds) {
-    logger.info('Updating bulk analytics', { videoCount: videoIds.length });
-    // Implement bulk analytics
-  }
-  
-  async invalidateUserCache(userId) {
-    logger.info('Invalidating user cache', { userId });
-    // Implement cache invalidation
-  }
-  
-  async sendPurchaseEmail(userId, purchase) {
-    logger.info('Sending purchase email', { userId, purchaseId: purchase._id });
-    // Implement email sending
-  }
-  
-  async sendBulkPurchaseEmail(userId, purchases) {
-    logger.info('Sending bulk purchase email', { userId, purchaseCount: purchases.length });
-    // Implement bulk email sending
-  }
-  
-  // Additional utility methods
-  
+
+  // ── Utility methods ─────────────────────────────────────────────────────────
+
   async getUserPurchases(userId, options = {}) {
     const { limit = 20, page = 1, status, fromDate, toDate } = options;
-    const skip = (page - 1) * limit;
-    
+    const skip  = (page - 1) * limit;
     const query = { userId };
-    
+
     if (status) query.status = status;
     if (fromDate || toDate) {
       query.purchaseDate = {};
       if (fromDate) query.purchaseDate.$gte = new Date(fromDate);
-      if (toDate) query.purchaseDate.$lte = new Date(toDate);
+      if (toDate)   query.purchaseDate.$lte = new Date(toDate);
     }
-    
-    const purchases = await Purchase.find(query)
-      .populate('videoId', 'title thumbnail duration price')
-      .sort({ purchaseDate: -1 })
-      .skip(skip)
-      .limit(limit);
-    
-    const total = await Purchase.countDocuments(query);
-    
+
+    const [purchases, total] = await Promise.all([
+      Purchase.find(query)
+        .populate('videoId', 'title thumbnail duration price accessType')
+        .sort({ purchaseDate: -1 })
+        .skip(skip)
+        .limit(limit),
+      Purchase.countDocuments(query)
+    ]);
+
     return {
       purchases,
-      pagination: {
-        total,
-        page,
-        limit,
-        totalPages: Math.ceil(total / limit)
-      }
+      pagination: { total, page, limit, totalPages: Math.ceil(total / limit) }
     };
   }
-  
+
   async checkAccess(userId, videoId) {
     const purchase = await Purchase.findOne({
-      userId,
-      videoId,
-      status: 'completed',
-      $or: [
-        { expiresAt: null },
-        { expiresAt: { $gt: new Date() } }
-      ]
+      userId, videoId, status: 'completed',
+      $or: [{ expiresAt: null }, { expiresAt: { $gt: new Date() } }]
     });
-    
-    return purchase ? {
-      hasAccess: true,
-      purchaseId: purchase._id,
-      purchasedAt: purchase.purchaseDate,
-      expiresAt: purchase.expiresAt,
-      daysRemaining: purchase.expiresAt ? 
-        Math.ceil((purchase.expiresAt - new Date()) / (1000 * 60 * 60 * 24)) : null
-    } : {
-      hasAccess: false
+
+    if (!purchase) return { hasAccess: false };
+
+    return {
+      hasAccess:     true,
+      purchaseId:    purchase._id,
+      purchasedAt:   purchase.purchaseDate,
+      expiresAt:     purchase.expiresAt,
+      daysRemaining: purchase.expiresAt
+        ? Math.ceil((purchase.expiresAt - new Date()) / (1000 * 60 * 60 * 24))
+        : null
     };
   }
-  
+
   async refundPurchase(purchaseId, reason) {
     const session = await mongoose.startSession();
-    
+
     try {
       await session.startTransaction();
-      
+
       const purchase = await Purchase.findById(purchaseId).session(session);
-      if (!purchase) {
-        throw new Error('Purchase not found');
-      }
-      
-      if (purchase.status !== 'completed') {
-        throw new Error('Only completed purchases can be refunded');
-      }
-      
-      // Check if purchase is within refund window (e.g., 30 days)
-      const refundWindow = 30 * 24 * 60 * 60 * 1000; // 30 days
-      if (new Date() - purchase.purchaseDate > refundWindow) {
+      if (!purchase)                        throw new Error('Purchase not found');
+      if (purchase.status !== 'completed')  throw new Error('Only completed purchases can be refunded');
+
+      const REFUND_WINDOW = 30 * 24 * 60 * 60 * 1000; // 30 วัน
+      if (new Date() - purchase.purchaseDate > REFUND_WINDOW) {
         throw new Error('Refund window has expired');
       }
-      
-      // Process refund
+
       const refundResult = await PaymentService.refund({
         transactionId: purchase.transactionId,
-        amount: purchase.amount,
-        reason: reason || 'Customer request'
+        amount:        purchase.amount,
+        reason:        reason || 'Customer request'
       });
-      
+
       if (!refundResult.success) {
         throw new Error(`Refund failed: ${refundResult.reason}`);
       }
-      
-      // Update purchase
-      purchase.status = 'refunded';
-      purchase.refundedAt = new Date();
-      purchase.refundReason = reason;
-      purchase.metadata.refund = refundResult;
+
+      purchase.status           = 'refunded';
+      purchase.refundedAt       = new Date();
+      purchase.refundReason     = reason;
+      purchase.metadata.refund  = refundResult;
       await purchase.save({ session });
-      
-      // Update user
+
       await User.updateOne(
         { _id: purchase.userId },
         {
           $pull: { purchasedVideos: purchase.videoId },
-          $inc: { totalSpent: -purchase.amount },
-          $set: { updatedAt: new Date() }
+          $inc:  { totalSpent: -purchase.amount },
+          $set:  { updatedAt: new Date() }
         },
         { session }
       );
-      
+
       await session.commitTransaction();
-      
-      logger.info(`Refund completed: ${purchaseId}`, { 
-        reason, 
-        amount: purchase.amount 
-      });
-      
-      return { 
-        success: true, 
-        purchase,
-        refund: refundResult 
-      };
-      
-    } catch (error) {
+      logger.info(`Refund completed: ${purchaseId}`, { reason, amount: purchase.amount });
+
+      return { success: true, purchase, refund: refundResult };
+
+    } catch (err) {
       await session.abortTransaction();
-      logger.error(`Refund failed: ${error.message}`, { purchaseId, error });
-      throw error;
+      logger.error(`Refund failed: ${err.message}`, { purchaseId });
+      throw err;
     } finally {
       session.endSession();
     }
   }
+
   async verifyOwnership(purchaseId, userId) {
-    return Purchase.findOne({
-      _id: purchaseId,
-      userId
-    });
+    return Purchase.findOne({ _id: purchaseId, userId });
   }
-  
-  // Method สำหรับ webhook จาก payment gateway
-  async handlePaymentWebhook(payload, signature) {
-    try {
-      // Verify signature
-      const isValid = await this.verifyWebhookSignature(payload, signature);
-      if (!isValid) {
-        throw new Error('Invalid webhook signature');
-      }
-      
-      const { event, data } = payload;
-      
-      switch (event) {
-        case 'payment.completed':
-          return await this.handlePaymentCompleted(data);
-        case 'payment.failed':
-          return await this.handlePaymentFailed(data);
-        case 'refund.processed':
-          return await this.handleRefundProcessed(data);
-        default:
-          console.log(`Unhandled webhook event: ${event}`);
-      }
-      
-      return { success: true };
-    } catch (error) {
-      console.error('Webhook handling error:', error);
-      throw error;
-    }
-  }
-  
-  async handlePaymentCompleted(data) {
-    const { transactionId, amount, gatewayId, metadata } = data;
-    
-    // Update purchase status
-    const purchase = await Purchase.findOneAndUpdate(
-      { transactionId },
-      {
-        status: 'completed',
-        gatewayTransactionId: gatewayId,
-        'metadata.paymentVerifiedAt': new Date(),
-        'metadata.webhookData': data
-      },
-      { new: true }
-    );
-    
-    if (purchase) {
-      // Trigger post-purchase actions
-      await this.afterPurchaseActions(
-        purchase.userId, 
-        purchase.videoId, 
-        purchase
-      );
-    }
-    
-    return purchase;
-  }
-  
-  // เพิ่ม method สำหรับ monitoring
+
   async getPurchaseStats(userId) {
     const stats = await Purchase.aggregate([
       { $match: { userId } },
       {
         $group: {
-          _id: null,
-          totalSpent: { $sum: '$amount' },
-          totalPurchases: { $sum: 1 },
-          completedPurchases: {
-            $sum: { $cond: [{ $eq: ['$status', 'completed'] }, 1, 0] }
-          },
-          refundedPurchases: {
-            $sum: { $cond: [{ $eq: ['$status', 'refunded'] }, 1, 0] }
-          },
-          averagePurchase: { $avg: '$amount' }
+          _id:                null,
+          totalSpent:         { $sum: '$amount' },
+          totalPurchases:     { $sum: 1 },
+          completedPurchases: { $sum: { $cond: [{ $eq: ['$status', 'completed'] }, 1, 0] } },
+          refundedPurchases:  { $sum: { $cond: [{ $eq: ['$status', 'refunded'] }, 1, 0] } },
+          averagePurchase:    { $avg: '$amount' }
         }
       }
     ]);
-    
+
     return stats[0] || {
-      totalSpent: 0,
-      totalPurchases: 0,
-      completedPurchases: 0,
-      refundedPurchases: 0,
-      averagePurchase: 0
+      totalSpent: 0, totalPurchases: 0,
+      completedPurchases: 0, refundedPurchases: 0, averagePurchase: 0
     };
   }
+
+  // ── Notification stubs ──────────────────────────────────────────────────────
+  async sendPurchaseNotification(u, v, a)    { logger.info('Purchase notification', { u, v, a }); }
+  async sendBulkPurchaseNotification(u, c, a) { logger.info('Bulk purchase notification', { u, c, a }); }
+  async updateAnalytics(videoId)             { logger.info('Analytics updated', { videoId }); }
+  async updateBulkAnalytics(videoIds)        { logger.info('Bulk analytics updated', { count: videoIds.length }); }
+  async invalidateUserCache(userId)          { logger.info('Cache invalidated', { userId }); }
+  async sendPurchaseEmail(userId, purchase)  { logger.info('Purchase email sent', { userId, purchaseId: purchase._id }); }
+  async sendBulkPurchaseEmail(u, purchases)  { logger.info('Bulk email sent', { u, count: purchases.length }); }
 }
 
 module.exports = new PurchaseService();

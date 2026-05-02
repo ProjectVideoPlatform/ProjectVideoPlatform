@@ -1,69 +1,80 @@
-// utils/customValidators.js
+'use strict';
+
 const mongoose = require('mongoose');
 
 const customValidators = {
-  // ตรวจสอบว่าเป็น array ของ MongoDB IDs
-  isMongoIdArray: (value) => {
+
+  // ── Array validators ────────────────────────────────────────────────────────
+
+  // ตรวจสอบว่าเป็น array ของ MongoDB ObjectIds ที่ valid ทั้งหมด
+  isMongoIdArray(value) {
     if (!Array.isArray(value)) {
       throw new Error('Must be an array');
     }
-    
-    const invalidIds = value.filter(id => !mongoose.Types.ObjectId.isValid(id));
-    if (invalidIds.length > 0) {
-      throw new Error(`Invalid MongoDB IDs: ${invalidIds.join(', ')}`);
+    const invalid = value.filter(id => !mongoose.Types.ObjectId.isValid(id));
+    if (invalid.length > 0) {
+      throw new Error(`Invalid MongoDB IDs: ${invalid.join(', ')}`);
     }
-    
     return true;
   },
-  
-  // ตรวจสอบว่า videoIds ไม่ซ้ำ
-  uniqueVideoIds: (value) => {
+
+  // ตรวจสอบว่า videoIds ไม่ซ้ำกัน
+  uniqueVideoIds(value) {
     if (!Array.isArray(value)) return true;
-    
-    const uniqueIds = [...new Set(value.map(id => id.toString()))];
-    if (uniqueIds.length !== value.length) {
+    const unique = [...new Set(value.map(id => id.toString()))];
+    if (unique.length !== value.length) {
       throw new Error('Video IDs must be unique');
     }
-    
     return true;
   },
-  
-  // ตรวจสอบจำนวน videoIds (สำหรับ bulk purchase)
-  maxVideoIds: (max) => (value) => {
-    if (!Array.isArray(value)) return true;
-    
-    if (value.length > max) {
-      throw new Error(`Cannot purchase more than ${max} videos at once`);
-    }
-    
-    return true;
+
+  // factory: ตรวจสอบจำนวน videoIds ไม่เกิน max
+  maxVideoIds(max) {
+    return (value) => {
+      if (!Array.isArray(value)) return true;
+      if (value.length > max) {
+        throw new Error(`Cannot purchase more than ${max} videos at once`);
+      }
+      return true;
+    };
   },
-  
-  // ตรวจสอบ payment method
-  validPaymentMethod: (value) => {
-    const validMethods = ['credit_card', 'debit_card', 'promptpay', 'truemoney'];
-    if (!validMethods.includes(value)) {
-      throw new Error(`Payment method must be one of: ${validMethods.join(', ')}`);
-    }
-    return true;
-  },
-  
-  // ตรวจสอบ transactionId format
-  validTransactionId: (value) => {
+
+  // ── Payment validators ──────────────────────────────────────────────────────
+
+  // ✅ ใหม่: ตรวจสอบ Stripe PaymentIntent ID (pi_xxxxxxxxxxxxxxxxxxxxxxxx)
+  validPaymentIntentId(value) {
     if (typeof value !== 'string') {
-      throw new Error('Transaction ID must be a string');
+      throw new Error('paymentIntentId must be a string');
     }
-    
-    if (value.length < 5 || value.length > 100) {
-      throw new Error('Transaction ID must be between 5 and 100 characters');
+    // Stripe PaymentIntent ID format: pi_ ตามด้วย alphanumeric 24 ตัว
+    if (!/^pi_[a-zA-Z0-9]{24,}$/.test(value)) {
+      throw new Error('Invalid Stripe PaymentIntent ID format (expected pi_...)');
     }
-    
-    // ตัวอย่าง: ตรวจสอบว่าเป็น format ที่ถูกต้อง
-    const transactionPattern = /^[a-zA-Z0-9_-]+$/;
-    if (!transactionPattern.test(value)) {
-      throw new Error('Transaction ID contains invalid characters');
+    return true;
+  },
+
+  // ── Video validators ────────────────────────────────────────────────────────
+
+  // ตรวจสอบ videoId ก่อนซื้อ (custom async validator — ใช้กับ validateRequest)
+  // ถ้าต้องการเช็ค video จาก DB ให้ใส่ logic ที่นี่ได้
+  async validateVideoPurchase(value) {
+    if (!mongoose.Types.ObjectId.isValid(value)) {
+      throw new Error('Invalid video ID');
     }
-    
+    return true;
+  },
+
+  // ── Amount validators ───────────────────────────────────────────────────────
+
+  // ตรวจสอบ amount (optional field สำหรับ override ราคา)
+  validAmount(value) {
+    const num = Number(value);
+    if (isNaN(num) || num <= 0) {
+      throw new Error('Amount must be a positive number');
+    }
+    if (num > 1_000_000) {
+      throw new Error('Amount exceeds maximum allowed value');
+    }
     return true;
   }
 };

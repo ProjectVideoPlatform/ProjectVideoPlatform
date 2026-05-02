@@ -9,10 +9,19 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import VideoPlayer from './VideoPlayer';
 import { useNotif } from '../NotifContext';
 import { apiFetch } from '../utils/apiClient';
-
+import VideoCard from './VideoCard';
 const API_BASE = '/api';
 
-/* ─── Styles (unchanged) ──────────────────────────────────── */
+const CATEGORIES = [
+  { value: 'action',  label: 'Action' },
+  { value: 'comedy',  label: 'Comedy' },
+  { value: 'thriller',label: 'Thriller' },
+  { value: 'romance', label: 'Romance' },
+  { value: 'sci-fi',  label: 'Sci-Fi' },
+  { value: 'horror',  label: 'Horror' },
+];
+
+/* ─── Styles ──────────────────────────────────────────────── */
 const styles = `
   @import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;1,9..40,300&display=swap');
 
@@ -63,8 +72,8 @@ const styles = `
   .vs-page { padding-top: var(--nav-h); min-height: 100vh; }
   @media (max-width: 640px) { .vs-page { padding-bottom: var(--bot-nav); } }
 
-  .vs-search-bar { padding: 16px 20px; display: flex; gap: 10px; align-items: center; border-bottom: 1px solid var(--border); background: var(--bg); }
-  .vs-search-wrap { flex: 1; position: relative; }
+  .vs-search-bar { padding: 16px 20px; display: flex; gap: 10px; align-items: center; border-bottom: 1px solid var(--border); background: var(--bg); flex-wrap: wrap; }
+  .vs-search-wrap { flex: 1; min-width: 160px; position: relative; }
   .vs-search-wrap svg { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: var(--muted); width: 16px; height: 16px; pointer-events: none; }
   .vs-search-input { width: 100%; padding: 10px 12px 10px 38px; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; color: var(--text); font-family: 'DM Sans', sans-serif; font-size: 14px; outline: none; transition: border-color .2s; }
   .vs-search-input::placeholder { color: var(--muted); }
@@ -101,6 +110,12 @@ const styles = `
   .vs-status-badge { position: absolute; top: 8px; left: 8px; display: flex; align-items: center; gap: 4px; font-size: 10px; font-weight: 700; letter-spacing: .5px; padding: 3px 9px; border-radius: 6px; text-transform: uppercase; }
   .vs-status-processing { background: rgba(245,200,66,.15); color: var(--gold); border: 1px solid rgba(245,200,66,.3); }
   .vs-status-failed { background: rgba(232,68,90,.15); color: var(--accent); border: 1px solid rgba(232,68,90,.3); }
+
+  /* ✅ accessType badge */
+  .vs-access-badge { position: absolute; top: 8px; right: 8px; font-size: 10px; font-weight: 700; letter-spacing: .5px; padding: 3px 9px; border-radius: 6px; text-transform: uppercase; }
+  .vs-access-free { background: rgba(46,204,113,.2); color: #2ecc71; border: 1px solid rgba(46,204,113,.35); }
+  .vs-access-paid { background: rgba(245,200,66,.15); color: var(--gold); border: 1px solid rgba(245,200,66,.3); }
+
   .vs-card-body { padding: 14px 16px 16px; }
   .vs-card-title { font-size: 14px; font-weight: 600; line-height: 1.4; color: var(--text); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; margin-bottom: 6px; }
   .vs-card-desc { font-size: 12px; color: var(--muted); line-height: 1.5; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; margin-bottom: 10px; }
@@ -155,6 +170,15 @@ const styles = `
   .vs-input:disabled, .vs-textarea:disabled { opacity: .5; cursor: not-allowed; }
   .vs-input::placeholder, .vs-textarea::placeholder { color: var(--muted); }
   .vs-textarea { height: 88px; resize: none; }
+
+  /* ✅ radio toggle สำหรับ accessType */
+  .vs-toggle-group { display: flex; gap: 8px; }
+  .vs-toggle-btn { flex: 1; padding: 9px 12px; border-radius: 10px; background: var(--surface); border: 1px solid var(--border); color: var(--muted); font-family: 'DM Sans', sans-serif; font-size: 13px; font-weight: 600; cursor: pointer; transition: all .2s; text-align: center; }
+  .vs-toggle-btn:hover { border-color: rgba(255,255,255,.2); color: var(--text); }
+  .vs-toggle-btn.active-free  { background: rgba(46,204,113,.15); border-color: rgba(46,204,113,.5); color: #2ecc71; }
+  .vs-toggle-btn.active-paid  { background: rgba(245,200,66,.12); border-color: rgba(245,200,66,.4); color: var(--gold); }
+  .vs-toggle-btn:disabled { opacity: .4; cursor: not-allowed; }
+
   .vs-file-hint { font-size: 11px; color: var(--muted); margin-top: 5px; }
   .vs-modal-actions { display: flex; gap: 10px; margin-top: 20px; }
   .vs-btn-cancel { flex: 1; padding: 11px; border-radius: 10px; background: var(--surface); border: 1px solid var(--border); color: var(--text); font-size: 14px; font-weight: 500; cursor: pointer; transition: border-color .2s; }
@@ -171,22 +195,15 @@ const styles = `
 `;
 
 /* ─── API ─────────────────────────────────────────────────── */
-// ✅ ใช้ apiFetch จาก apiClient.js
 const api = {
   getVideos: (params = {}) => {
     const query = new URLSearchParams(params).toString();
     return apiFetch(`/videos?${query}`);
   },
   purchaseVideo: (id) =>
-    apiFetch(`/videos/${id}/purchase`, {
-      method: 'POST',
-    }),
-
+    apiFetch(`/videos/${id}/purchase`, { method: 'POST' }),
   playVideo: (id) =>
-    apiFetch(`/videos/${id}/play`, {
-      method: 'POST',
-    }),
-
+    apiFetch(`/videos/${id}/play`, { method: 'POST' }),
   getPurchasedVideos: (params = {}) => {
     const query = new URLSearchParams(params).toString();
     return apiFetch(`/videos/purchased/list?${query}`);
@@ -196,12 +213,8 @@ const api = {
       method: 'POST',
       body: JSON.stringify(data),
     }),
-
   completeUpload: (id) =>
-    apiFetch(`/videos/upload/${id}/complete`, {
-      method: 'POST',
-    }),
-
+    apiFetch(`/videos/upload/${id}/complete`, { method: 'POST' }),
   failUpload: (id, error) =>
     apiFetch(`/videos/upload/${id}/failed`, {
       method: 'POST',
@@ -209,232 +222,71 @@ const api = {
     }),
 };
 
-/* ─── Payment Modal ───────────────────────────────────────── */
-const PaymentModal = ({ video, onClose, onSuccess }) => {
-  const [qrImageUrl, setQrImageUrl] = useState(null);
-  const [paymentStatus, setStatus]  = useState('pending');
-  const [loading, setLoading]       = useState(false);
-  const [error, setError]           = useState(null);
-
-  const createQRPayment = async () => {
-    setLoading(true); setError(null);
-    try {
-      // ✅ ใช้ apiFetch แทน fetch
-      const data = await apiFetch('/payment/create', {
-        method: 'POST',
-        body: JSON.stringify({ amount: video.price * 100, orderId: `VIDEO-${video.id}-${Date.now()}`, videoId: video.id }),
-      });
-      setQrImageUrl(data.qrImageUrl);
-      setStatus('checking');
-      setTimeout(() => {
-        setStatus('success');
-        setTimeout(() => onSuccess(video), 1500);
-      }, 5000);
-    } catch (err) {
-      setError(err.message); setStatus('failed');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => { createQRPayment(); }, []);
-
-  return (
-    <div className="vs-modal-backdrop">
-      <div className="vs-modal">
-        <div className="vs-modal-header">
-          <div className="vs-modal-icon"><QrCode size={22} color="#fff" /></div>
-          <div>
-            <div style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: 22, letterSpacing: 2 }}>ชำระเงิน</div>
-            <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>สแกน QR Code เพื่อชำระเงิน</div>
-          </div>
-          <button className="vs-modal-close" onClick={onClose}><X size={16} /></button>
-        </div>
-        <div className="vs-modal-body">
-          <div className="vs-payment-summary">
-            <span style={{ fontSize: 13, color: 'var(--muted)', maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{video.title}</span>
-            <span style={{ fontSize: 22, fontWeight: 700, background: 'linear-gradient(135deg,#f5c842,#e8a82a)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', backgroundClip: 'text' }}>฿{video.price.toFixed(2)}</span>
-          </div>
-
-          {loading && (
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '40px 0', gap: 14 }}>
-              <Loader size={36} className="animate-spin" color="var(--accent)" />
-              <span style={{ fontSize: 13, color: 'var(--muted)' }}>กำลังสร้าง QR Code...</span>
-            </div>
-          )}
-
-          {error && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '12px 14px', background: 'rgba(232,68,90,.1)', border: '1px solid rgba(232,68,90,.3)', borderRadius: 10, marginBottom: 14 }}>
-              <AlertCircle size={16} color="var(--accent)" />
-              <span style={{ fontSize: 13, color: 'var(--accent)' }}>{error}</span>
-            </div>
-          )}
-
-          {qrImageUrl && paymentStatus === 'checking' && (
-            <>
-              <div className="vs-qr-wrap"><img src={qrImageUrl} alt="QR Code" /></div>
-              <div className="vs-payment-status">
-                <Clock size={16} color="#60a5fa" />
-                <span style={{ fontSize: 13, fontWeight: 600, color: '#60a5fa' }}>รอการชำระเงิน...</span>
-                <span style={{ fontSize: 12, color: 'var(--muted)' }}>กรุณาสแกน QR Code ด้วยแอปธนาคาร</span>
-              </div>
-              <div className="vs-payment-steps">
-                <p>วิธีชำระเงิน</p>
-                <ol>
-                  <li>เปิดแอปธนาคารหรือ Mobile Banking</li>
-                  <li>เลือกเมนูสแกน QR Code</li>
-                  <li>สแกนรหัสด้านบน</li>
-                  <li>ยืนยันการชำระเงิน</li>
-                </ol>
-              </div>
-            </>
-          )}
-
-          {paymentStatus === 'success' && (
-            <div className="vs-result-wrap">
-              <div className="vs-result-icon vs-result-success"><CheckCircle size={36} color="var(--success)" /></div>
-              <div style={{ fontFamily: "'Bebas Neue',sans-serif", fontSize: 26, color: 'var(--success)', letterSpacing: 2 }}>ชำระเงินสำเร็จ!</div>
-              <p style={{ fontSize: 13, color: 'var(--muted)' }}>คุณสามารถรับชมวิดีโอได้แล้ว</p>
-            </div>
-          )}
-
-          {paymentStatus === 'failed' && (
-            <div className="vs-result-wrap">
-              <div className="vs-result-icon vs-result-fail"><AlertCircle size={36} color="var(--accent)" /></div>
-              <div style={{ fontFamily: "'Bebas Neue',sans-serif", fontSize: 26, color: 'var(--accent)', letterSpacing: 2 }}>ชำระเงินไม่สำเร็จ</div>
-              <p style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 12 }}>กรุณาลองใหม่อีกครั้ง</p>
-              <button className="vs-btn-confirm" style={{ width: '100%', maxWidth: 180 }} onClick={createQRPayment}>ลองใหม่</button>
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-};
-
 /* ─── Video Card ──────────────────────────────────────────── */
-const VideoCard = ({ video, onPlay, isLoading, isAdmin }) => {
-  const [showPayment, setShowPayment] = useState(false);
-  const [purchased, setPurchased]     = useState(video.purchased || false);
-  const canWatch = isAdmin || purchased || video.canPlay || video.purchased;
-
-  const formatDuration = (s) => {
-    if (!s) return '';
-    return `${Math.floor(s / 60)}:${(s % 60).toString().padStart(2, '0')}`;
-  };
-
-  return (
-    <>
-      <div className="vs-card">
-        <div className="vs-thumb">
-          {video.thumbnailPath ? (
-            <img src={`https://cdn.toteja.co/${video.thumbnailPath}`} alt={video.title} />
-          ) : (
-            <div className="vs-thumb-placeholder">
-              {video.uploadStatus === 'processing'
-                ? <Loader size={32} color="var(--muted)" style={{ animation: 'spin 1s linear infinite' }} />
-                : <Video size={40} color="var(--muted)" />}
-            </div>
-          )}
-          <div className="vs-thumb-overlay" />
-          {video.uploadStatus === 'completed' && canWatch && (
-            <div className="vs-play-btn" onClick={() => !isLoading && onPlay(video)}>
-              <div className="vs-play-circle">
-                {isLoading ? <Loader size={20} color="#fff" style={{ animation: 'spin 1s linear infinite' }} /> : <Play size={20} color="#fff" fill="#fff" />}
-              </div>
-            </div>
-          )}
-          {video.duration && <div className="vs-duration">{formatDuration(video.duration)}</div>}
-          {video.uploadStatus === 'processing' && (
-            <div className="vs-status-badge vs-status-processing">
-              <Loader size={10} style={{ animation: 'spin 1s linear infinite' }} /> Processing
-            </div>
-          )}
-          {video.uploadStatus === 'failed' && (
-            <div className="vs-status-badge vs-status-failed">
-              <AlertCircle size={10} /> Failed
-            </div>
-          )}
-        </div>
-
-        <div className="vs-card-body">
-          <div className="vs-card-title">{video.title}</div>
-          {video.description && <div className="vs-card-desc">{video.description}</div>}
-          {video.tags?.length > 0 && (
-            <div className="vs-tags">
-              {video.tags.slice(0, 3).map((t, i) => (
-                <span key={i} className="vs-tag"><Tag size={9} />{t}</span>
-              ))}
-            </div>
-          )}
-          <div className="vs-card-footer">
-            {video.price === 0
-              ? <span className="vs-price-free">ฟรี</span>
-              : <span className="vs-price">฿{video.price.toFixed(2)}</span>}
-            {video.uploadStatus === 'completed' ? (
-              canWatch ? (
-                <button className="vs-action-btn vs-btn-play" onClick={() => onPlay(video)} disabled={isLoading}>
-                  {isLoading ? <Loader size={14} style={{ animation: 'spin 1s linear infinite' }} /> : <Play size={14} fill="currentColor" />}
-                  เล่น
-                </button>
-              ) : (
-                <button className="vs-action-btn vs-btn-buy" onClick={() => setShowPayment(true)} disabled={isLoading}>
-                  <ShoppingCart size={14} /> ซื้อ
-                </button>
-              )
-            ) : (
-              <span style={{ fontSize: 11, color: 'var(--muted)', padding: '4px 0' }}>
-                {video.uploadStatus === 'processing' ? 'กำลังประมวลผล...' : 'ไม่พร้อมใช้'}
-              </span>
-            )}
-          </div>
-          {(purchased || video.purchased) && !isAdmin && (
-            <div className="vs-owned-badge">
-              <CheckCircle size={13} />เป็นเจ้าของแล้ว
-              {video.purchaseInfo && (
-                <span style={{ color: 'var(--muted)', marginLeft: 4 }}>
-                  · {new Date(video.purchaseInfo.purchaseDate).toLocaleDateString('th-TH')}
-                </span>
-              )}
-            </div>
-          )}
-          {isAdmin && <div className="vs-admin-badge"><Sparkles size={11} />Admin Access</div>}
-        </div>
-      </div>
-
-      {showPayment && (
-        <PaymentModal
-          video={video}
-          onClose={() => setShowPayment(false)}
-          onSuccess={() => { setPurchased(true); setShowPayment(false); }}
-        />
-      )}
-    </>
-  );
-};
 
 /* ─── Upload Modal ────────────────────────────────────────── */
 const UploadModal = ({ isOpen, onClose, onUpload }) => {
-  const [form, setForm]           = useState({ title: '', description: '', price: 0, tags: '' });
+  const [form, setForm] = useState({
+    title: '',
+    description: '',
+    price: 0,
+    tags: [],        // ✅ เปลี่ยนเป็น array
+    accessType: 'free', // ✅ เพิ่ม
+  });
   const [file, setFile]           = useState(null);
   const [uploading, setUploading] = useState(false);
   const [progress, setProgress]   = useState(0);
   const [step, setStep]           = useState('form');
 
-  const reset = () => { setForm({ title: '', description: '', price: 0, tags: '' }); setFile(null); setProgress(0); setStep('form'); setUploading(false); };
+  const reset = () => {
+    setForm({ title: '', description: '', price: 0, tags: [], accessType: 'free' });
+    setFile(null); setProgress(0); setStep('form'); setUploading(false);
+  };
   const handleClose = () => { if (!uploading) { onClose(); reset(); } };
+
+  // ✅ toggle category
+  const toggleTag = (val) => {
+    setForm(prev => ({
+      ...prev,
+      tags: prev.tags.includes(val)
+        ? prev.tags.filter(t => t !== val)
+        : [...prev.tags, val]
+    }));
+  };
 
   const handleSubmit = async () => {
     if (!file || !form.title) return;
     setUploading(true); setStep('uploading'); setProgress(0);
     try {
-      const init = await api.initializeUpload({ ...form, fileName: file.name, fileSize: file.size, contentType: file.type });
-      // S3 pre-signed URL — ไม่ต้องส่ง cookie
+      const payload = {
+        ...form,
+        tags: form.tags.join(','), // ✅ ส่งเป็น string ตาม route เดิม
+        price: form.accessType === 'paid' ? form.price : 0,
+        fileName: file.name,
+        fileSize: file.size,
+        contentType: file.type,
+      };
+      const init = await api.initializeUpload(payload);
       const up = await fetch(init.uploadUrl, { method: 'PUT', body: file, headers: { 'Content-Type': file.type } });
       if (!up.ok) throw new Error('S3 upload failed');
       setProgress(100); setStep('processing');
       await api.completeUpload(init.videoId);
-      onUpload({ id: init.videoId, title: form.title, description: form.description, price: form.price, tags: form.tags ? form.tags.split(',').map(t => t.trim()) : [], uploadStatus: 'processing', thumbnailPath: null, canPlay: false, purchased: false }, init.videoId, form.title);
+      onUpload(
+        {
+          id: init.videoId,
+          title: form.title,
+          description: form.description,
+          price: payload.price,
+          tags: form.tags,
+          accessType: form.accessType,
+          uploadStatus: 'processing',
+          thumbnailPath: null,
+          canPlay: false,
+          purchased: false,
+        },
+        init.videoId,
+        form.title
+      );
       onClose(); reset();
     } catch (err) {
       console.error(err); setStep('failed'); setUploading(false);
@@ -480,25 +332,101 @@ const UploadModal = ({ isOpen, onClose, onUpload }) => {
             <input type="file" accept="video/*" onChange={e => setFile(e.target.files[0])} disabled={uploading} className="vs-input" style={{ cursor: 'pointer' }} />
             {file && <div className="vs-file-hint">{file.name} · {(file.size / 1024 / 1024).toFixed(1)} MB</div>}
           </div>
+
           <div className="vs-field">
             <label className="vs-label">Title *</label>
             <input className="vs-input" value={form.title} onChange={e => setForm({ ...form, title: e.target.value })} disabled={uploading} placeholder="ชื่อวิดีโอ" />
           </div>
+
           <div className="vs-field">
             <label className="vs-label">Description</label>
             <textarea className="vs-textarea" value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} disabled={uploading} placeholder="รายละเอียดวิดีโอ..." />
           </div>
+
+          {/* ✅ ประเภทวิดีโอ (free / paid) */}
           <div className="vs-field">
-            <label className="vs-label">Price (฿)</label>
-            <input type="number" min="0" step="0.01" className="vs-input" value={form.price} onChange={e => setForm({ ...form, price: parseFloat(e.target.value) || 0 })} disabled={uploading} />
+            <label className="vs-label">ประเภท</label>
+            <div className="vs-toggle-group">
+              <button
+                type="button"
+                className={`vs-toggle-btn ${form.accessType === 'free' ? 'active-free' : ''}`}
+                onClick={() => setForm({ ...form, accessType: 'free', price: 0 })}
+                disabled={uploading}
+              >
+                🆓 ฟรี
+              </button>
+              <button
+                type="button"
+                className={`vs-toggle-btn ${form.accessType === 'paid' ? 'active-paid' : ''}`}
+                onClick={() => setForm({ ...form, accessType: 'paid' })}
+                disabled={uploading}
+              >
+                💰 มีค่าใช้จ่าย
+              </button>
+            </div>
           </div>
+
+          {/* ✅ แสดง price field เฉพาะตอน paid */}
+          {form.accessType === 'paid' && (
+            <div className="vs-field">
+              <label className="vs-label">ราคา (฿) *</label>
+              <input
+                type="number"
+                min="1"
+                step="0.01"
+                className="vs-input"
+                value={form.price}
+                onChange={e => setForm({ ...form, price: parseFloat(e.target.value) || 0 })}
+                disabled={uploading}
+                placeholder="เช่น 99.00"
+              />
+            </div>
+          )}
+
+          {/* ✅ หมวดหมู่ — เลือกได้หลายอัน */}
           <div className="vs-field">
-            <label className="vs-label">Tags</label>
-            <input className="vs-input" value={form.tags} onChange={e => setForm({ ...form, tags: e.target.value })} disabled={uploading} placeholder="action, comedy, thriller" />
+            <label className="vs-label">หมวดหมู่</label>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+              {CATEGORIES.map(cat => {
+                const active = form.tags.includes(cat.value);
+                return (
+                  <button
+                    key={cat.value}
+                    type="button"
+                    onClick={() => !uploading && toggleTag(cat.value)}
+                    disabled={uploading}
+                    style={{
+                      padding: '6px 14px',
+                      borderRadius: 8,
+                      border: active ? '1px solid rgba(232,68,90,.6)' : '1px solid var(--border)',
+                      background: active ? 'rgba(232,68,90,.15)' : 'var(--surface)',
+                      color: active ? 'var(--accent)' : 'var(--muted)',
+                      fontSize: 12,
+                      fontWeight: 600,
+                      cursor: uploading ? 'not-allowed' : 'pointer',
+                      transition: 'all .2s',
+                      opacity: uploading ? .5 : 1,
+                    }}
+                  >
+                    {cat.label}
+                  </button>
+                );
+              })}
+            </div>
+            {form.tags.length > 0 && (
+              <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 6 }}>
+                เลือก: {form.tags.join(', ')}
+              </div>
+            )}
           </div>
+
           <div className="vs-modal-actions">
             <button className="vs-btn-cancel" onClick={handleClose} disabled={uploading}>{uploading ? 'Please wait...' : 'Cancel'}</button>
-            <button className="vs-btn-confirm" onClick={handleSubmit} disabled={uploading || !file || !form.title}>
+            <button
+              className="vs-btn-confirm"
+              onClick={handleSubmit}
+              disabled={uploading || !file || !form.title || (form.accessType === 'paid' && !form.price)}
+            >
               {uploading ? <Loader size={16} style={{ animation: 'spin 1s linear infinite' }} /> : 'Upload'}
             </button>
           </div>
@@ -512,7 +440,7 @@ const UploadModal = ({ isOpen, onClose, onUpload }) => {
 const VideoStreamingApp = () => {
   const { startWatching } = useNotif();
   const navigate = useNavigate();
-  const location = useLocation();  // ← เพิ่ม
+  const location = useLocation();
   const [videos, setVideos]               = useState([]);
   const [purchasedVideos, setPurchased]   = useState([]);
   const [currentView, setView] = useState(
@@ -522,6 +450,7 @@ const VideoStreamingApp = () => {
   const [actionLoading, setActionLoading] = useState(null);
   const [searchQuery, setSearch]          = useState('');
   const [selectedCat, setCat]             = useState('');
+  const [selectedAccessType, setAccessType] = useState(''); // ✅ filter by accessType
   const [currentPage, setPage]            = useState(1);
   const [pagination, setPagination]       = useState({});
   const [currentPlayer, setPlayer]        = useState(null);
@@ -532,7 +461,14 @@ const VideoStreamingApp = () => {
   const loadVideos = async (params = {}) => {
     setLoading(true);
     try {
-      const r = await api.getVideos({ page: currentPage, limit: 12, search: searchQuery, category: selectedCat, ...params });
+      const r = await api.getVideos({
+        page: currentPage,
+        limit: 12,
+        search: searchQuery,
+        category: selectedCat,
+        accessType: selectedAccessType, // ✅ ส่ง filter
+        ...params
+      });
       setVideos(r.videos); setPagination(r.pagination);
     } catch (e) { console.error(e); }
     finally { setLoading(false); }
@@ -557,7 +493,7 @@ const VideoStreamingApp = () => {
     finally { setActionLoading(null); }
   };
 
-  const handleViewChange = (v) => { setView(v); setPage(1); setSearch(''); setCat(''); };
+  const handleViewChange = (v) => { setView(v); setPage(1); setSearch(''); setCat(''); setAccessType(''); };
 
   const handleUploadComplete = useCallback((newVideo, videoId, title) => {
     setVideos(prev => [newVideo, ...prev]);
@@ -590,9 +526,9 @@ const VideoStreamingApp = () => {
             <button className={`vs-htab ${currentView === 'purchased' ? 'active' : ''}`} onClick={() => handleViewChange('purchased')}>
               <BookOpen size={13} style={{ display: 'inline', marginRight: 5, verticalAlign: 'middle' }} />วิดีโอของฉัน
             </button>
-              <button className="vs-htab" onClick={() => navigate('/foryou')}>
-    <Sparkles size={13} style={{ display: 'inline', marginRight: 5, verticalAlign: 'middle' }} />สำหรับคุณ
-  </button>
+            <button className="vs-htab" onClick={() => navigate('/foryou')}>
+              <Sparkles size={13} style={{ display: 'inline', marginRight: 5, verticalAlign: 'middle' }} />สำหรับคุณ
+            </button>
           </div>
           <div className="vs-header-spacer" />
           <div className="vs-header-actions">
@@ -619,15 +555,31 @@ const VideoStreamingApp = () => {
                 onKeyDown={e => e.key === 'Enter' && (setPage(1), loadVideos())}
               />
             </div>
-            <select className="vs-select" value={selectedCat} onChange={e => setCat(e.target.value)}>
-              <option value="">ทุกหมด</option>
-              <option value="action">Action</option>
-              <option value="comedy">Comedy</option>
-              <option value="drama">Drama</option>
-              <option value="thriller">Thriller</option>
-              <option value="educational">Educational</option>
-              <option value="documentary">Documentary</option>
+
+            {/* ✅ Dropdown หมวดหมู่ */}
+            <select
+              className="vs-select"
+              value={selectedCat}
+              onChange={e => setCat(e.target.value)}
+            >
+              <option value="">ทุกหมวด</option>
+              {CATEGORIES.map(c => (
+                <option key={c.value} value={c.value}>{c.label}</option>
+              ))}
             </select>
+
+            {/* ✅ Dropdown ประเภท free/paid */}
+            <select
+              className="vs-select"
+              value={selectedAccessType}
+              onChange={e => setAccessType(e.target.value)}
+              style={{ minWidth: 110 }}
+            >
+              <option value="">ทุกประเภท</option>
+              <option value="free">ฟรี</option>
+              <option value="paid">มีค่าใช้จ่าย</option>
+            </select>
+
             <button className="vs-search-btn" onClick={() => { setPage(1); loadVideos(); }} disabled={loading}>
               {loading ? <Loader size={14} style={{ animation: 'spin 1s linear infinite' }} /> : 'ค้นหา'}
             </button>
@@ -680,26 +632,22 @@ const VideoStreamingApp = () => {
           )}
         </main>
 
-     <nav className="vs-bottom-nav">
-  <button className={`vs-bnav-item ${currentView === 'all' ? 'active' : ''}`} onClick={() => handleViewChange('all')}>
-    <Home />หน้าหลัก
-  </button>
-
-  {/* ✅ เพิ่มปุ่ม "สำหรับคุณ" ก่อนปุ่ม Upload */}
-  <button className="vs-bnav-item" onClick={() => navigate('/foryou')}>
-    <Sparkles />สำหรับคุณ
-  </button>
-
-  {isAdmin && (
-    <button className="vs-bnav-center" onClick={() => setShowUpload(true)}>
-      <Upload size={22} color="#fff" />
-    </button>
-  )}
-
-  <button className={`vs-bnav-item ${currentView === 'purchased' ? 'active' : ''}`} onClick={() => handleViewChange('purchased')}>
-    <BookOpen />คลังของฉัน
-  </button>
-</nav>
+        <nav className="vs-bottom-nav">
+          <button className={`vs-bnav-item ${currentView === 'all' ? 'active' : ''}`} onClick={() => handleViewChange('all')}>
+            <Home />หน้าหลัก
+          </button>
+          <button className="vs-bnav-item" onClick={() => navigate('/foryou')}>
+            <Sparkles />สำหรับคุณ
+          </button>
+          {isAdmin && (
+            <button className="vs-bnav-center" onClick={() => setShowUpload(true)}>
+              <Upload size={22} color="#fff" />
+            </button>
+          )}
+          <button className={`vs-bnav-item ${currentView === 'purchased' ? 'active' : ''}`} onClick={() => handleViewChange('purchased')}>
+            <BookOpen />คลังของฉัน
+          </button>
+        </nav>
       </div>
 
       {currentPlayer && (

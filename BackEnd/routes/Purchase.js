@@ -1,8 +1,10 @@
+'use strict';
+
 const express = require('express');
 const router = express.Router();
-const PurchaseService = require('../services/Purchaseservice');
-const Purchase = require('../models/Purchase'); // ✅ require ครั้งเดียวข้างบน
-// const AppError = require('../utils/AppError');   // ✅ fix: ต้อง import AppError ก่อนใช้
+const PurchaseService = require('../services/PurchaseService');
+const Purchase = require('../models/Purchase');
+const Video = require('../models/Video');
 const { authenticateToken } = require('../middleware/auth');
 const preventDuplicate = require('../middleware/preventduplicate');
 const { releaseLockMiddleware } = require('../middleware/releaseLock');
@@ -10,39 +12,43 @@ const validateRequest = require('../middleware/validateRequest');
 const rateLimiter = require('../middleware/rateLimiter');
 const customValidators = require('../utils/customValidators');
 
-// ─────────────────────────────────────────────
-// Purchase single video
-// ─────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// STEP 1: Authorize — อายัดวงเงิน, ส่ง clientSecret กลับ
+// POST /api/purchases/video/:videoId/purchase
+// Body: { currency? }
+// Response: { requiresAction: true, clientSecret, intentId, amount }
+// ─────────────────────────────────────────────────────────────────────────────
 router.post('/video/:videoId/purchase',
   authenticateToken,
   rateLimiter({ windowMs: 60000, max: 10 }),
   preventDuplicate('purchase', { ttl: 30 }),
   validateRequest({
     params: {
-      videoId: ['required', 'mongoId', { custom: customValidators.validateVideoPurchase }]
+      videoId: ['required', 'mongoId']
     },
     body: {
-      paymentMethod: ['required', { custom: customValidators.validPaymentMethod }],
-      transactionId: ['required', { custom: customValidators.validTransactionId }],
-      amount: ['optional', { custom: customValidators.validAmount }],
-      currency: ['optional', { in: ['THB', 'USD', 'EUR'] }],
-      metadata: ['optional', 'object']
+      currency: ['optional', { in: ['THB', 'USD', 'EUR'] }]
     }
   }),
   async (req, res, next) => {
     try {
       const { videoId } = req.params;
       const userId = req.user._id;
-      const paymentData = {
-        method: req.body.paymentMethod,
-        transactionId: req.body.transactionId,
-        amount: req.body.amount,
-        currency: req.body.currency || 'THB',
-        metadata: req.body.metadata || {}
-      };
 
-      const result = await PurchaseService.purchaseVideo(userId, videoId, paymentData);
-      req._purchaseResult = result;
+      // เช็ค free video ก่อน (ไม่ต้องเข้า service)
+      const video = await Video.findById(videoId);
+      if (!video) {
+        return res.status(404).json({ error: 'Video not found' });
+      }
+      if (video.accessType === 'free') {
+        return res.status(400).json({ error: 'This video is free, no purchase needed' });
+      }
+
+      // ไม่ส่ง paymentIntentId → PurchaseService จะ authorize อายัดวงเงิน
+      const result = await PurchaseService.purchaseVideo(userId, videoId, {
+        currency: req.body.currency || 'THB'
+        // ไม่มี paymentIntentId → trigger authorize step
+      });
 
       res.json({ success: true, data: result });
     } catch (error) {
@@ -53,9 +59,48 @@ router.post('/video/:videoId/purchase',
   }
 );
 
-// ─────────────────────────────────────────────
-// Bulk video purchase
-// ─────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// STEP 2: Confirm — frontend ยืนยันบัตรแล้ว → capture + บันทึก DB
+// POST /api/purchases/video/:videoId/confirm
+// Body: { paymentIntentId }
+// Response: { success: true, purchase, payment }
+// ─────────────────────────────────────────────────────────────────────────────
+router.post('/video/:videoId/confirm',
+  authenticateToken,
+  rateLimiter({ windowMs: 60000, max: 10 }),
+  preventDuplicate('confirm', { ttl: 60 }),
+  validateRequest({
+    params: {
+      videoId: ['required', 'mongoId']
+    },
+    body: {
+      paymentIntentId: ['required', { custom: customValidators.validPaymentIntentId }]
+    }
+  }),
+  async (req, res, next) => {
+    try {
+      const { videoId } = req.params;
+      const userId = req.user._id;
+
+      // ส่ง paymentIntentId → PurchaseService จะ capture + save
+      const result = await PurchaseService.purchaseVideo(userId, videoId, {
+        paymentIntentId: req.body.paymentIntentId
+      });
+
+      res.json({ success: true, data: result });
+    } catch (error) {
+      next(error);
+    } finally {
+      await releaseLockMiddleware(req, res);
+    }
+  }
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Bulk purchase — authorize + confirm แบบเดียวกัน
+// POST /api/purchases/videos/bulk-purchase  → authorize
+// POST /api/purchases/videos/bulk-confirm   → capture + save
+// ─────────────────────────────────────────────────────────────────────────────
 router.post('/videos/bulk-purchase',
   authenticateToken,
   rateLimiter({ windowMs: 60000, max: 5 }),
@@ -69,27 +114,18 @@ router.post('/videos/bulk-purchase',
         { custom: customValidators.uniqueVideoIds },
         { custom: customValidators.maxVideoIds(100) }
       ],
-      paymentMethod: ['required', { custom: customValidators.validPaymentMethod }],
-      transactionId: ['required', { custom: customValidators.validTransactionId }],
-      amount: ['optional', { custom: customValidators.validAmount }],
-      currency: ['optional', { in: ['THB', 'USD', 'EUR'] }],
-      metadata: ['optional', 'object']
+      currency: ['optional', { in: ['THB', 'USD', 'EUR'] }]
     }
   }),
   async (req, res, next) => {
     try {
-      const { videoIds, paymentMethod, transactionId, amount, currency, metadata } = req.body;
+      const { videoIds, currency } = req.body;
       const userId = req.user._id;
 
-      const paymentData = {
-        method: paymentMethod,
-        transactionId,
-        amount,
-        currency: currency || 'THB',
-        metadata: metadata || {}
-      };
-
-      const result = await PurchaseService.bulkPurchaseVideos(userId, videoIds, paymentData);
+      // ไม่ส่ง paymentIntentId → authorize
+      const result = await PurchaseService.bulkPurchaseVideos(userId, videoIds, {
+        currency: currency || 'THB'
+      });
 
       res.json({ success: true, data: result });
     } catch (error) {
@@ -100,12 +136,46 @@ router.post('/videos/bulk-purchase',
   }
 );
 
-// ─────────────────────────────────────────────
-// ✅ Static routes ต้องอยู่เหนือ dynamic routes (:id)
-//    เพื่อป้องกัน Express match /stats หรือ /history เป็น /:id
-// ─────────────────────────────────────────────
+router.post('/videos/bulk-confirm',
+  authenticateToken,
+  rateLimiter({ windowMs: 60000, max: 5 }),
+  preventDuplicate('bulk_confirm', { ttl: 60 }),
+  validateRequest({
+    body: {
+      videoIds: [
+        'required',
+        'array',
+        { custom: customValidators.isMongoIdArray },
+        { custom: customValidators.uniqueVideoIds },
+        { custom: customValidators.maxVideoIds(100) }
+      ],
+      paymentIntentId: ['required', { custom: customValidators.validPaymentIntentId }]
+    }
+  }),
+  async (req, res, next) => {
+    try {
+      const { videoIds, paymentIntentId } = req.body;
+      const userId = req.user._id;
 
-// Get purchase history (unified — ลบ GET / ที่ซ้ำออก)
+      // ส่ง paymentIntentId → capture + save
+      const result = await PurchaseService.bulkPurchaseVideos(userId, videoIds, {
+        paymentIntentId
+      });
+
+      res.json({ success: true, data: result });
+    } catch (error) {
+      next(error);
+    } finally {
+      await releaseLockMiddleware(req, res);
+    }
+  }
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Static routes — ต้องอยู่เหนือ dynamic routes (:id)
+// ─────────────────────────────────────────────────────────────────────────────
+
+// GET /api/purchases/history
 router.get('/history',
   authenticateToken,
   rateLimiter({ windowMs: 60000, max: 30 }),
@@ -124,16 +194,14 @@ router.get('/history',
       const userId = req.user._id;
       const { page = 1, limit = 20, status, fromDate, toDate, videoId } = req.query;
 
-      const options = {
-        page: parseInt(page),
+      const result = await PurchaseService.getUserPurchases(userId, {
+        page:  parseInt(page),
         limit: parseInt(limit),
         status,
         fromDate,
         toDate,
         videoId
-      };
-
-      const result = await PurchaseService.getUserPurchases(userId, options);
+      });
 
       res.json({ success: true, data: result });
     } catch (error) {
@@ -142,9 +210,7 @@ router.get('/history',
   }
 );
 
-// Get purchase stats
-// ✅ fix: ต้องอยู่เหนือ /:purchaseId/refund และ /:id/access
-//    มิฉะนั้น /stats จะถูก match เป็น /:purchaseId หรือ /:id แทน
+// GET /api/purchases/stats
 router.get('/stats',
   authenticateToken,
   rateLimiter({ windowMs: 60000, max: 30 }),
@@ -154,9 +220,9 @@ router.get('/stats',
         { $match: { userId: req.user._id, status: 'completed' } },
         {
           $group: {
-            _id: null,
-            totalSpent: { $sum: '$amount' },
-            totalPurchases: { $sum: 1 },
+            _id:              null,
+            totalSpent:       { $sum: '$amount' },
+            totalPurchases:   { $sum: 1 },
             totalAccessCount: { $sum: '$accessCount' }
           }
         }
@@ -169,26 +235,20 @@ router.get('/stats',
   }
 );
 
-// ─────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
 // Dynamic routes (:id / :purchaseId) — อยู่หลัง static เสมอ
-// ─────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
 
-// Check video access
+// GET /api/purchases/video/:videoId/access
 router.get('/video/:videoId/access',
   authenticateToken,
   rateLimiter({ windowMs: 60000, max: 30 }),
   validateRequest({
-    params: {
-      videoId: ['required', 'mongoId']
-    }
+    params: { videoId: ['required', 'mongoId'] }
   }),
   async (req, res, next) => {
     try {
-      const { videoId } = req.params;
-      const userId = req.user._id;
-
-      const accessInfo = await PurchaseService.checkAccess(userId, videoId);
-
+      const accessInfo = await PurchaseService.checkAccess(req.user._id, req.params.videoId);
       res.json({ success: true, data: accessInfo });
     } catch (error) {
       next(error);
@@ -196,18 +256,14 @@ router.get('/video/:videoId/access',
   }
 );
 
-// Request refund
+// POST /api/purchases/:purchaseId/refund
 router.post('/:purchaseId/refund',
   authenticateToken,
   rateLimiter({ windowMs: 60000, max: 5 }),
   preventDuplicate('refund', { ttl: 30 }),
   validateRequest({
-    params: {
-      purchaseId: ['required', 'mongoId']
-    },
-    body: {
-      reason: ['required', 'string', { min: 10, max: 500 }]
-    }
+    params: { purchaseId: ['required', 'mongoId'] },
+    body:   { reason: ['required', 'string', { min: 10, max: 500 }] }
   }),
   async (req, res, next) => {
     try {
@@ -215,14 +271,12 @@ router.post('/:purchaseId/refund',
       const { reason } = req.body;
       const userId = req.user._id;
 
-      // ✅ fix: AppError ถูก import แล้ว จะไม่ crash อีกต่อไป
       const purchase = await PurchaseService.verifyOwnership(purchaseId, userId);
       if (!purchase) {
         return res.status(404).json({ error: 'Purchase not found' });
       }
 
       const result = await PurchaseService.refundPurchase(purchaseId, reason);
-
       res.json({ success: true, data: result });
     } catch (error) {
       next(error);
@@ -232,8 +286,7 @@ router.post('/:purchaseId/refund',
   }
 );
 
-// Check access by purchase ID
-// ✅ ลบ route GET / ที่ซ้ำกับ /history ออก และรวม logic มาไว้ที่นี่
+// GET /api/purchases/:id/access
 router.get('/:id/access',
   authenticateToken,
   rateLimiter({ windowMs: 60000, max: 30 }),
@@ -242,20 +295,17 @@ router.get('/:id/access',
       const hasAccess = await Purchase.hasAccess(req.user._id, req.params.id);
 
       if (!hasAccess) {
-        return res.status(403).json({
-          canAccess: false,
-          message: 'No active purchase found'
-        });
+        return res.status(403).json({ canAccess: false, message: 'No active purchase found' });
       }
 
       if (req.query.recordAccess === 'true') {
-        await hasAccess.recordAccess(req.query.currentTime || 0);
+        await hasAccess.recordAccess();
       }
 
       res.json({
-        canAccess: true,
+        canAccess:    true,
         purchaseInfo: hasAccess,
-        expiresAt: hasAccess.expiresAt
+        expiresAt:    hasAccess.expiresAt
       });
     } catch (error) {
       next(error);

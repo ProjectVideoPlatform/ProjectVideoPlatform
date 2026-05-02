@@ -31,6 +31,12 @@ const videoSchema = new mongoose.Schema({
     default: 0,
     min: 0
   },
+  accessType: {
+    type: String,
+    enum: ['free', 'paid', 'subscription_only'],
+    default: 'free',
+    index: true // ทำ Index ไว้เพราะต้องใช้ Filter บ่อย
+  },
   tags: [String],
   isActive: {
     type: Boolean,
