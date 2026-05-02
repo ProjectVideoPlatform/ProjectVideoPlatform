@@ -13,7 +13,7 @@
 
 const express         = require('express');
 const router          = express.Router();
-const PurchaseService = require('./services/Purchaseservice');
+const PurchaseService = require('./services/PurchaseService');
 const { constructWebhookEvent } = require('./services/PaymentService');
 const logger          = require('./utils/logger');
 
