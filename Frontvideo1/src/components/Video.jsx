@@ -11,7 +11,7 @@ import { useNotif } from '../NotifContext';
 import { apiFetch } from '../utils/apiClient';
 import VideoCard from './VideoCard';
 const API_BASE = '/api';
-
+import { useAuth } from '../AuthContext';
 const CATEGORIES = [
   { value: 'action',  label: 'Action' },
   { value: 'comedy',  label: 'Comedy' },
@@ -438,6 +438,7 @@ const UploadModal = ({ isOpen, onClose, onUpload }) => {
 
 /* ─── Main App ────────────────────────────────────────────── */
 const VideoStreamingApp = () => {
+  const { user } = useAuth();
   const { startWatching } = useNotif();
   const navigate = useNavigate();
   const location = useLocation();
@@ -455,9 +456,8 @@ const VideoStreamingApp = () => {
   const [pagination, setPagination]       = useState({});
   const [currentPlayer, setPlayer]        = useState(null);
   const [showUpload, setShowUpload]       = useState(false);
-  const [isAdmin]                         = useState(true);
-  const currentUserIdRef                  = useRef(null);
-
+ const isAdmin = user?.role === 'admin';
+  const currentUserIdRef = useRef(null);
   const loadVideos = async (params = {}) => {
     setLoading(true);
     try {
