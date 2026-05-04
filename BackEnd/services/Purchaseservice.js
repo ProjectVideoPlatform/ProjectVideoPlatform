@@ -436,27 +436,64 @@ class PurchaseService {
 
   // ── Webhook handlers ────────────────────────────────────────────────────────
 
-  async handlePaymentCompleted(data) {
-    const { transactionId, gatewayId, metadata } = data;
+async handlePaymentCompleted(data) {
+  const { transactionId, gatewayId, metadata } = data;
 
-    const purchase = await Purchase.findOneAndUpdate(
-      { transactionId },
-      {
-        status:                       'completed',
-        gatewayTransactionId:         gatewayId,
-        'metadata.paymentVerifiedAt': new Date(),
-        'metadata.webhookData':       data
-      },
-      { new: true }
-    );
-
-    if (purchase) {
-      await this.afterPurchaseActions(purchase.userId, purchase.videoId, purchase);
-    }
-
-    return purchase;
+  // ✅ เช็คก่อน — ถ้า completed แล้ว webhook มาซ้ำ ไม่ต้องทำอะไร
+  const existing = await Purchase.findOne({ 
+    transactionId, 
+    status: 'completed' 
+  });
+  if (existing) {
+    logger.info('[handlePaymentCompleted] Already completed, skipping', { transactionId });
+    return existing;
   }
 
+  // ✅ upsert — ถ้า /confirm save ไปแล้วก็ update, ถ้ายังไม่มี (user ปิด browser) ก็ create
+  const purchase = await Purchase.findOneAndUpdate(
+    { transactionId },
+    {
+      status:                       'completed',
+      gatewayTransactionId:         gatewayId,
+      'metadata.paymentVerifiedAt': new Date(),
+      'metadata.webhookData':       data
+    },
+    { new: true }
+  );
+
+  // ✅ ถ้า purchase ไม่มีเลยใน DB (user ปิด browser กลางคัน)
+  // webhook เป็นคนสร้าง record แทน
+  if (!purchase) {
+    logger.warn('[handlePaymentCompleted] Purchase not found, webhook creating record', { transactionId });
+
+    // ดึง metadata จาก Stripe intent เพื่อรู้ว่า videoId / userId คืออะไร
+    const intent = await PaymentService.retrieveIntent(transactionId);
+    const { userId, videoId } = intent.metadata;
+
+    if (!userId || !videoId) {
+      logger.error('[handlePaymentCompleted] Missing metadata in intent', { transactionId });
+      return null;
+    }
+
+    const newPurchase = await Purchase.create({
+      userId,
+      videoId,
+      transactionId,
+      gatewayTransactionId:         gatewayId,
+      amount:                       data.amount,
+      status:                       'completed',
+      'metadata.paymentVerifiedAt': new Date(),
+      'metadata.webhookData':       data,
+      'metadata.createdByWebhook':  true   // ← flag ไว้ debug
+    });
+
+    await this.afterPurchaseActions(userId, videoId, newPurchase);
+    return newPurchase;
+  }
+
+  await this.afterPurchaseActions(purchase.userId, purchase.videoId, purchase);
+  return purchase;
+}
   async handlePaymentFailed(data) {
     const { transactionId, reason } = data;
 

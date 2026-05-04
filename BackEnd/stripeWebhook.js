@@ -14,7 +14,7 @@
 const express         = require('express');
 const router          = express.Router();
 const PurchaseService = require('./services/PurchaseService');
-const { constructWebhookEvent } = require('./services/PaymentService');
+const { verifyWebhook } = require('./services/PaymentService');
 const logger          = require('./utils/logger');
 
 // ── Event types ที่ handle ────────────────────────────────────────────────────
@@ -45,7 +45,7 @@ router.post(
     // ── 1. Parse + verify ──────────────────────────────────────────────────
     let event;
     try {
-      event = constructWebhookEvent(req.body, signature);
+      event = await verifyWebhook(req.body, signature);
     } catch (err) {
       logger.error('[Webhook] Signature verification failed', { message: err.message });
       return res.status(400).json({ error: `Webhook signature invalid: ${err.message}` });

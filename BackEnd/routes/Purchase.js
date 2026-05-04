@@ -14,19 +14,16 @@ const customValidators = require('../utils/customValidators');
 
 // ─────────────────────────────────────────────────────────────────────────────
 // STEP 1: Authorize — อายัดวงเงิน, ส่ง clientSecret กลับ
-// POST /api/purchases/video/:videoId/purchase
-// Body: { currency? }
-// Response: { requiresAction: true, clientSecret, intentId, amount }
+// POST /api/purchase/video/:videoId/purchase
 // ─────────────────────────────────────────────────────────────────────────────
 router.post('/video/:videoId/purchase',
   authenticateToken,
   rateLimiter({ windowMs: 60000, max: 10 }),
   preventDuplicate('purchase', { ttl: 30 }),
-  // ✅ วาง Middleware ไว้ตรงนี้ เพื่อรอปลด Lock เมื่อ Response จบลง
-  releaseLockMiddleware, 
+  releaseLockMiddleware,
   validateRequest({
     params: { videoId: ['required', 'mongoId'] },
-    body: { currency: ['optional', { in: ['THB', 'USD', 'EUR'] }] }
+    body:   { currency: ['optional', { in: ['THB', 'USD', 'EUR'] }] }
   }),
   async (req, res, next) => {
     try {
@@ -45,67 +42,52 @@ router.post('/video/:videoId/purchase',
         currency: req.body.currency || 'THB'
       });
 
-      // ✅ ส่งคำตอบกลับทันที releaseLockMiddleware (ที่ใช้ res.on('finish')) 
-      // จะทำหน้าที่ล้าง Redis Lock ให้เองโดยอัตโนมัติ
       res.json({ success: true, data: result });
-      
     } catch (error) {
-      // ✅ ส่ง Error ไปยัง Global Error Handler
       next(error);
     }
-    // ❌ ลบบล็อก finally ออกทั้งหมด
   }
 );
 
 // ─────────────────────────────────────────────────────────────────────────────
 // STEP 2: Confirm — frontend ยืนยันบัตรแล้ว → capture + บันทึก DB
-// POST /api/purchases/video/:videoId/confirm
-// Body: { paymentIntentId }
-// Response: { success: true, purchase, payment }
+// POST /api/purchase/video/:videoId/confirm
 // ─────────────────────────────────────────────────────────────────────────────
 router.post('/video/:videoId/confirm',
   authenticateToken,
   rateLimiter({ windowMs: 60000, max: 10 }),
   preventDuplicate('confirm', { ttl: 60 }),
-  // ✅ วาง Middleware ไว้ลำดับนี้เพื่อให้ Express จัดการวงจรชีวิตของมันเอง
-  releaseLockMiddleware, 
+  releaseLockMiddleware,
   validateRequest({
-    params: {
-      videoId: ['required', 'mongoId']
-    },
-    body: {
-      paymentIntentId: ['required', { custom: customValidators.validPaymentIntentId }]
-    }
+    params: { videoId: ['required', 'mongoId'] },
+    body:   { paymentIntentId: ['required', { custom: customValidators.validPaymentIntentId }] }
   }),
   async (req, res, next) => {
     try {
       const { videoId } = req.params;
       const userId = req.user._id;
 
-      // ส่ง paymentIntentId → PurchaseService จะ capture (ตัดเงินจริง) + save ข้อมูล
       const result = await PurchaseService.purchaseVideo(userId, videoId, {
         paymentIntentId: req.body.paymentIntentId
       });
 
-      // ✅ ส่งข้อมูลกลับให้ User ทันที
       res.json({ success: true, data: result });
-      
     } catch (error) {
-      // ✅ ส่ง Error ไปยัง Global Error Handler เพื่อตอบกลับลูกค้าอย่างเหมาะสม
       next(error);
     }
-    // ❌ ลบบล็อก finally ที่เรียก releaseLockMiddleware ออกทั้งหมด
   }
 );
+
 // ─────────────────────────────────────────────────────────────────────────────
-// Bulk purchase — authorize + confirm แบบเดียวกัน
-// POST /api/purchases/videos/bulk-purchase  → authorize
-// POST /api/purchases/videos/bulk-confirm   → capture + save
+// Bulk purchase
+// POST /api/purchase/videos/bulk-purchase  → authorize
+// POST /api/purchase/videos/bulk-confirm   → capture + save
 // ─────────────────────────────────────────────────────────────────────────────
 router.post('/videos/bulk-purchase',
   authenticateToken,
   rateLimiter({ windowMs: 60000, max: 5 }),
   preventDuplicate('bulk_purchase', { ttl: 60 }),
+  releaseLockMiddleware,
   validateRequest({
     body: {
       videoIds: [
@@ -123,7 +105,6 @@ router.post('/videos/bulk-purchase',
       const { videoIds, currency } = req.body;
       const userId = req.user._id;
 
-      // ไม่ส่ง paymentIntentId → authorize
       const result = await PurchaseService.bulkPurchaseVideos(userId, videoIds, {
         currency: currency || 'THB'
       });
@@ -131,8 +112,6 @@ router.post('/videos/bulk-purchase',
       res.json({ success: true, data: result });
     } catch (error) {
       next(error);
-    } finally {
-      await releaseLockMiddleware(req, res);
     }
   }
 );
@@ -141,6 +120,7 @@ router.post('/videos/bulk-confirm',
   authenticateToken,
   rateLimiter({ windowMs: 60000, max: 5 }),
   preventDuplicate('bulk_confirm', { ttl: 60 }),
+  releaseLockMiddleware,
   validateRequest({
     body: {
       videoIds: [
@@ -158,7 +138,6 @@ router.post('/videos/bulk-confirm',
       const { videoIds, paymentIntentId } = req.body;
       const userId = req.user._id;
 
-      // ส่ง paymentIntentId → capture + save
       const result = await PurchaseService.bulkPurchaseVideos(userId, videoIds, {
         paymentIntentId
       });
@@ -166,8 +145,6 @@ router.post('/videos/bulk-confirm',
       res.json({ success: true, data: result });
     } catch (error) {
       next(error);
-    } finally {
-      await releaseLockMiddleware(req, res);
     }
   }
 );
@@ -176,7 +153,7 @@ router.post('/videos/bulk-confirm',
 // Static routes — ต้องอยู่เหนือ dynamic routes (:id)
 // ─────────────────────────────────────────────────────────────────────────────
 
-// GET /api/purchases/history
+// GET /api/purchase/history
 router.get('/history',
   authenticateToken,
   rateLimiter({ windowMs: 60000, max: 30 }),
@@ -211,7 +188,7 @@ router.get('/history',
   }
 );
 
-// GET /api/purchases/stats
+// GET /api/purchase/stats
 router.get('/stats',
   authenticateToken,
   rateLimiter({ windowMs: 60000, max: 30 }),
@@ -240,7 +217,7 @@ router.get('/stats',
 // Dynamic routes (:id / :purchaseId) — อยู่หลัง static เสมอ
 // ─────────────────────────────────────────────────────────────────────────────
 
-// GET /api/purchases/video/:videoId/access
+// GET /api/purchase/video/:videoId/access
 router.get('/video/:videoId/access',
   authenticateToken,
   rateLimiter({ windowMs: 60000, max: 30 }),
@@ -257,11 +234,12 @@ router.get('/video/:videoId/access',
   }
 );
 
-// POST /api/purchases/:purchaseId/refund
+// POST /api/purchase/:purchaseId/refund
 router.post('/:purchaseId/refund',
   authenticateToken,
   rateLimiter({ windowMs: 60000, max: 5 }),
   preventDuplicate('refund', { ttl: 30 }),
+  releaseLockMiddleware,
   validateRequest({
     params: { purchaseId: ['required', 'mongoId'] },
     body:   { reason: ['required', 'string', { min: 10, max: 500 }] }
@@ -281,13 +259,11 @@ router.post('/:purchaseId/refund',
       res.json({ success: true, data: result });
     } catch (error) {
       next(error);
-    } finally {
-      await releaseLockMiddleware(req, res);
     }
   }
 );
 
-// GET /api/purchases/:id/access
+// GET /api/purchase/:id/access
 router.get('/:id/access',
   authenticateToken,
   rateLimiter({ windowMs: 60000, max: 30 }),

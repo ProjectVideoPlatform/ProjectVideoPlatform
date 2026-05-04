@@ -67,7 +67,7 @@ const PaymentService = {
   // ─── Refund ──────────────────────────────────────────────────────
   async refund({ transactionId, amount, reason }) {
     const refund = await stripe.refunds.create({
-      payment_intent: transactionId,
+      payment_intent: transactionId.toLowerCase(),
       amount:         amount ? Math.round(amount * 100) : undefined, // partial refund
       reason:         'requested_by_customer',
       metadata:       { reason }

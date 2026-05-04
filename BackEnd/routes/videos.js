@@ -651,7 +651,8 @@ router.get('/purchased/list', authenticateToken, async (req, res) => {
     purchaseDate: purchase.purchaseDate,
     amount: purchase.amount,
     accessCount: purchase.accessCount,
-    lastAccessedAt: purchase.lastAccessedAt
+    lastAccessedAt: purchase.lastAccessedAt,
+    purchaseId: purchase._id
   }
 }));
     
