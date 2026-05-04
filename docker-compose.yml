@@ -294,10 +294,10 @@ services:
       KAFKA_NODE_ID: 1
       KAFKA_PROCESS_ROLES: broker,controller
       # แก้ไข: เปลี่ยนจาก 1@kafka เป็น 1@secure-video-kafka
-      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@secure-video-kafka:9093
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093  # ใช้ service name
       KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
       # แก้ไข: เปลี่ยนเป็นชื่อคอนเทนเนอร์จริง
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://secure-video-kafka:9092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
       KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
       KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
@@ -495,7 +495,7 @@ services:
     restart: unless-stopped
     command: python user-vector-producer.py
     env_file:
-      - ./Backend/.env
+      - ./BackEnd/.env
     environment:
       KAFKA_BROKERS: kafka:9092
       KAFKA_TOPIC: user-vector-refresh
@@ -517,7 +517,7 @@ services:
     restart: unless-stopped
     command: python user-vector-worker.py
     env_file:
-      - ./Backend/.env
+      - ./BackEnd/.env
     environment:
       KAFKA_BROKERS:    kafka:9092
       KAFKA_TOPIC:      user-vector-refresh
@@ -531,7 +531,7 @@ services:
       kafka:
         condition: service_healthy
     deploy:
-      replicas: 5        # เริ่มที่ 10 workers
+      replicas: 3        # เริ่มที่ 10 workers
       resources:
         limits:
           cpus: "1"

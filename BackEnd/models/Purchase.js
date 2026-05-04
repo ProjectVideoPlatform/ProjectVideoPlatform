@@ -30,7 +30,7 @@ const purchaseSchema = new mongoose.Schema({
   },
   paymentMethod: {
     type: String,
-    enum: ['kplus', 'credit_card', 'promptpay', 'truewallet', 'bank_transfer', 'cash'],
+    enum: ['kplus', 'credit_card', 'promptpay', 'truewallet', 'bank_transfer', 'cash','card'],
     required: true
   },
   

@@ -19,10 +19,8 @@ const preventDuplicate = (prefix, options = {}) => {
       
       // Determine resource ID based on request type
       if (req.params.id) {
-        // Single purchase
         resourceId = req.params.id;
       } else if (Array.isArray(req.body.videoIds)) {
-        // Bulk purchase
         const hash = crypto
           .createHash('sha1')
           .update(req.body.videoIds.sort().join(','))
@@ -30,7 +28,6 @@ const preventDuplicate = (prefix, options = {}) => {
           .substring(0, 8);
         resourceId = hash;
       } else if (req.body.transactionId) {
-        // Payment-level
         resourceId = req.body.transactionId;
       } else {
         resourceId = 'general';
@@ -38,14 +35,29 @@ const preventDuplicate = (prefix, options = {}) => {
       
       const lockKey = `lock:${prefix}:${userId}:${resourceId}`;
       
-      // Try to acquire lock
-      const acquired = await redisClient.set(lockKey, 'processing', {
-        NX: true,
-        EX: ttl
-      });
+      // ✅ แก้ไข: ใช้ syntax ที่ถูกต้องของ ioredis
+      // วิธีที่ 1: ใช้ method แยก
+      const acquired = await redisClient.set(
+        lockKey, 
+        'processing', 
+        'EX', ttl,     // Expire ใน ttl วินาที
+        'NX'           // Set only if not exists
+      );
+      
+      // หรือ วิธีที่ 2: ใช้ object options (ioredis รองรับ)
+      // const acquired = await redisClient.set(lockKey, 'processing', 'EX', ttl, 'NX');
+      
+      // หรือ วิธีที่ 3: ใช้ SETNX + EXPIRE แยกกัน (รองรับทุกเวอร์ชัน)
+      // const exists = await redisClient.setnx(lockKey, 'processing');
+      // if (exists === 1) {
+      //   await redisClient.expire(lockKey, ttl);
+      //   const acquired = true;
+      // } else {
+      //   const acquired = false;
+      // }
       
       if (!acquired) {
-        logger.warn(`Duplicate request blocked: ${lockKey}`, { userId });
+        logger.warn(`Duplicate request blocked: ${lockKey}`, { userId, resourceId });
         return res.status(429).json({
           error: errorMessage,
           retryAfter: ttl,
@@ -53,14 +65,19 @@ const preventDuplicate = (prefix, options = {}) => {
         });
       }
       
+      // Store lock info in request for cleanup if needed
       req.lockKey = lockKey;
       req.lockTtl = ttl;
       
-      logger.debug(`Lock acquired: ${lockKey}`, { userId });
+      logger.debug(`Lock acquired: ${lockKey}`, { userId, resourceId });
       next();
       
     } catch (error) {
       logger.error('PreventDuplicate middleware error:', error);
+      // Clean up lock if error occurred after acquiring
+      if (req.lockKey) {
+        await redisClient.del(req.lockKey).catch(e => logger.error('Failed to release lock:', e));
+      }
       next(error);
     }
   };

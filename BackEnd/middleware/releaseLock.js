@@ -1,37 +1,21 @@
 const redisClient = require('../config/redis');
 const logger = require('../utils/logger');
 
-const releaseLock = async (req, res, next) => {
-  try {
-    await next();
-  } catch (error) {
-    // Pass error to error handler
-    throw error;
-  } finally {
-    // Always release lock in finally block
+// Alternative: Express middleware style
+const releaseLockMiddleware = (req, res, next) => {
+  // ใช้เหตุการณ์ 'finish' เพื่อให้มั่นใจว่าทำงานหลังจากส่งข้อมูลให้ลูกค้าเสร็จแล้ว
+  res.on('finish', async () => {
     if (req.lockKey) {
       try {
         await redisClient.del(req.lockKey);
-        logger.debug(`Lock released: ${req.lockKey}`);
+        logger.debug(`Lock released after response finish: ${req.lockKey}`);
       } catch (error) {
         logger.error(`Failed to release lock ${req.lockKey}:`, error);
       }
     }
-  }
+  });
+
+  next(); // ส่งต่อไปยัง Controller ทันที ไม่ต้องรอให้ข้างบนทำงานเสร็จ
 };
 
-// Alternative: Express middleware style
-const releaseLockMiddleware = (req, res, next) => {
-  const originalEnd = res.end;
-  
-  res.end = function(...args) {
-    // Release lock when response ends
-    releaseLock(req).finally(() => {
-      originalEnd.apply(res, args);
-    });
-  };
-  
-  next();
-};
-
-module.exports = { releaseLock, releaseLockMiddleware };
+module.exports = { releaseLockMiddleware };

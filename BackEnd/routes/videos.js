@@ -133,7 +133,8 @@ router.get('/', authenticateToken, async (req, res) => {
       .select('id title description price duration thumbnailPath tags createdAt accessType') // ✅ เพิ่ม accessType
       .sort({ createdAt: -1 })
       .skip(skip)
-      .limit(limit);
+      .limit(limit)
+      .read('secondaryPreferred');
 
     const total = await Video.countDocuments(query);
 
@@ -634,25 +635,25 @@ router.get('/purchased/list', authenticateToken, async (req, res) => {
     .populate('videoId', 'id title description thumbnailPath duration price tags accessType') // ✅ เพิ่ม accessType
     .sort({ purchaseDate: -1 })
     .skip(skip)
-    .limit(parseInt(limit));
-    
+    .limit(parseInt(limit))
+    .read('secondaryPreferred'); // ✅
     const total = await Purchase.countDocuments({
       userId: req.user._id,
       status: 'completed'
     });
-    
-    const purchasedVideos = purchases.map(purchase => ({
-      ...purchase.videoId.toObject(),
-      uploadStatus: 'completed',
-      canPlay: true,
-      accessType: purchase.videoId.accessType, // ✅ เพิ่ม
-      purchaseInfo: {
-        purchaseDate: purchase.purchaseDate,
-        amount: purchase.amount,
-        accessCount: purchase.accessCount,
-        lastAccessedAt: purchase.lastAccessedAt
-      }
-    }));
+  const purchasedVideos = purchases.map(purchase => ({
+  ...purchase.videoId.toObject(),
+  uploadStatus: 'completed',
+  canPlay: true,
+  purchased: true,              // ✅ เพิ่มบรรทัดนี้
+  accessType: purchase.videoId.accessType,
+  purchaseInfo: {
+    purchaseDate: purchase.purchaseDate,
+    amount: purchase.amount,
+    accessCount: purchase.accessCount,
+    lastAccessedAt: purchase.lastAccessedAt
+  }
+}));
     
     res.json({
       videos: purchasedVideos,

@@ -8,7 +8,6 @@ const authRoutes = require('./routes/auth');
 const videoRoutes = require('./routes/videos');
 const adminRoutes = require('./routes/admin');
 const UserRoute = require('./routes/user');
-const paymentRoutes = require('./routes/payment');
 const purchaseRoutes = require('./routes/Purchase');
 
 // ✅ 1. Import Webhook Route เข้ามา
@@ -51,9 +50,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/videos', videoRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/user', UserRoute);
-app.use('/api/payment', paymentRoutes);
 app.use('/api/public', require('./routes/analyze'));
-// app.use('/api/payment', paymentRoutes); // ❌ ลบอันนี้ออก (คุณประกาศไปแล้วด้านบน)
 
 app.get('/api/health', (req, res) => {
   res.json({ status: 'OK', timestamp: new Date().toISOString() });

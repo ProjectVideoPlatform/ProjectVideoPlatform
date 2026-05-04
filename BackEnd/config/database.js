@@ -16,7 +16,7 @@ async function connectDB() {
       socketTimeoutMS: 45000,
 
       // production practice
-      readPreference: 'secondaryPreferred',
+     readPreference: 'primary',
       retryWrites: true,
       retryReads: true,             
       w: 'majority'

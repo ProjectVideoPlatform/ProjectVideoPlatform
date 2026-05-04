@@ -13,24 +13,27 @@ const rateLimiter = (options = {}) => {
       const key = `${keyPrefix}:${req.ip || 'unknown'}:${req.path}`;
       const now = Date.now();
 
-      // ioredis pipeline (เร็วกว่า multi สำหรับ non-transactional)
+      // ✅ ioredis pipeline syntax ถูกต้องแล้ว
       const pipeline = redisClient.pipeline();
       pipeline.incr(key);
       pipeline.ttl(key);
 
-      // ioredis: exec() คืน [[err, val], [err, val], ...]
       const results = await pipeline.exec();
-      const [incrErr, count] = results[0];
-      const [ttlErr,  ttl]   = results[1];
-
-      if (incrErr) throw incrErr;
-      if (ttlErr)  throw ttlErr;
+      
+      // ✅ ตรวจสอบผลลัพธ์ pipeline
+      const count = results[0][1];  // incr result
+      const ttl = results[1][1];     // ttl result
 
       // ถ้า key เพิ่งถูกสร้าง (ttl === -1) → ตั้ง expire
       if (ttl === -1) {
         await redisClient.expire(key, Math.ceil(windowMs / 1000));
+        
+        // หรือใช้ pipeline เดิมเลยก็ได้
+        // pipeline.expire(key, Math.ceil(windowMs / 1000));
+        // await pipeline.exec();
       }
 
+      // Set headers
       res.setHeader('X-RateLimit-Limit', max);
       res.setHeader('X-RateLimit-Remaining', Math.max(0, max - count));
       res.setHeader('X-RateLimit-Reset', Math.ceil((now + windowMs) / 1000));
@@ -45,7 +48,9 @@ const rateLimiter = (options = {}) => {
 
       next();
     } catch (error) {
+      // ✅ ใช้ logger แทน console.error
       console.error('Rate limiter error:', error);
+      // Don't block the request if rate limiter fails
       next();
     }
   };

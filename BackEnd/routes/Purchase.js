@@ -22,20 +22,17 @@ router.post('/video/:videoId/purchase',
   authenticateToken,
   rateLimiter({ windowMs: 60000, max: 10 }),
   preventDuplicate('purchase', { ttl: 30 }),
+  // ✅ วาง Middleware ไว้ตรงนี้ เพื่อรอปลด Lock เมื่อ Response จบลง
+  releaseLockMiddleware, 
   validateRequest({
-    params: {
-      videoId: ['required', 'mongoId']
-    },
-    body: {
-      currency: ['optional', { in: ['THB', 'USD', 'EUR'] }]
-    }
+    params: { videoId: ['required', 'mongoId'] },
+    body: { currency: ['optional', { in: ['THB', 'USD', 'EUR'] }] }
   }),
   async (req, res, next) => {
     try {
       const { videoId } = req.params;
       const userId = req.user._id;
 
-      // เช็ค free video ก่อน (ไม่ต้องเข้า service)
       const video = await Video.findById(videoId);
       if (!video) {
         return res.status(404).json({ error: 'Video not found' });
@@ -44,18 +41,19 @@ router.post('/video/:videoId/purchase',
         return res.status(400).json({ error: 'This video is free, no purchase needed' });
       }
 
-      // ไม่ส่ง paymentIntentId → PurchaseService จะ authorize อายัดวงเงิน
       const result = await PurchaseService.purchaseVideo(userId, videoId, {
         currency: req.body.currency || 'THB'
-        // ไม่มี paymentIntentId → trigger authorize step
       });
 
+      // ✅ ส่งคำตอบกลับทันที releaseLockMiddleware (ที่ใช้ res.on('finish')) 
+      // จะทำหน้าที่ล้าง Redis Lock ให้เองโดยอัตโนมัติ
       res.json({ success: true, data: result });
+      
     } catch (error) {
+      // ✅ ส่ง Error ไปยัง Global Error Handler
       next(error);
-    } finally {
-      await releaseLockMiddleware(req, res);
     }
+    // ❌ ลบบล็อก finally ออกทั้งหมด
   }
 );
 
@@ -69,6 +67,8 @@ router.post('/video/:videoId/confirm',
   authenticateToken,
   rateLimiter({ windowMs: 60000, max: 10 }),
   preventDuplicate('confirm', { ttl: 60 }),
+  // ✅ วาง Middleware ไว้ลำดับนี้เพื่อให้ Express จัดการวงจรชีวิตของมันเอง
+  releaseLockMiddleware, 
   validateRequest({
     params: {
       videoId: ['required', 'mongoId']
@@ -82,20 +82,21 @@ router.post('/video/:videoId/confirm',
       const { videoId } = req.params;
       const userId = req.user._id;
 
-      // ส่ง paymentIntentId → PurchaseService จะ capture + save
+      // ส่ง paymentIntentId → PurchaseService จะ capture (ตัดเงินจริง) + save ข้อมูล
       const result = await PurchaseService.purchaseVideo(userId, videoId, {
         paymentIntentId: req.body.paymentIntentId
       });
 
+      // ✅ ส่งข้อมูลกลับให้ User ทันที
       res.json({ success: true, data: result });
+      
     } catch (error) {
+      // ✅ ส่ง Error ไปยัง Global Error Handler เพื่อตอบกลับลูกค้าอย่างเหมาะสม
       next(error);
-    } finally {
-      await releaseLockMiddleware(req, res);
     }
+    // ❌ ลบบล็อก finally ที่เรียก releaseLockMiddleware ออกทั้งหมด
   }
 );
-
 // ─────────────────────────────────────────────────────────────────────────────
 // Bulk purchase — authorize + confirm แบบเดียวกัน
 // POST /api/purchases/videos/bulk-purchase  → authorize
