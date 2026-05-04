@@ -39,7 +39,6 @@ const purchaseSchema = new mongoose.Schema({
     type: String, 
     index: true, 
     sparse: true,
-    uppercase: true,
     trim: true
   },
   gatewayTransactionId: {

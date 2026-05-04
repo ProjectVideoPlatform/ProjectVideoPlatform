@@ -664,13 +664,15 @@ async handlePaymentCompleted(data) {
     };
   }
 
-  async refundPurchase(purchaseId, reason) {
+async refundPurchase(purchaseId, reason) {
     const session = await mongoose.startSession();
 
     try {
       await session.startTransaction();
 
       const purchase = await Purchase.findById(purchaseId).session(session);
+      console.log('=== PURCHASE FROM DB ===');
+console.log('transactionId:', JSON.stringify(purchase.transactionId));
       if (!purchase)                        throw new Error('Purchase not found');
       if (purchase.status !== 'completed')  throw new Error('Only completed purchases can be refunded');
 
@@ -689,12 +691,20 @@ async handlePaymentCompleted(data) {
         throw new Error(`Refund failed: ${refundResult.reason}`);
       }
 
-      purchase.status           = 'refunded';
-      purchase.refundedAt       = new Date();
-      purchase.refundReason     = reason;
-      purchase.metadata.refund  = refundResult;
-      await purchase.save({ session });
-
+      purchase.status       = 'refunded';
+      purchase.refundedAt   = new Date();
+      console.log('before save - status:', purchase.status);
+console.log('before save - isModified:', purchase.isModified('status'));
+      purchase.refundReason = reason;
+      purchase.metadata.set('refund', refundResult); // ✅ Map ต้องใช้ .set()
+      purchase.markModified('metadata');             // ✅ บอก Mongoose ว่า Map เปลี่ยนแล้ว
+try {
+  await purchase.save({ session });
+  console.log('after save - status:', purchase.status);
+} catch (saveErr) {
+  console.log('SAVE ERROR:', saveErr.message, saveErr.code);
+  throw saveErr;
+}
       await User.updateOne(
         { _id: purchase.userId },
         {

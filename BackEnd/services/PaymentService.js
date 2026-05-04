@@ -66,8 +66,11 @@ const PaymentService = {
 
   // ─── Refund ──────────────────────────────────────────────────────
   async refund({ transactionId, amount, reason }) {
+    console.log('=== STRIPE REFUND ===');
+  console.log('transactionId:', JSON.stringify(transactionId));
+  console.log('length:', transactionId?.length);
     const refund = await stripe.refunds.create({
-      payment_intent: transactionId.toLowerCase(),
+      payment_intent: transactionId,
       amount:         amount ? Math.round(amount * 100) : undefined, // partial refund
       reason:         'requested_by_customer',
       metadata:       { reason }
