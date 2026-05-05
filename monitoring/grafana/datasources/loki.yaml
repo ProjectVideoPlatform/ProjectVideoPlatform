@@ -1,0 +1,9 @@
+apiVersion: 1
+datasources:
+  - name: Loki
+    type: loki
+    uid: loki_ds          # <--- กำหนด UID สำหรับให้ Dashboard อ้างอิง
+    access: proxy
+    url: http://loki:3100 # <--- อ้างอิงชื่อ service และ port จาก docker-compose
+    jsonData:
+      maxLines: 1000      # (Optional) กำหนดจำนวนบรรทัดสูงสุดที่จะดึงมาแสดงผล

@@ -614,6 +614,7 @@ const VideoStreamingApp = () => {
                     onPlay={handlePlay}
                     isLoading={actionLoading === (video.id || video._id)}
                     isAdmin={isAdmin}
+                     showRefundButton={currentView === 'purchased'}  // ✅ แค่นี้พอ
                   />
                 ))}
               </div>

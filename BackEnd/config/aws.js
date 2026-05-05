@@ -14,7 +14,7 @@
     // MediaConvert
     mediaConvertEndpoint: process.env.MEDIACONVERT_ENDPOINT,
     mediaConvertRole: process.env.MEDIACONVERT_ROLE,
-    
+    mediaConvertQueueArn: process.env.MEDIACONVERT_QUEUE_ARN,
     // CloudFront
     cloudFrontDomain: process.env.CLOUDFRONT_DOMAIN,
     cloudFrontKeyPairId: process.env.CLOUDFRONT_KEY_PAIR_ID,

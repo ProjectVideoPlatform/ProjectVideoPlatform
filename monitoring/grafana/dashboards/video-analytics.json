@@ -1,5 +1,5 @@
 {
-  "title": "🎬 Pro Video Analytics Dashboard",
+  "title": "🎬 Pro Video Analytics Dashboard (Fixed)",
   "timezone": "browser",
   "panels": [
     {
@@ -17,13 +17,13 @@
     },
     {
       "title": "Unique Users",
-      "description": "จำนวน user ที่ไม่ซ้ำที่กด play (ไม่รวม anonymous)",
+      "description": "จำนวน session logged-in (ไม่นับ anonymous และ empty user_id)",
       "type": "stat",
       "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse_ds" },
       "targets": [
         {
           "queryType": "sql",
-          "rawSql": "SELECT uniqExact(user_id) FROM app_db.video_watch_events WHERE $__timeFilter(event_time) AND event_type = 'play' AND user_id != 'anonymous'"
+          "rawSql": "SELECT uniqExactIf(session_id, user_id != '' AND user_id != 'anonymous') FROM app_db.video_watch_events WHERE $__timeFilter(event_time) AND event_type = 'play'"
         }
       ],
       "gridPos": { "h": 4, "w": 4, "x": 4, "y": 0 }
@@ -43,26 +43,26 @@
     },
     {
       "title": "✅ Completion Rate",
-      "description": "% session ที่ได้รับ completed event ต่อ session ที่มี play (นับ unique session)",
+      "description": "% session ที่ดูจบ — group by session ก่อนเพื่อป้องกัน rate เกิน 100%",
       "type": "stat",
       "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse_ds" },
       "targets": [
         {
           "queryType": "sql",
-          "rawSql": "SELECT ROUND((uniqExactIf(session_id, event_type = 'completed') / NULLIF(uniqExactIf(session_id, event_type = 'play'), 0)) * 100, 1) FROM app_db.video_watch_events WHERE $__timeFilter(event_time)"
+          "rawSql": "WITH sessions AS (SELECT session_id, maxIf(1, event_type = 'play') AS had_play, maxIf(1, event_type = 'completed') AS had_completed FROM app_db.video_watch_events WHERE $__timeFilter(event_time) GROUP BY session_id) SELECT ROUND(SUM(had_completed) / NULLIF(SUM(had_play), 0) * 100, 1) FROM sessions WHERE had_play = 1"
         }
       ],
       "gridPos": { "h": 4, "w": 4, "x": 12, "y": 0 }
     },
     {
       "title": "⏩ Seek Rate",
-      "description": "% session ที่มีการ seek อย่างน้อย 1 ครั้ง",
+      "description": "% session ที่มีการ seek อย่างน้อย 1 ครั้ง — group by session ป้องกัน rate เกิน 100%",
       "type": "stat",
       "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse_ds" },
       "targets": [
         {
           "queryType": "sql",
-          "rawSql": "SELECT ROUND((uniqExactIf(session_id, event_type = 'seek') / NULLIF(uniqExactIf(session_id, event_type = 'play'), 0)) * 100, 1) FROM app_db.video_watch_events WHERE $__timeFilter(event_time)"
+          "rawSql": "WITH sessions AS (SELECT session_id, maxIf(1, event_type = 'play') AS had_play, maxIf(1, event_type = 'seek') AS had_seek FROM app_db.video_watch_events WHERE $__timeFilter(event_time) GROUP BY session_id) SELECT ROUND(SUM(had_seek) / NULLIF(SUM(had_play), 0) * 100, 1) FROM sessions WHERE had_play = 1"
         }
       ],
       "gridPos": { "h": 4, "w": 4, "x": 16, "y": 0 }
@@ -110,13 +110,13 @@
 
     {
       "title": "🔥 Top Performing Videos",
-      "description": "วิดีโอยอดนิยม — views, unique users, total/avg watch time จาก watch_chunk",
+      "description": "วิดีโอยอดนิยม — views, total/avg watch time จาก watch_chunk",
       "type": "table",
       "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse_ds" },
       "targets": [
         {
           "queryType": "sql",
-          "rawSql": "SELECT video_id AS `Video ID`, uniqExact(session_id) AS `Total Views`, uniqExact(user_id) AS `Unique Users`, ROUND(SUM(session_sec) / 60.0, 1) AS `Watch Time (mins)`, ROUND(AVG(session_sec), 0) AS `Avg Watch Time (s)` FROM (SELECT video_id, session_id, user_id, SUM(watch_duration_seconds) AS session_sec FROM app_db.video_watch_events WHERE $__timeFilter(event_time) AND event_type = 'watch_chunk' GROUP BY video_id, session_id, user_id) GROUP BY video_id ORDER BY `Total Views` DESC LIMIT 10"
+          "rawSql": "SELECT video_id AS `Video ID`, uniqExact(session_id) AS `Total Views`, ROUND(SUM(session_sec) / 60.0, 1) AS `Watch Time (mins)`, ROUND(AVG(session_sec), 0) AS `Avg Watch Time (s)` FROM (SELECT video_id, session_id, SUM(watch_duration_seconds) AS session_sec FROM app_db.video_watch_events WHERE $__timeFilter(event_time) AND event_type = 'watch_chunk' GROUP BY video_id, session_id) GROUP BY video_id ORDER BY `Total Views` DESC LIMIT 10"
         }
       ],
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 }
@@ -136,14 +136,14 @@
 
     {
       "title": "📉 Drop-off Distribution",
-      "description": "session ที่ไม่ completed จบที่ช่วงไหนบ้าง (เฉพาะ logged-in users)",
+      "description": "session ที่ไม่ completed จบที่ช่วงไหนบ้าง (เฉพาะ logged-in users — filter ทั้ง '' และ 'anonymous')",
       "type": "barchart",
       "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse_ds" },
       "targets": [
         {
           "refId": "A",
           "queryType": "sql",
-          "rawSql": "SELECT toString(intDiv(total_watched, 10) * 10) || 's' AS second_bucket, COUNT(*) AS drop_offs FROM (SELECT session_id, SUM(watch_duration_seconds) AS total_watched, maxIf(1, event_type = 'completed') AS is_completed FROM app_db.video_watch_events WHERE $__timeFilter(event_time) AND user_id != 'anonymous' GROUP BY session_id) WHERE is_completed = 0 GROUP BY second_bucket ORDER BY toUInt32(replaceAll(second_bucket, 's', '')) ASC"
+          "rawSql": "SELECT toString(intDiv(total_watched, 10) * 10) || 's' AS second_bucket, COUNT(*) AS drop_offs FROM (SELECT session_id, SUM(watch_duration_seconds) AS total_watched, maxIf(1, event_type = 'completed') AS is_completed FROM app_db.video_watch_events WHERE $__timeFilter(event_time) AND (user_id != 'anonymous' AND user_id != '') GROUP BY session_id) WHERE is_completed = 0 GROUP BY second_bucket ORDER BY toUInt32(replaceAll(second_bucket, 's', '')) ASC"
         }
       ],
       "options": {
@@ -160,35 +160,36 @@
       },
       "gridPos": { "h": 9, "w": 12, "x": 0, "y": 20 }
     },
+{
+  "title": "📉 Retention Curve (MV)",
+  "description": "% คนที่ยังอยู่ในแต่ละช่วงเวลาของวิดีโอ — filter ทีละ video",
+  "type": "barchart",
+  "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse_ds" },
+  "targets": [
     {
-      "title": "📉 Retention Curve (MV)",
-      "description": "% คนที่ยังอยู่ในแต่ละช่วงเวลาของวิดีโอ — จาก video_retention_mv (pre-aggregated)",
-      "type": "timeseries",
-      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse_ds" },
-      "targets": [
-        {
-          "refId": "B",
-          "queryType": "sql",
-          "rawSql": "WITH total AS (SELECT uniqMerge(viewers) AS v FROM app_db.video_retention_mv WHERE event_date >= toDate($__fromTime) AND event_date <= toDate($__toTime) AND bucket_seconds = 0) SELECT bucket_seconds AS second, ROUND(uniqMerge(viewers) / NULLIF((SELECT v FROM total), 0) * 100, 1) AS retention_pct FROM app_db.video_retention_mv WHERE event_date >= toDate($__fromTime) AND event_date <= toDate($__toTime) GROUP BY bucket_seconds ORDER BY bucket_seconds ASC"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "percent",
-          "min": 0,
-          "max": 100,
-          "custom": { "lineWidth": 2, "fillOpacity": 20 }
-        }
-      },
-      "options": {
-        "tooltip": { "mode": "single" }
-      },
-      "gridPos": { "h": 9, "w": 12, "x": 12, "y": 20 }
-    },
-
+      "refId": "B",
+      "queryType": "sql",
+      "rawSql": "WITH total AS (SELECT uniqMerge(viewers) AS v FROM app_db.video_retention_mv WHERE video_id = '${video_id}' AND event_date >= toDate($__fromTime) AND event_date <= toDate($__toTime) AND bucket_seconds = 0) SELECT bucket_seconds AS second, ROUND(uniqMerge(viewers) / NULLIF((SELECT v FROM total), 0) * 100, 1) AS retention_pct FROM app_db.video_retention_mv WHERE video_id = '${video_id}' AND event_date >= toDate($__fromTime) AND event_date <= toDate($__toTime) GROUP BY bucket_seconds ORDER BY bucket_seconds ASC"
+    }
+  ],
+  "fieldConfig": {
+    "defaults": {
+      "unit": "percent",
+      "min": 0,
+      "max": 100,
+      "custom": { "fillOpacity": 20 }
+    }
+  },
+  "options": {
+    "xField": "second",
+    "tooltip": { "mode": "single" },
+    "barWidth": 0.9
+  },
+  "gridPos": { "h": 9, "w": 12, "x": 12, "y": 20 }
+},
     {
       "title": "⏩ Seek Behavior",
-      "description": "forward (seek_delta > 0) vs backward (seek_delta < 0) แยก bucket",
+      "description": "forward (seek_to > seek_from) vs backward (seek_to < seek_from) แยก bucket",
       "type": "barchart",
       "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse_ds" },
       "targets": [
@@ -244,13 +245,13 @@
     },
     {
       "title": "👤 Logged-in vs Anonymous Views",
-      "description": "เปรียบ session ระหว่าง logged-in user กับ anonymous",
+      "description": "เปรียบ session ระหว่าง logged-in กับ anonymous — filter ทั้ง '' และ 'anonymous'",
       "type": "piechart",
       "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse_ds" },
       "targets": [
         {
           "queryType": "sql",
-          "rawSql": "SELECT multiIf(user_id = 'anonymous', 'Anonymous', 'Logged-in') AS user_type, uniqExact(session_id) AS sessions FROM app_db.video_watch_events WHERE $__timeFilter(event_time) AND event_type = 'play' GROUP BY user_type"
+          "rawSql": "SELECT multiIf(user_id = 'anonymous' OR user_id = '', 'Anonymous', 'Logged-in') AS user_type, uniqExact(session_id) AS sessions FROM app_db.video_watch_events WHERE $__timeFilter(event_time) AND event_type = 'play' GROUP BY user_type"
         }
       ],
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 37 }
@@ -258,13 +259,13 @@
 
     {
       "title": "🏆 Video Performance Summary",
-      "description": "ภาพรวมต่อวิดีโอ — views, avg watch time, completion rate",
+      "description": "ภาพรวมต่อวิดีโอ — views, avg watch time, completion rate (ไม่เกิน 100%)",
       "type": "table",
       "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse_ds" },
       "targets": [
         {
           "queryType": "sql",
-          "rawSql": "WITH chunks AS (SELECT video_id, session_id, SUM(watch_duration_seconds) AS session_watch_sec FROM app_db.video_watch_events WHERE $__timeFilter(event_time) AND event_type = 'watch_chunk' GROUP BY video_id, session_id), events AS (SELECT video_id, session_id, maxIf(1, event_type = 'completed') AS is_completed, maxIf(1, event_type = 'play') AS is_play FROM app_db.video_watch_events WHERE $__timeFilter(event_time) GROUP BY video_id, session_id) SELECT e.video_id AS `Video`, COUNT(e.session_id) AS `Total Views`, ROUND(AVG(c.session_watch_sec), 0) AS `Avg Watch Time (s)`, ROUND((SUM(e.is_completed) / NULLIF(SUM(e.is_play), 0)) * 100, 1) AS `Completion Rate (%)` FROM events e LEFT JOIN chunks c ON e.video_id = c.video_id AND e.session_id = c.session_id GROUP BY e.video_id ORDER BY `Total Views` DESC"
+          "rawSql": "WITH chunks AS (SELECT video_id, session_id, SUM(watch_duration_seconds) AS session_watch_sec FROM app_db.video_watch_events WHERE $__timeFilter(event_time) AND event_type = 'watch_chunk' GROUP BY video_id, session_id), events AS (SELECT video_id, session_id, maxIf(1, event_type = 'completed') AS is_completed, maxIf(1, event_type = 'play') AS is_play FROM app_db.video_watch_events WHERE $__timeFilter(event_time) GROUP BY video_id, session_id) SELECT e.video_id AS `Video`, SUM(e.is_play) AS `Total Views`, ROUND(AVG(c.session_watch_sec), 0) AS `Avg Watch Time (s)`, ROUND((SUM(e.is_completed) / NULLIF(SUM(e.is_play), 0)) * 100, 1) AS `Completion Rate (%)` FROM events e LEFT JOIN chunks c ON e.video_id = c.video_id AND e.session_id = c.session_id WHERE e.is_play = 1 GROUP BY e.video_id ORDER BY `Total Views` DESC"
         }
       ],
       "fieldConfig": {

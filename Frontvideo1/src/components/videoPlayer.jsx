@@ -39,6 +39,14 @@
 //    pause ตอน isSeekingRef=true ไม่ใช่ user pause จริง → ไม่ส่ง analytics
 //    แต่ยัง sync lastVideoTimeRef เพื่อให้ handleSeeking ได้ pre-seek time ✅
 //
+//  FIX 7 (fetchPendingRef ทำให้ play event หายสำหรับวิดีโอสั้น):
+//    วิดีโอสั้น (< 5 วิ) เล่นจบก่อน fetchVideoProgress() return
+//    → handlePlay ถูก block ด้วย fetchPendingRef → play event ไม่ถูกส่ง
+//    → completed มีแต่ไม่มี play → Completion Rate เป็น 0
+//    แก้: ลบ fetchPendingRef ออกทั้งหมด
+//         isRestoringProgressRef ดูแล race condition นี้อยู่แล้วโดยไม่จำเป็นต้องมี fetchPendingRef
+//    เพิ่ม hasEmittedPlayRef เพื่อกัน play event ซ้ำในกรณีที่ browser fire play หลายครั้ง
+//
 import React, { useRef, useEffect, useState, useCallback } from 'react';
 import Hls from 'hls.js';
 import { X, Play } from 'lucide-react';
@@ -164,10 +172,10 @@ const VideoPlayer = ({ manifestUrl, onClose, videoId, videoCategory }) => {
   // กัน play event ที่ browser fire หลัง seeked ไม่ให้ส่ง analytics
   const justSeekedRef = useRef(false);
 
-  // true ระหว่าง mount → fetchVideoProgress return
-  // block startChunk ทุกชนิด (play, timeupdate) จนกว่าจะรู้ว่า owned หรือไม่
-  // ป้องกัน startChunk(0) ก่อน fetch return → chunk ค้างผ่าน restore seek ❌
-  const fetchPendingRef = useRef(true);
+  // FIX 7: กัน play event ซ้ำ — reset ทุกครั้งที่ videoId เปลี่ยน
+  // ป้องกัน browser fire play หลายครั้ง (หลัง restore seek, หลัง buffer)
+  // แต่ยังการันตีว่าทุก session ได้ play event อย่างน้อย 1 ครั้งเสมอ
+  const hasEmittedPlayRef = useRef(false);
 
   const isOwnedRef            = useRef(false);
   const lastSavedProgressTime = useRef(-1);
@@ -267,8 +275,10 @@ const VideoPlayer = ({ manifestUrl, onClose, videoId, videoCategory }) => {
     if (!videoId) return;
     let cancelled = false;
 
+    // FIX 7: reset play flag ทุกครั้งที่ videoId เปลี่ยน
+    hasEmittedPlayRef.current = false;
+
     fetchVideoProgress(videoId).then((result) => {
-       fetchPendingRef.current = false; // ← unblock ตรงนี้
       if (cancelled || !result) return;
       if (!result.owned) { isOwnedRef.current = false; return; }
 
@@ -344,18 +354,18 @@ const VideoPlayer = ({ manifestUrl, onClose, videoId, videoCategory }) => {
 
     // ── play ──────────────────────────────────────────────────────────────
     //  FIX 4: isRestoring=true → skip ทั้งหมด (ไม่ sync ref, ไม่ startChunk)
-    //  browser fire play อีกครั้งหลัง currentTime=savedTime set
-    //  ถ้า sync lastVideoTimeRef=savedTime → handleSeeking flush chunk ด้วย
-    //  end=savedTime → duration พอง ❌
+    //  FIX 7: ลบ fetchPendingRef ออก — isRestoringProgressRef ดูแล race condition แทน
+    //         เพิ่ม hasEmittedPlayRef กัน play event ซ้ำแทน
     const handlePlay = () => {
       setIsPlaying(true);
       const ct = safeTime(video.currentTime, video);
 
       log('EVENT play', {
-        ct:             ct.toFixed(2),
-        isSeeking:      isSeekingRef.current,
-        isRestoring:    isRestoringProgressRef.current,
-        hasActiveChunk: chunkStartVideoTime.current !== null,
+        ct:              ct.toFixed(2),
+        isSeeking:       isSeekingRef.current,
+        isRestoring:     isRestoringProgressRef.current,
+        hasActiveChunk:  chunkStartVideoTime.current !== null,
+        hasEmittedPlay:  hasEmittedPlayRef.current,
       });
 
       // FIX 4: ไม่แตะ lastVideoTimeRef และไม่ startChunk ระหว่าง restore
@@ -363,10 +373,7 @@ const VideoPlayer = ({ manifestUrl, onClose, videoId, videoCategory }) => {
         log('play IGNORED — restoring progress');
         return;
       }
-if (fetchPendingRef.current) {
-  log('play IGNORED — fetch still pending');
-  return;
-}
+
       // FIX 3: sync lastVideoTimeRef (หลัง restore check)
       lastVideoTimeRef.current = ct;
 
@@ -390,10 +397,14 @@ if (fetchPendingRef.current) {
       isHiddenRef.current = false;
       startChunk(ct);
 
-      videoAnalytics.trackVideoEvent(makePayload({
-        event_type:           'play',
-        current_time_seconds: Math.round(ct),
-      }));
+      // FIX 7: ส่ง play event แค่ครั้งแรกของ session เท่านั้น
+      if (!hasEmittedPlayRef.current) {
+        hasEmittedPlayRef.current = true;
+        videoAnalytics.trackVideoEvent(makePayload({
+          event_type:           'play',
+          current_time_seconds: Math.round(ct),
+        }));
+      }
     };
 
     // ── pause ─────────────────────────────────────────────────────────────
@@ -402,15 +413,13 @@ if (fetchPendingRef.current) {
     //    browser fire pause → seeking → seeked → play ทุกครั้งที่ seek ขณะเล่น
     //    pause ระหว่าง seek ไม่ใช่ user pause จริง → ไม่ flushChunk ไม่ส่ง event
     //    (handleSeeking จัดการ flush แล้ว)
-// ── pause ─────────────────────────────────────────────────────────────
-  // ── pause ─────────────────────────────────────────────────────────────
     const handlePause = () => {
       let ct = safeTime(video.currentTime, video);
 
       // --- [FIX] ป้องกัน Browser ยิง pause ด้วยเวลาปลายทาง ---
       const delta = ct - lastVideoTimeRef.current;
       if (Math.abs(delta) > 1.5 && chunkStartVideoTime.current !== null) {
-         ct = lastVideoTimeRef.current; // บังคับใช้เวลาก่อน Seek เพื่อปิด Chunk
+        ct = lastVideoTimeRef.current; // บังคับใช้เวลาก่อน Seek เพื่อปิด Chunk
       }
       // --------------------------------------------------
 
@@ -446,6 +455,7 @@ if (fetchPendingRef.current) {
       scheduleSaveProgress(ct, true);
       videoAnalytics.forceFlushChunk();
     };
+
     // ── seeking ───────────────────────────────────────────────────────────
     const handleSeeking = () => {
       if (!isSeekingRef.current) {
@@ -471,7 +481,6 @@ if (fetchPendingRef.current) {
     };
 
     // ── seeked ────────────────────────────────────────────────────────────
-// ── seeked ────────────────────────────────────────────────────────────
     const handleSeeked = () => {
       const dest = safeTime(video.currentTime, video);
       const from = seekFromRef.current;
@@ -485,14 +494,12 @@ if (fetchPendingRef.current) {
       });
 
       if (seekCountRef.current <= 5) {
-       // แก้เป็น
-
-videoAnalytics.trackVideoEvent(makePayload({
-  event_type:           'seek',
-  seek_from_seconds:    Math.round(from),
-  seek_to_seconds:      Math.round(dest),          // ✅ ตรงกับ column ใหม่
-  current_time_seconds: Math.round(dest),
-}));
+        videoAnalytics.trackVideoEvent(makePayload({
+          event_type:           'seek',
+          seek_from_seconds:    Math.round(from),
+          seek_to_seconds:      Math.round(dest),
+          current_time_seconds: Math.round(dest),
+        }));
       }
 
       if (isRestoringProgressRef.current) {
@@ -500,22 +507,18 @@ videoAnalytics.trackVideoEvent(makePayload({
         isRestoringProgressRef.current = false;
       } else if (!video.paused && !document.hidden) {
         justSeekedRef.current = true;
-        
-        // --- [FIX] เริ่ม Chunk ใหม่จากเวลาหลัง Seek เสมอ ---
         startChunk(dest);
-        // ---------------------------------------------
       }
 
       scheduleSaveProgress(dest);
     };
 
     // ── timeupdate ────────────────────────────────────────────────────────
-// ── timeupdate ────────────────────────────────────────────────────────
     const handleTimeUpdate = () => {
       if (
         video.paused         ||
         video.ended          ||
-        video.seeking        || // แนะนำให้เพิ่ม native video.seeking เพื่อความชัวร์
+        video.seeking        ||
         isSeekingRef.current ||
         isHiddenRef.current  ||
         document.hidden
@@ -524,17 +527,14 @@ videoAnalytics.trackVideoEvent(makePayload({
       const ct = safeTime(video.currentTime, video);
 
       // --- [FIX] ป้องกัน Race Condition ก่อนเกิด Event Seeking ---
-      // เวลาเล่นปกติ delta จะขยับแค่ ~0.25 วิ 
-      // ถ้าเวลาโดดเกิน 1.5 วิ (ไปข้างหน้า) หรือติดลบ (ถอยหลัง) แสดงว่าเกิดการ Seek
       const delta = ct - lastVideoTimeRef.current;
       if (Math.abs(delta) > 1.5 && chunkStartVideoTime.current !== null) {
-        // คืนค่าออกไปเลย ปล่อยให้ handleSeeking ดึง lastVideoTimeRef ตัวเก่า (ก่อน Seek) ไปใช้
-        return; 
+        return;
       }
       // --------------------------------------------------------
 
       lastVideoTimeRef.current = ct;
-if (fetchPendingRef.current) return; // ← เพิ่มตรงนี้
+
       if (chunkStartVideoTime.current === null) {
         log('timeupdate — no active chunk, starting', { ct: ct.toFixed(2) });
         startChunk(ct);
@@ -550,6 +550,7 @@ if (fetchPendingRef.current) return; // ← เพิ่มตรงนี้
         scheduleSaveProgress(ct);
       }
     };
+
     // ── ended ─────────────────────────────────────────────────────────────
     const handleEnded = () => {
       isEndedRef.current = true;
@@ -564,6 +565,17 @@ if (fetchPendingRef.current) return; // ← เพิ่มตรงนี้
 
       flushChunk(endTime, 'ended');
       videoAnalytics.forceFlushChunk();
+
+      // FIX 7: backfill play event ถ้าวิดีโอสั้นมากจน play event ไม่ถูกส่ง
+      // เกิดได้เมื่อ browser fire ended ก่อน handlePlay ทำงาน (edge case มาก)
+      if (!hasEmittedPlayRef.current) {
+        hasEmittedPlayRef.current = true;
+        log('ended — backfill missing play event');
+        videoAnalytics.trackVideoEvent(makePayload({
+          event_type:           'play',
+          current_time_seconds: 0,
+        }));
+      }
 
       videoAnalytics.trackVideoEvent(makePayload({
         event_type:             'completed',
