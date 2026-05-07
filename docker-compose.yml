@@ -315,6 +315,17 @@ services:
       timeout: 10s
       retries: 5
       start_period: 60s  # เพิ่มเป็น 60s เพราะ Kafka ใช้เวลา start นานกว่า 40s
+  kafka-exporter:
+    image: danielqsj/kafka-exporter:latest
+    container_name: kafka-exporter
+    command:
+      - "--kafka.server=kafka:9092"
+    ports:
+      - "9308:9308"
+    depends_on:
+      - kafka
+    networks:
+      - secure-video-network # เปลี่ยนให้ตรงกับ network ที่คุณใช้อยู่
 
   # Nginx — serve static React + proxy API (ไม่มี react-app service แล้ว)
   nginx:

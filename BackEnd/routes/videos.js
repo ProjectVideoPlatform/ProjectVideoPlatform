@@ -181,27 +181,30 @@ router.get('/', authenticateToken, async (req, res) => {
 // ── /foryou route (แก้แล้ว) ──────────────────────────────────────────────────
 // เพิ่ม canPlay + purchased เหมือน GET / เพื่อให้ frontend ใช้ได้เลย
 // วางแทน router.get('/foryou', ...) เดิมใน videos.js
-
 router.get('/foryou', authenticateToken, async (req, res) => {
   try {
     const userId = req.user._id;
     const { videos, source, boostCategory } = await getRecommendedVideos(userId);
-
-    // ── inject canPlay + purchased ─────────────────────────────────────────────
-    const purchasedVideoIds = await Purchase.find({
+    
+    // ดึง videoIds ทั้งหมด
+    const videoIds = videos.map(v => v._id);
+    
+    // ดึง purchase status ทีเดียวด้วย $in
+    const purchases = await Purchase.find({
       userId: req.user._id,
-      status: 'completed'
+      status: 'completed',
+      videoId: { $in: videoIds }
     }).distinct('videoId');
+    
+    const purchasedSet = new Set(purchases.map(id => id.toString()));
 
-    const enriched = videos.map(video => {
-      const isPurchased = purchasedVideoIds.some(id => id.equals(video._id));
-      const canPlay =
-        req.user.role === 'admin' ||
-        video.accessType === 'free' ||
-        isPurchased;
-
-      return { ...video, purchased: isPurchased, canPlay };
-    });
+    const enriched = videos.map(video => ({
+      ...video,
+      purchased: purchasedSet.has(video._id.toString()),
+      canPlay: req.user.role === 'admin' || 
+               video.accessType === 'free' || 
+               purchasedSet.has(video._id.toString())
+    }));
 
     res.json({ videos: enriched, source, boostCategory });
   } catch (error) {
@@ -209,7 +212,6 @@ router.get('/foryou', authenticateToken, async (req, res) => {
     res.status(500).json({ message: 'Internal server error' });
   }
 });
-
 // GET /:id - single video
 router.get('/:id', authenticateToken, async (req, res) => {
   try {
