@@ -54,7 +54,7 @@ const purchaseSchema = new mongoose.Schema({
   // Status
   status: {
     type: String,
-    enum: ['pending', 'completed', 'failed', 'refunded', 'processing', 'cancelled'],
+    enum: ['pending', 'completed', 'failed', 'refunded', 'processing', 'cancelled','refund_pending'],
     default: 'pending',
     index: true
   },

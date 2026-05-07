@@ -21,10 +21,13 @@ router.post('/video/:videoId/purchase',
   rateLimiter({ windowMs: 60000, max: 10 }),
   preventDuplicate('purchase', { ttl: 30 }),
   releaseLockMiddleware,
-  validateRequest({
-    params: { videoId: ['required', 'mongoId'] },
-    body:   { currency: ['optional', { in: ['THB', 'USD', 'EUR'] }] }
-  }),
+validateRequest({
+  params: { videoId: ['required', 'mongoId'] },
+  body: {
+    currency:      ['optional', { in: ['THB', 'USD', 'EUR'] }],
+    paymentMethod: ['optional', { in: ['card', 'promptpay'] }]  // ← เพิ่ม
+  }
+}),
   async (req, res, next) => {
     try {
       const { videoId } = req.params;
@@ -39,7 +42,8 @@ router.post('/video/:videoId/purchase',
       }
 
       const result = await PurchaseService.purchaseVideo(userId, videoId, {
-        currency: req.body.currency || 'THB'
+        currency: req.body.currency || 'THB',
+        paymentMethod: req.body.paymentMethod || 'card'
       });
 
       res.json({ success: true, data: result });
@@ -58,18 +62,22 @@ router.post('/video/:videoId/confirm',
   rateLimiter({ windowMs: 60000, max: 10 }),
   preventDuplicate('confirm', { ttl: 60 }),
   releaseLockMiddleware,
-  validateRequest({
-    params: { videoId: ['required', 'mongoId'] },
-    body:   { paymentIntentId: ['required', { custom: customValidators.validPaymentIntentId }] }
-  }),
+ validateRequest({
+  params: { videoId: ['required', 'mongoId'] },
+  body: {
+    currency:      ['optional', { in: ['THB', 'USD', 'EUR'] }],
+    paymentMethod: ['optional', { in: ['card', 'promptpay'] }]  // ← เพิ่ม
+  }
+}),
   async (req, res, next) => {
     try {
       const { videoId } = req.params;
       const userId = req.user._id;
 
-      const result = await PurchaseService.purchaseVideo(userId, videoId, {
-        paymentIntentId: req.body.paymentIntentId
-      });
+ const result = await PurchaseService.purchaseVideo(userId, videoId, {
+  currency:      req.body.currency || 'THB',
+  paymentMethod: req.body.paymentMethod        // ← เพิ่ม
+});
 
       res.json({ success: true, data: result });
     } catch (error) {
@@ -235,34 +243,59 @@ router.get('/video/:videoId/access',
 );
 
 // POST /api/purchase/:purchaseId/refund
-router.post('/:purchaseId/refund',
+router.post(
+  '/:purchaseId/refund',
   authenticateToken,
   rateLimiter({ windowMs: 60000, max: 5 }),
-  preventDuplicate('refund', { ttl: 30 }),
-  releaseLockMiddleware,
+  // FIX 2: ส่ง resourceId = purchaseId → lock key: lock:refund:{userId}:{purchaseId}
+  (req, res, next) =>
+    preventDuplicate('refund', { ttl: 30, resourceId: req.params.purchaseId })(req, res, next),
   validateRequest({
     params: { purchaseId: ['required', 'mongoId'] },
-    body:   { reason: ['required', 'string', { min: 10, max: 500 }] }
+    body:   { reason: ['required', 'string', { min: 10, max: 500 }] },
   }),
   async (req, res, next) => {
     try {
       const { purchaseId } = req.params;
-      const { reason } = req.body;
-      const userId = req.user._id;
-
+      const { reason }     = req.body;
+      const userId         = req.user._id;
+ 
       const purchase = await PurchaseService.verifyOwnership(purchaseId, userId);
       if (!purchase) {
         return res.status(404).json({ error: 'Purchase not found' });
       }
-
+ 
       const result = await PurchaseService.refundPurchase(purchaseId, reason);
+      res.json({ success: true, data: result });
+    } catch (error) {
+      next(error);
+    } finally {
+      // FIX 1: release lock หลัง response เสมอ ไม่ว่าจะสำเร็จหรือ error
+      req.releaseLock?.();
+    }
+  }
+);
+ 
+router.post('/video/:videoId/promptpay-status',
+  authenticateToken,
+  rateLimiter({ windowMs: 60000, max: 30 }),  // poll บ่อย → limit สูงขึ้น
+  validateRequest({
+    params: { videoId: ['required', 'mongoId'] },
+    body:   { paymentIntentId: ['required', { custom: customValidators.validPaymentIntentId }] }
+  }),
+  async (req, res, next) => {
+    try {
+      const result = await PurchaseService.checkPromptPayStatus(
+        req.user._id,
+        req.params.videoId,
+        req.body.paymentIntentId
+      );
       res.json({ success: true, data: result });
     } catch (error) {
       next(error);
     }
   }
 );
-
 // GET /api/purchase/:id/access
 router.get('/:id/access',
   authenticateToken,
