@@ -72,7 +72,6 @@ class State:
             decode_responses=True, password=REDIS_PASSWORD,
             socket_connect_timeout=5,
             socket_timeout=5,
-            # retry_on_timeout removed: TimeoutError retries are on by default since redis-py 6.0
             health_check_interval=30,
         )
 
@@ -96,19 +95,40 @@ state = State()
 pc    = Pinecone(api_key=PINECONE_KEY)
 index = pc.Index("video-catalog")
 
-# ── Kafka consumer ────────────────────────────────────────
-consumer = KafkaConsumer(
-    KAFKA_TOPIC,
-    bootstrap_servers=KAFKA_BROKERS,
-    group_id=KAFKA_GROUP,
-    value_deserializer=lambda v: json.loads(v.decode("utf-8")),
-    auto_offset_reset="earliest",
-    enable_auto_commit=False,     # manual commit หลัง process สำเร็จ
-    max_poll_records=MAX_POLL_RECORDS,
-    session_timeout_ms=30000,
-    heartbeat_interval_ms=10000,
-    max_poll_interval_ms=300000,  # 5 นาที (ให้เวลา process batch)
-)
+# ── Kafka consumer (lazy init + retry) ───────────────────
+# ไม่สร้างระดับ module เพราะถ้า Kafka ยังไม่พร้อม → crash ทันทีโดยไม่มี retry
+consumer = None  # จะถูก set ใน make_consumer()
+
+def make_consumer(retries: int = 12, delay: int = 5) -> KafkaConsumer:
+    """
+    สร้าง KafkaConsumer พร้อม retry
+    เรียกใน __main__ หลัง MongoDB พร้อมแล้ว
+    """
+    for attempt in range(1, retries + 1):
+        try:
+            print(f"[{WORKER_ID}] 🔌 Connecting Kafka "
+                  f"(attempt {attempt}/{retries}) → {KAFKA_BROKERS}")
+            c = KafkaConsumer(
+                KAFKA_TOPIC,
+                bootstrap_servers=KAFKA_BROKERS,
+                group_id=KAFKA_GROUP,
+                value_deserializer=lambda v: json.loads(v.decode("utf-8")),
+                auto_offset_reset="earliest",
+                enable_auto_commit=False,       # manual commit หลัง process สำเร็จ
+                max_poll_records=MAX_POLL_RECORDS,
+                session_timeout_ms=30000,
+                heartbeat_interval_ms=10000,
+                max_poll_interval_ms=300000,    # 5 นาที
+                request_timeout_ms=40000,
+                api_version_auto_timeout_ms=10000,
+            )
+            print(f"[{WORKER_ID}] ✅ Kafka connected")
+            return c
+        except KafkaError as e:
+            print(f"[{WORKER_ID}] ⚠️  Kafka not ready: {e}")
+            if attempt == retries:
+                raise
+            time.sleep(delay)
 
 # ── Core ──────────────────────────────────────────────────
 def compute_user_vector(user_id: str) -> list | None:
@@ -128,9 +148,9 @@ def compute_user_vector(user_id: str) -> list | None:
             print(f"[{WORKER_ID}] ⚠️  No history: user={user_id}")
             return None
 
-        seed_ids      = [h["videoId"] for h in history]
+        seed_ids       = [h["videoId"] for h in history]
         fetch_response = index.fetch(ids=seed_ids)
-        records       = fetch_response.vectors or {}
+        records        = fetch_response.vectors or {}
 
         vectors = [
             records[vid].values
@@ -258,8 +278,9 @@ def run():
 def graceful_shutdown(signum, frame):
     print(f"[{WORKER_ID}] 🛑 Shutting down...")
     try:
-        consumer.commit()
-        consumer.close()
+        if consumer:
+            consumer.commit()
+            consumer.close()
         state.mongo.close()
         state.redis.close()
         print(f"[{WORKER_ID}] ✅ Clean shutdown")
@@ -272,7 +293,7 @@ signal.signal(signal.SIGINT,  graceful_shutdown)
 
 # ── Entrypoint ────────────────────────────────────────────
 if __name__ == "__main__":
-    # Ping MongoDB before starting
+    # 1. Ping MongoDB ก่อน
     for attempt in range(3):
         try:
             state.mongo.admin.command("ping")
@@ -283,4 +304,8 @@ if __name__ == "__main__":
             if attempt == 2: raise
             time.sleep(2)
 
+    # 2. สร้าง Kafka consumer พร้อม retry (lazy init)
+    consumer = make_consumer()
+
+    # 3. เริ่ม main loop
     run()

@@ -64,3 +64,5 @@ Thumbs.db
 *.crt
 *.cer
 .secrets/
+
+terraform-lambda/

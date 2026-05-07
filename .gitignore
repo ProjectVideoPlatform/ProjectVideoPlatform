@@ -68,3 +68,5 @@ Frontvideo1
 Frontvideo1
 #k8s
 k8s/secretsCantpush
+
+terraform-lambda/

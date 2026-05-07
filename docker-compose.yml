@@ -331,6 +331,9 @@ services:
       - ./Frontvideo1/dist:/var/www/html:ro   # ← dist ที่ build แล้ว
     networks:
       - secure-video-network
+    # depends_on:
+    #   app:
+    #     condition: service_healthy
  
   # Monitoring
   prometheus:
