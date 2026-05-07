@@ -15,7 +15,7 @@ const kafkaService = require('../services/kafkaService');
 const QUEUES = require('../services/rabbitmq/queues');
 const router = express.Router();
 const { broadcast } = require('../websocket');
-const { enrichWithAccess }     = require('../services/accessService');
+
 // GET - ดึง progress ปัจจุบัน
 router.get('/video-progress', authenticateToken, async (req, res) => {
   try {
@@ -184,32 +184,28 @@ router.get('/', authenticateToken, async (req, res) => {
 
 router.get('/foryou', authenticateToken, async (req, res) => {
   try {
-    // 1. ดึง recommendation (raw — ไม่มี access info)
-    const { videos, source, boostCategory } = await getRecommendedVideos(req.user._id);
- 
-    // 2. inject purchased + canPlay (access layer รับผิดชอบ)
-    const enriched = await enrichWithAccess(videos, req.user);
- 
-    // 3. ส่งกลับ — shape เดิม ไม่มีอะไรเปลี่ยน
+    const userId = req.user._id;
+    const { videos, source, boostCategory } = await getRecommendedVideos(userId);
+
+    // ── inject canPlay + purchased ─────────────────────────────────────────────
+    const purchasedVideoIds = await Purchase.find({
+      userId: req.user._id,
+      status: 'completed'
+    }).distinct('videoId');
+
+    const enriched = videos.map(video => {
+      const isPurchased = purchasedVideoIds.some(id => id.equals(video._id));
+      const canPlay =
+        req.user.role === 'admin' ||
+        video.accessType === 'free' ||
+        isPurchased;
+
+      return { ...video, purchased: isPurchased, canPlay };
+    });
+
     res.json({ videos: enriched, source, boostCategory });
- 
-  } catch (err) {
-    console.error('[/foryou]', err);
-    res.status(500).json({ message: 'Internal server error' });
-  }
-});
- 
-// ── GET /feed/cowatch/:videoId ─────────────────────────────────────────────────
-//  ตัวอย่างว่า route อื่นก็ใช้ enrichWithAccess เดิมได้เลย
-const { getCoWatchVideos } = require('../services/recommendation.service');
- 
-router.get('/cowatch/:videoId', authenticateToken, async (req, res) => {
-  try {
-    const videos   = await getCoWatchVideos(req.params.videoId);
-    const enriched = await enrichWithAccess(videos, req.user);
-    res.json({ videos: enriched });
-  } catch (err) {
-    console.error('[/cowatch]', err);
+  } catch (error) {
+    console.error('[/foryou]', error);
     res.status(500).json({ message: 'Internal server error' });
   }
 });
