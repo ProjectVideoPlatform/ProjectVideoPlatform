@@ -157,6 +157,12 @@ services:
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - REDIS_PASSWORD=redispassword123
+      # ✅ เพิ่ม Elastic
+      - ELASTICSEARCH_URL=http://elasticsearch:9200
+      - ELASTIC_APM_SERVER_URL=http://apm-server:8200
+      - ELASTIC_APM_SERVICE_NAME=secure-video-app
+      - ELASTIC_APM_ENVIRONMENT=production
+      - ELASTIC_APM_ACTIVE=true
     volumes:
       - ./BackEnd/keys:/app/keys:ro
       - ./BackEnd/vault/certs:/app/vault-certs:ro
@@ -172,6 +178,10 @@ services:
         condition: service_healthy
       kafka:
         condition: service_healthy
+      elasticsearch:          # ✅ เพิ่ม
+        condition: service_healthy
+      apm-server:             # ✅ เพิ่ม
+        condition: service_started
     user: "1001:1001"
     read_only: true
     tmpfs:
@@ -187,7 +197,50 @@ services:
       timeout: 5s
       retries: 3
       start_period: 30s
-
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.14.1
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"  # ✅ จำกัด RAM
+    networks:
+      - secure-video-network
+    healthcheck:             # ✅ เพิ่ม healthcheck
+      test: ["CMD-SHELL", "curl -f http://localhost:9200/_cluster/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+  kibana:
+    image: docker.elastic.co/kibana/kibana:8.14.1
+    ports:
+      - "5601:5601"
+    environment:
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+    networks:
+      - secure-video-network        # ✅ เพิ่ม
+    depends_on:
+      elasticsearch:
+        condition: service_healthy  # ✅ เพิ่ม รอให้ ES พร้อมก่อน
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:5601/api/status || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+  apm-server:
+    image: docker.elastic.co/apm/apm-server:8.14.1
+    depends_on:
+      elasticsearch:
+        condition: service_healthy  # ✅ เปลี่ยนจาก - elasticsearch เป็น condition
+    ports:
+      - "8200:8200"
+    command: >
+      apm-server -e
+        -E output.elasticsearch.hosts=["elasticsearch:9200"]
+        -E apm-server.host=0.0.0.0:8200
+    networks:
+      - secure-video-network        # ✅ เพิ่ม  
   # MongoDB
   mongodb1:
     image: mongo:7.0
@@ -319,7 +372,7 @@ services:
     image: danielqsj/kafka-exporter:latest
     container_name: kafka-exporter
     command:
-      - "--kafka.server=kafka:9092"
+      - "--kafka.server=secure-video-kafka:9092"
     ports:
       - "9308:9308"
     depends_on:

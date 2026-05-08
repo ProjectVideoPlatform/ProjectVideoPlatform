@@ -15,4 +15,4 @@ scrape_configs:
   - job_name: "kafka"
     static_configs:
       - targets:
-          - "kafka-exporter: 9308" # พอร์ตมาตรฐานของ Kafka Exporter
+          - "kafka-exporter:9308" # พอร์ตมาตรฐานของ Kafka Exporter
