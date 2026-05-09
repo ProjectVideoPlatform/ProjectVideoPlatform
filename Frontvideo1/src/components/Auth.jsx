@@ -330,7 +330,7 @@ const UserProfile = memo(({ currentUser, onLogout, onNavigate, onNavigateAdmin }
 const VideoAuthSystem = () => {
   const navigate = useNavigate();
   const { setUser: setAuthUser, logout } = useAuth();
-  const { addNotification } = useNotif();
+  const { addNotification, stopWatching } = useNotif();
 
   const [currentView, setCurrentView]       = useState('login');
   const [currentUser, setCurrentUser]       = useState(null);
@@ -355,9 +355,11 @@ const VideoAuthSystem = () => {
       message: 'แล้วเจอกันใหม่นะ!',
       type: 'info',
     });
+    stopWatching();
     await logout();
     setCurrentUser(null);
     setCurrentView('login');
+    
     setLoginForm({ email: '', password: '' });
     setRegisterForm({ email: '', password: '' });
   }, [logout, addNotification]);

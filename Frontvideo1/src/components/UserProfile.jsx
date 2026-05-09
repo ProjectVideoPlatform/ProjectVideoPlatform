@@ -4,12 +4,15 @@ import {
   Eye, EyeOff, ChevronRight, Loader, CreditCard,
   MapPin, Video, Clock, TrendingUp, Award
 } from 'lucide-react';
-import { useNotif } from '../NotifContext';
+import { useNotif} from '../NotifContext';
 import { apiFetch } from '../utils/apiClient';
 import { useAuth } from '../AuthContext';
+
 const UserProfile = () => {
   const { notifications, videoNotifications, addNotification } = useNotif();
 const { logout } = useAuth();
+
+    
   const [activeTab, setActiveTab] = useState('overview');
 
   // ✅ fix UI: แยก showPassword ให้แต่ละ field — toggle ช่องเดียวไม่กระทบช่องอื่น

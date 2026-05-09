@@ -1,12 +1,12 @@
 // ✅ ต้อง require APM ก่อนทุกอย่าง (บรรทัดแรกสุดเลย!)
-const apm = require('elastic-apm-node').start({
-  serviceName: process.env.ELASTIC_APM_SERVICE_NAME || 'my-backend',
-  serverUrl: process.env.ELASTIC_APM_SERVER_URL || 'http://apm-server:8200',
-  environment: process.env.NODE_ENV || 'development',
-  active: process.env.ELASTIC_APM_ACTIVE !== 'false',
-});
-const { connectES } = require('./config/elasticsearch');
 require('dotenv').config();
+// const apm = require('elastic-apm-node').start({
+//   serviceName: process.env.ELASTIC_APM_SERVICE_NAME || 'my-backend',
+//   serverUrl: process.env.ELASTIC_APM_SERVER_URL || 'http://apm-server:8200',
+//   environment: process.env.NODE_ENV || 'development',
+//   active: process.env.ELASTIC_APM_ACTIVE !== 'false',
+// });
+// const { connectES } = require('./config/elasticsearch');
 const express = require('express');
 const http = require('http');
 const cors = require('cors');
@@ -20,8 +20,6 @@ const purchaseRoutes = require('./routes/Purchase');
 
 // ✅ 1. Import Webhook Route เข้ามา
 const webhookRoutes = require('./stripeWebhook'); 
-
-const { startRedisSubscriber } = require('./services/redisSubscriber');
 const cookieParser = require('cookie-parser');
 const { initWebSocket } = require('./websocket');
 const client = require('prom-client');
@@ -74,14 +72,12 @@ app.use((error, req, res, next) => {
 const startServer = async () => {
   try {
     await connectDB();
-    await connectES();
+    // await connectES();
     console.log('Connected to MongoDB and Elasticsearch');
     const PORT = process.env.PORT || 3000;
 
     console.log('Connecting to Redis...');
     await redisClient.connect();
-    await startRedisSubscriber();
-
     server.listen(PORT, () => {
       console.log(`Server running on port ${PORT}`);
     });
