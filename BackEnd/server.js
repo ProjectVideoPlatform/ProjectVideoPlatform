@@ -1,12 +1,20 @@
 // ✅ ต้อง require APM ก่อนทุกอย่าง (บรรทัดแรกสุดเลย!)
 require('dotenv').config();
-// const apm = require('elastic-apm-node').start({
-//   serviceName: process.env.ELASTIC_APM_SERVICE_NAME || 'my-backend',
-//   serverUrl: process.env.ELASTIC_APM_SERVER_URL || 'http://apm-server:8200',
-//   environment: process.env.NODE_ENV || 'development',
-//   active: process.env.ELASTIC_APM_ACTIVE !== 'false',
-// });
-// const { connectES } = require('./config/elasticsearch');
+const apm = require('elastic-apm-node').start({
+  serviceName: 'toteja-backend',
+  
+  // 1. เปลี่ยน URL ให้ชี้ไปที่ Elastic Agent (Fleet)
+  // ถ้าแอปอยู่ใน Docker Network เดียวกัน ให้ใช้ชื่อ Service ของ Fleet
+  serverUrl: process.env.ELASTIC_APM_SERVER_URL || 'http://fleet-server:8200',
+
+  // 2. ต้องใส่ Secret Token (ห้ามลืม!) 
+  // เพราะ Fleet บังคับใช้ Token เพื่อไม่ให้ใครก็ไม่รู้ส่งข้อมูลปลอมมาใส่ Elasticsearch ของคุณ
+  secretToken: process.env.ELASTIC_APM_SECRET_TOKEN || 'YOUR_FLEET_APM_SECRET_TOKEN',
+
+  environment: process.env.NODE_ENV || 'production',
+  active: true,
+});
+const { connectES } = require('./config/elasticsearch');
 const express = require('express');
 const http = require('http');
 const cors = require('cors');

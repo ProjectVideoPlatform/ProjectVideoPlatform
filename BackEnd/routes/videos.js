@@ -8,7 +8,7 @@ const { config,s3 } = require('../config/aws');
 const Video = require('../models/Video');
 const Purchase = require('../models/Purchase');
 const escapeStringRegexp = require('escape-string-regexp');
-const { getRecommendedVideos } = require('../services/recommendations'); 
+const { getRecommended } = require('../grpc/recommendation.client');
 const redisClient = require('../config/redis');
 const https = require('https');
 const kafkaService = require('../services/kafkaService');
@@ -183,30 +183,35 @@ router.get('/', authenticateToken, async (req, res) => {
 // วางแทน router.get('/foryou', ...) เดิมใน videos.js
 router.get('/foryou', authenticateToken, async (req, res) => {
   try {
-    const userId = req.user._id;
-    const { videos, source, boostCategory } = await getRecommendedVideos(userId);
-    
-    // ดึง videoIds ทั้งหมด
-    const videoIds = videos.map(v => v._id);
-    
-    // ดึง purchase status ทีเดียวด้วย $in
+    const userId = req.user._id.toString();
+    const limit  = Math.min(parseInt(req.query.limit) || 12, 50);
+
+    // gRPC call แทน function call เดิม
+    const { videos, source, boost_category } = await getRecommended(userId, limit);
+
+    if (!videos.length) {
+      return res.json({ videos: [], source, boostCategory: boost_category });
+    }
+
+    const videoIds = videos.map(v => v.id);
+
     const purchases = await Purchase.find({
-      userId: req.user._id,
-      status: 'completed',
+      userId:  req.user._id,
+      status:  'completed',
       videoId: { $in: videoIds }
     }).distinct('videoId');
-    
+
     const purchasedSet = new Set(purchases.map(id => id.toString()));
 
     const enriched = videos.map(video => ({
       ...video,
-      purchased: purchasedSet.has(video._id.toString()),
-      canPlay: req.user.role === 'admin' || 
-               video.accessType === 'free' || 
-               purchasedSet.has(video._id.toString())
+      purchased: purchasedSet.has(video.id),
+      canPlay:   req.user.role === 'admin' ||
+                 video.access_type === 'free' ||
+                 purchasedSet.has(video.id),
     }));
 
-    res.json({ videos: enriched, source, boostCategory });
+    res.json({ videos: enriched, source, boostCategory: boost_category });
   } catch (error) {
     console.error('[/foryou]', error);
     res.status(500).json({ message: 'Internal server error' });

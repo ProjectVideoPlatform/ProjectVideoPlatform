@@ -1,0 +1,6 @@
+# requirements.txt
+grpcio==1.64.0
+grpcio-tools==1.64.0
+pinecone-client==3.2.2
+redis==5.0.4
+motor==3.4.0

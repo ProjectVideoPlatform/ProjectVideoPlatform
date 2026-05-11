@@ -160,8 +160,8 @@ services:
       # ✅ เพิ่ม Elastic
       - ELASTICSEARCH_URL=http://elasticsearch:9200
       - ELASTIC_APM_SERVER_URL=http://apm-server:8200
-      - ELASTIC_APM_SERVICE_NAME=secure-video-app
-      - ELASTIC_APM_ENVIRONMENT=production
+      - ELASTIC_APM_SERVICE_NAME=my-securevideo-backend
+      - ELASTIC_APM_ENVIRONMENT=development
       - ELASTIC_APM_ACTIVE=true
     volumes:
       - ./BackEnd/keys:/app/keys:ro
@@ -197,50 +197,26 @@ services:
       timeout: 5s
       retries: 3
       start_period: 30s
-  elasticsearch:
-    image: docker.elastic.co/elasticsearch/elasticsearch:8.14.1
-    environment:
-      - discovery.type=single-node
-      - xpack.security.enabled=false
-      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"  # ✅ จำกัด RAM
-    networks:
-      - secure-video-network
-    healthcheck:             # ✅ เพิ่ม healthcheck
-      test: ["CMD-SHELL", "curl -f http://localhost:9200/_cluster/health || exit 1"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
-      start_period: 60s
-  kibana:
-    image: docker.elastic.co/kibana/kibana:8.14.1
-    ports:
-      - "5601:5601"
-    environment:
-      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
-    networks:
-      - secure-video-network        # ✅ เพิ่ม
-    depends_on:
-      elasticsearch:
-        condition: service_healthy  # ✅ เพิ่ม รอให้ ES พร้อมก่อน
+  recommendation-service:
+    build:
+      context: .
+      dockerfile: recommendation-service/Dockerfile
+    container_name: recommendation-service
+    expose:
+      - "50051"          # ไม่ expose ออก host — คุยแค่ใน network
+    env_file:
+      - ./BackEnd/.env  
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:5601/api/status || exit 1"]
-      interval: 30s
-      timeout: 10s
+      test: ["CMD", "python", "-c", 
+             "import grpc; ch=grpc.insecure_channel('localhost:50051'); grpc.channel_ready_future(ch).result(timeout=5)"]
+      interval: 10s
+      timeout: 5s
       retries: 5
-      start_period: 60s
-  apm-server:
-    image: docker.elastic.co/apm/apm-server:8.14.1
-    depends_on:
-      elasticsearch:
-        condition: service_healthy  # ✅ เปลี่ยนจาก - elasticsearch เป็น condition
-    ports:
-      - "8200:8200"
-    command: >
-      apm-server -e
-        -E output.elasticsearch.hosts=["elasticsearch:9200"]
-        -E apm-server.host=0.0.0.0:8200
+      start_period: 10s
     networks:
-      - secure-video-network        # ✅ เพิ่ม  
+      - app-network
+    restart: unless-stopped
+
   # MongoDB
   mongodb1:
     image: mongo:7.0
@@ -395,9 +371,9 @@ services:
       - ./Frontvideo1/dist:/var/www/html:ro   # ← dist ที่ build แล้ว
     networks:
       - secure-video-network
-    # depends_on:
-    #   app:
-    #     condition: service_healthy
+    depends_on:
+      app:
+        condition: service_healthy
  
   # Monitoring
   prometheus:

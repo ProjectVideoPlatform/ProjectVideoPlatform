@@ -23,6 +23,8 @@
     "@aws-sdk/s3-request-presigner": "^3.896.0",
     "@clickhouse/client": "^1.17.0",
     "@elastic/elasticsearch": "^9.4.0",
+    "@grpc/grpc-js": "^1.14.3",
+    "@grpc/proto-loader": "^0.8.1",
     "@pinecone-database/pinecone": "^7.2.0",
     "amqplib": "^0.10.9",
     "aws-cloudfront-sign": "^3.0.2",
