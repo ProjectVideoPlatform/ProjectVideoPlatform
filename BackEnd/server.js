@@ -1,5 +1,5 @@
 // ✅ ต้อง require APM ก่อนทุกอย่าง (บรรทัดแรกสุดเลย!)
-require('dotenv').config();
+
 const apm = require('elastic-apm-node').start({
   serviceName: 'toteja-backend',
   
@@ -14,6 +14,7 @@ const apm = require('elastic-apm-node').start({
   environment: process.env.NODE_ENV || 'production',
   active: true,
 });
+require('dotenv').config();
 const { connectES } = require('./config/elasticsearch');
 const express = require('express');
 const http = require('http');

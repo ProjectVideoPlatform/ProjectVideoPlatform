@@ -18,7 +18,7 @@ const packageDef = protoLoader.loadSync(PROTO_PATH, {
 const grpcObj = grpc.loadPackageDefinition(packageDef).recommendation;
 
 const client = new grpcObj.RecommendationService(
-  process.env.RECOMMENDATION_GRPC_HOST || 'localhost:50051',
+  process.env.RECOMMENDATION_GRPC_HOST || 'recommendation-service:50051',
   grpc.credentials.createInsecure()
 );
 

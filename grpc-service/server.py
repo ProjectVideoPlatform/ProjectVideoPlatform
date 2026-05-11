@@ -16,7 +16,13 @@ import os
 pc        = Pinecone(api_key=os.environ["PINECONE_API_KEY"])
 pine_idx  = pc.Index("video-catalog")
 
-redis_client = aioredis.from_url(os.environ["REDIS_HOST"])
+REDIS_HOST     = os.environ.get("REDIS_HOST", "redis")
+REDIS_PASSWORD = os.environ.get("REDIS_PASSWORD")
+
+redis_client = aioredis.from_url(
+    f"redis://{REDIS_HOST}:6379",
+    password=REDIS_PASSWORD or None
+)
 mongo        = AsyncIOMotorClient(os.environ["MONGO_URI"])
 db           = mongo["secure-video"]  # ← เปลี่ยนชื่อ DB
 

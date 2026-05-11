@@ -179,38 +179,53 @@ router.get('/', authenticateToken, async (req, res) => {
 // GET /foryou
 // ── /foryou route (แก้แล้ว) ──────────────────────────────────────────────────
 // เพิ่ม canPlay + purchased เหมือน GET / เพื่อให้ frontend ใช้ได้เลย
-// วางแทน router.get('/foryou', ...) เดิมใน videos.js
 router.get('/foryou', authenticateToken, async (req, res) => {
   try {
     const userId = req.user._id.toString();
-    const limit  = Math.min(parseInt(req.query.limit) || 12, 50);
-
-    // gRPC call แทน function call เดิม
-    const { videos, source, boost_category } = await getRecommended(userId, limit);
+    const { videos, source, boost_category } = await getRecommended(userId);
 
     if (!videos.length) {
       return res.json({ videos: [], source, boostCategory: boost_category });
     }
 
+    // videos จาก gRPC มี id = uuidv4
     const videoIds = videos.map(v => v.id);
 
+    // ── หา _id จริงใน MongoDB ก่อน ──────────────────────────
+    const videoDocs = await Video.find(
+      { id: { $in: videoIds } },
+      { _id: 1, id: 1 }          // ดึงแค่ 2 field
+    ).lean();
+
+    // map uuid → ObjectId
+    const uuidToObjectId = Object.fromEntries(
+      videoDocs.map(v => [v.id, v._id])
+    );
+    const objectIds = videoDocs.map(v => v._id);
+
+    // ── query Purchase ด้วย ObjectId ────────────────────────
     const purchases = await Purchase.find({
       userId:  req.user._id,
       status:  'completed',
-      videoId: { $in: videoIds }
+      videoId: { $in: objectIds }   // ← ObjectId แล้ว
     }).distinct('videoId');
 
     const purchasedSet = new Set(purchases.map(id => id.toString()));
 
-    const enriched = videos.map(video => ({
-      ...video,
-      purchased: purchasedSet.has(video.id),
-      canPlay:   req.user.role === 'admin' ||
-                 video.access_type === 'free' ||
-                 purchasedSet.has(video.id),
-    }));
+    // ── enrich ──────────────────────────────────────────────
+    const enriched = videos.map(video => {
+      const objectId = uuidToObjectId[video.id]?.toString();
+      return {
+        ...video,
+        purchased: purchasedSet.has(objectId),
+        canPlay:   req.user.role === 'admin' ||
+                   video.access_type === 'free' ||
+                   purchasedSet.has(objectId),
+      };
+    });
 
     res.json({ videos: enriched, source, boostCategory: boost_category });
+
   } catch (error) {
     console.error('[/foryou]', error);
     res.status(500).json({ message: 'Internal server error' });
