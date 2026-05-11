@@ -1,6 +1,7 @@
-# requirements.txt
-grpcio==1.64.0
-grpcio-tools==1.64.0
+grpcio==1.80.0
+grpcio-tools==1.80.0
+protobuf==6.33.6
 pinecone-client==3.2.2
 redis==5.0.4
-motor==3.4.0
+motor==3.7.0
+pymongo==4.10.1
