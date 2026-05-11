@@ -1,4 +1,4 @@
-// node-api/grpc/recommendation.client.js
+// node-api/grpc/recommendation-client.js
 'use strict';
 
 const grpc       = require('@grpc/grpc-js');

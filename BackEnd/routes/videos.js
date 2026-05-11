@@ -8,7 +8,7 @@ const { config,s3 } = require('../config/aws');
 const Video = require('../models/Video');
 const Purchase = require('../models/Purchase');
 const escapeStringRegexp = require('escape-string-regexp');
-const { getRecommended } = require('../grpc/recommendation.client');
+const { getRecommended } = require('../grpc/recommendation-client');
 const redisClient = require('../config/redis');
 const https = require('https');
 const kafkaService = require('../services/kafkaService');
@@ -34,7 +34,6 @@ router.get('/video-progress', authenticateToken, async (req, res) => {
     if (video.accessType === 'free') {
       return res.json({ lastTime: 0, owned: true });
     }
-
     const purchase = await Purchase.findOne({
       userId: req.user._id,
       videoId: video._id,

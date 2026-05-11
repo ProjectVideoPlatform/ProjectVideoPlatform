@@ -1,5 +1,5 @@
 # ====== STAGE 1: Production Dependencies ======
-FROM node:18-alpine AS deps-prod
+FROM node:20-alpine AS deps-prod
 
 WORKDIR /app
 
@@ -11,7 +11,7 @@ RUN npm ci --only=production --no-audit --prefer-offline && \
     npm cache clean --force
 
 # ====== STAGE 2: Development Dependencies (ถ้าต้อง build) ======
-FROM node:18-alpine AS deps-dev
+FROM node:20-alpine AS deps-dev
 
 WORKDIR /app
 
@@ -21,7 +21,7 @@ COPY BackEnd/package.json BackEnd/package-lock.json ./
 RUN npm ci --no-audit --prefer-offline
 
 # ====== STAGE 3: Builder (ถ้ามี build step) ======
-FROM node:18-alpine AS builder
+FROM node:20-alpine AS builder
 
 WORKDIR /app
 
@@ -35,7 +35,7 @@ COPY BackEnd/ ./
 RUN npm run build --if-present
 
 # ====== STAGE 4: Production Runner ======
-FROM node:18-alpine AS runner
+FROM node:20-alpine AS runner
 
 # Security: Install only tini + dumb-init
 RUN apk add --no-cache tini dumb-init && \
@@ -53,6 +53,8 @@ COPY --from=deps-prod --chown=appuser:nodejs /app/node_modules ./node_modules
 COPY --from=builder --chown=appuser:nodejs /app/package.json ./
 
 # Copy only necessary files
+COPY --from=builder --chown=appuser:nodejs /app/grpc ./grpc
+COPY --from=builder --chown=appuser:nodejs /app/proto ./proto
 COPY --from=builder --chown=appuser:nodejs /app/server.js ./
 COPY --from=builder --chown=appuser:nodejs /app/config ./config
 COPY --from=builder --chown=appuser:nodejs /app/routes ./routes
