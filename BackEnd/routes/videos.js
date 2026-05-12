@@ -178,7 +178,6 @@ router.get('/', authenticateToken, async (req, res) => {
 
 // GET /foryou
 // ── /foryou route (แก้แล้ว) ──────────────────────────────────────────────────
-// เพิ่ม canPlay + purchased เหมือน GET / เพื่อให้ frontend ใช้ได้เลย
 router.get('/foryou', authenticateToken, async (req, res) => {
   try {
     const userId = req.user._id.toString();
@@ -188,39 +187,46 @@ router.get('/foryou', authenticateToken, async (req, res) => {
       return res.json({ videos: [], source, boostCategory: boost_category });
     }
 
-    // videos จาก gRPC มี id = uuidv4
     const videoIds = videos.map(v => v.id);
 
-    // ── หา _id จริงใน MongoDB ก่อน ──────────────────────────
+    // ── ดึง metadata ครบจาก MongoDB ─────────────────────────
     const videoDocs = await Video.find(
       { id: { $in: videoIds } },
-      { _id: 1, id: 1 }          // ดึงแค่ 2 field
+      { _id: 1, id: 1, thumbnailPath: 1, uploadStatus: 1,
+        description: 1, duration: 1, price: 1, category: 1 }
     ).lean();
 
-    // map uuid → ObjectId
-    const uuidToObjectId = Object.fromEntries(
-      videoDocs.map(v => [v.id, v._id])
+    // map uuid → full meta doc
+    const uuidToMeta = Object.fromEntries(
+      videoDocs.map(v => [v.id, v])
     );
     const objectIds = videoDocs.map(v => v._id);
 
-    // ── query Purchase ด้วย ObjectId ────────────────────────
+    // ── query Purchase ────────────────────────────────────────
     const purchases = await Purchase.find({
       userId:  req.user._id,
       status:  'completed',
-      videoId: { $in: objectIds }   // ← ObjectId แล้ว
+      videoId: { $in: objectIds },
     }).distinct('videoId');
 
     const purchasedSet = new Set(purchases.map(id => id.toString()));
 
-    // ── enrich ──────────────────────────────────────────────
+    // ── enrich ───────────────────────────────────────────────
     const enriched = videos.map(video => {
-      const objectId = uuidToObjectId[video.id]?.toString();
+      const meta     = uuidToMeta[video.id];
+      const objectId = meta?._id?.toString();
       return {
         ...video,
-        purchased: purchasedSet.has(objectId),
-        canPlay:   req.user.role === 'admin' ||
-                   video.access_type === 'free' ||
-                   purchasedSet.has(objectId),
+        thumbnailPath: meta?.thumbnailPath ?? null,
+        uploadStatus:  meta?.uploadStatus  ?? 'completed',
+        description:   meta?.description   ?? video.description ?? '',
+        duration:      meta?.duration      ?? video.duration    ?? 0,
+        price:         meta?.price         ?? video.price       ?? 0,
+        category:      meta?.category      ?? video.category    ?? '',
+        purchased:     purchasedSet.has(objectId),
+        canPlay:       req.user.role === 'admin' ||
+                       video.access_type === 'free' ||
+                       purchasedSet.has(objectId),
       };
     });
 
