@@ -8,10 +8,7 @@ services:
     environment:
       - discovery.type=single-node
       - xpack.security.enabled=true
-      - xpack.security.enrollment.enabled=false
-
       - ELASTIC_PASSWORD=changeme
-
       - ES_JAVA_OPTS=-Xms1g -Xmx1g
 
     mem_limit: 2g
@@ -26,35 +23,12 @@ services:
       test:
         [
           "CMD-SHELL",
-          "curl -u elastic:changeme -s -f http://localhost:9200/_cluster/health || exit 1"
+          "curl -u elastic:changeme -s http://localhost:9200 >/dev/null"
         ]
       interval: 10s
       timeout: 10s
       retries: 20
       start_period: 60s
-
-  setup-kibana-user:
-    image: docker.elastic.co/elasticsearch/elasticsearch:8.14.1
-    container_name: setup-kibana-user
-
-    depends_on:
-      elasticsearch:
-        condition: service_healthy
-
-    command: >
-      bash -c "
-      curl -X POST
-      -u elastic:changeme
-      http://elasticsearch:9200/_security/user/kibana_system/_password
-      -H 'Content-Type: application/json'
-      -d '{\"password\":\"kibana123\"}'
-      && echo 'kibana_system password updated'
-      "
-
-    restart: "no"
-
-    networks:
-      - secure-video-network
 
   kibana:
     image: docker.elastic.co/kibana/kibana:8.14.1
@@ -64,86 +38,63 @@ services:
       elasticsearch:
         condition: service_healthy
 
-      setup-kibana-user:
-        condition: service_completed_successfully
-
     environment:
       - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
-
       - ELASTICSEARCH_USERNAME=kibana_system
       - ELASTICSEARCH_PASSWORD=kibana123
 
-      - NODE_OPTIONS=--max-old-space-size=1536
-
-      # IMPORTANT
+      # สำคัญสำหรับ APM UI
       - xpack.encryptedSavedObjects.encryptionKey=abcdefghijklmnopqrstuvwxyz123456
 
-      # Fleet
-      - xpack.fleet.agents.enabled=true
+      - NODE_OPTIONS=--max-old-space-size=1024
 
-    mem_limit: 2g
+    mem_limit: 1.5g
 
     ports:
       - "5601:5601"
 
     networks:
       - secure-video-network
+  setup-kibana-user:
+      image: docker.elastic.co/elasticsearch/elasticsearch:8.14.1
+      container_name: setup-kibana-user
 
-    healthcheck:
-      test:
-        [
-          "CMD-SHELL",
-          "curl -s http://localhost:5601/api/status | grep -q 'available'"
-        ]
-      interval: 15s
-      timeout: 10s
-      retries: 30
-      start_period: 120s
+      depends_on:
+        elasticsearch:
+          condition: service_healthy
 
-  fleet-server:
-    image: docker.elastic.co/beats/elastic-agent:8.14.1
-    container_name: fleet-server
+      command: >
+        bash -c "
+        curl -X POST
+        -u elastic:changeme
+        http://elasticsearch:9200/_security/user/kibana_system/_password
+        -H 'Content-Type: application/json'
+        -d '{\"password\":\"kibana123\"}'
+        && echo 'kibana_system password updated'
+        "
+
+      restart: "no"
+
+      networks:
+        - secure-video-network
+  apm-server:
+    image: docker.elastic.co/apm/apm-server:8.14.1
+    container_name: apm-server
 
     depends_on:
-      kibana:
+      elasticsearch:
         condition: service_healthy
 
-    environment:
-      # Enable Fleet Server
-      - FLEET_SERVER_ENABLE=1
-
-      # Enrollment flow
-      - FLEET_ENROLL=1
-
-      # IMPORTANT:
-      # Replace with token from Kibana Fleet UI
-      - FLEET_ENROLLMENT_TOKEN=QnRGTUc1NEJyTm52ODdEUnFVaU06S1c1SmZkVzVUOXFPSm04UXlqYVBVZw==
-
-      # Fleet URL
-      - FLEET_URL=http://fleet-server:8220
-
-      # Elasticsearch
-      - FLEET_SERVER_ELASTICSEARCH_HOST=http://elasticsearch:9200
-
-      - FLEET_SERVER_ELASTICSEARCH_USERNAME=elastic
-      - FLEET_SERVER_ELASTICSEARCH_PASSWORD=changeme
-
-      - FLEET_SERVER_ELASTICSEARCH_INSECURE=true
-
-      # Kibana
-      - KIBANA_HOST=http://kibana:5601
-
-      # HTTP mode for local/dev
-      - FLEET_SERVER_INSECURE_HTTP=true
-
-      # Listen
-      - FLEET_SERVER_HOST=0.0.0.0
-      - FLEET_SERVER_PORT=8220
-
-    mem_limit: 1g
+    command: >
+      apm-server -e
+      -E apm-server.host=0.0.0.0:8200
+      -E output.elasticsearch.hosts=["http://elasticsearch:9200"]
+      -E output.elasticsearch.username=elastic
+      -E output.elasticsearch.password=changeme
+      -E setup.kibana.host=http://kibana:5601
 
     ports:
-      - "8220:8220"
+      - "8200:8200"
 
     networks:
       - secure-video-network
@@ -151,3 +102,156 @@ services:
 networks:
   secure-video-network:
     driver: bridge
+# version: "3.9"
+
+# services:
+#   elasticsearch:
+#     image: docker.elastic.co/elasticsearch/elasticsearch:8.14.1
+#     container_name: elasticsearch
+
+#     environment:
+#       - discovery.type=single-node
+#       - xpack.security.enabled=true
+#       - xpack.security.enrollment.enabled=false
+
+#       - ELASTIC_PASSWORD=changeme
+
+#       - ES_JAVA_OPTS=-Xms1g -Xmx1g
+
+#     mem_limit: 2g
+
+#     ports:
+#       - "9200:9200"
+
+#     networks:
+#       - secure-video-network
+
+#     healthcheck:
+#       test:
+#         [
+#           "CMD-SHELL",
+#           "curl -u elastic:changeme -s -f http://localhost:9200/_cluster/health || exit 1"
+#         ]
+#       interval: 10s
+#       timeout: 10s
+#       retries: 20
+#       start_period: 60s
+
+#   setup-kibana-user:
+#     image: docker.elastic.co/elasticsearch/elasticsearch:8.14.1
+#     container_name: setup-kibana-user
+
+#     depends_on:
+#       elasticsearch:
+#         condition: service_healthy
+
+#     command: >
+#       bash -c "
+#       curl -X POST
+#       -u elastic:changeme
+#       http://elasticsearch:9200/_security/user/kibana_system/_password
+#       -H 'Content-Type: application/json'
+#       -d '{\"password\":\"kibana123\"}'
+#       && echo 'kibana_system password updated'
+#       "
+
+#     restart: "no"
+
+#     networks:
+#       - secure-video-network
+
+#   kibana:
+#     image: docker.elastic.co/kibana/kibana:8.14.1
+#     container_name: kibana
+
+#     depends_on:
+#       elasticsearch:
+#         condition: service_healthy
+
+#       setup-kibana-user:
+#         condition: service_completed_successfully
+
+#     environment:
+#       - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+
+#       - ELASTICSEARCH_USERNAME=kibana_system
+#       - ELASTICSEARCH_PASSWORD=kibana123
+#       - xpack.fleet.agents.tlsCheckDisabled=true
+#       - NODE_OPTIONS=--max-old-space-size=1536
+#       - xpack.fleet.agents.fleet_server.hosts=["http://fleet-server:8220"]
+#       # IMPORTANT
+#       - xpack.encryptedSavedObjects.encryptionKey=abcdefghijklmnopqrstuvwxyz123456
+
+#       # Fleet
+#       - xpack.fleet.agents.enabled=true
+
+#     mem_limit: 2g
+
+#     ports:
+#       - "5601:5601"
+
+#     networks:
+#       - secure-video-network
+
+#     healthcheck:
+#       test:
+#         [
+#           "CMD-SHELL",
+#           "curl -s http://localhost:5601/api/status | grep -q 'available'"
+#         ]
+#       interval: 15s
+#       timeout: 10s
+#       retries: 30
+#       start_period: 120s
+
+#   fleet-server:
+#     image: docker.elastic.co/beats/elastic-agent:8.14.1
+#     container_name: fleet-server
+
+#     depends_on:
+#       kibana:
+#         condition: service_healthy
+
+#     environment:
+#       # Enable Fleet Server
+#       - FLEET_SERVER_ENABLE=1
+
+#       # Enrollment flow
+#       - FLEET_ENROLL=1
+
+#       # IMPORTANT:
+#       # Replace with token from Kibana Fleet UI
+#       - FLEET_ENROLLMENT_TOKEN=RkVwOEc1NEJ5dTNpRXphWk5jZHY6QUpKSDduaklSS3lrYzNDUHl4bXVlZw==
+
+#       # Fleet URL
+#       - FLEET_URL=http://fleet-server:8220
+
+#       # Elasticsearch
+#       - FLEET_SERVER_ELASTICSEARCH_HOST=http://elasticsearch:9200
+
+#       - FLEET_SERVER_ELASTICSEARCH_USERNAME=elastic
+#       - FLEET_SERVER_ELASTICSEARCH_PASSWORD=changeme
+
+#       - FLEET_SERVER_ELASTICSEARCH_INSECURE=true
+
+#       # Kibana
+#       - KIBANA_HOST=http://kibana:5601
+
+#       # HTTP mode for local/dev
+#       - FLEET_SERVER_INSECURE_HTTP=true
+
+#       # Listen
+#       - FLEET_SERVER_HOST=0.0.0.0
+#       - FLEET_SERVER_PORT=8220
+
+#     mem_limit: 1g
+
+#     ports:
+#       - "8220:8220"
+
+#     networks:
+#       - secure-video-network
+
+# networks:
+#   secure-video-network:
+#     driver: bridge

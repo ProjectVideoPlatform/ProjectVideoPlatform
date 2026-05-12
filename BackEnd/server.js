@@ -1,4 +1,4 @@
-// // ✅ ต้อง require APM ก่อนทุกอย่าง (บรรทัดแรกสุดเลย!)
+// ✅ ต้อง require APM ก่อนทุกอย่าง (บรรทัดแรกสุดเลย!)
 
 // const apm = require('elastic-apm-node').start({
 //   serviceName: 'toteja-backend',
@@ -14,6 +14,19 @@
 //   environment: process.env.NODE_ENV || 'production',
 //   active: true,
 // });
+const apm = require('elastic-apm-node').start({
+  serviceName: 'toteja-backend',
+
+  // ชี้ไป APM Server
+  serverUrl: process.env.ELASTIC_APM_SERVER_URL || 'http://apm-server:8200',
+
+  // standalone local dev ไม่ต้องใช้ token ก็ได้
+  secretToken: process.env.ELASTIC_APM_SECRET_TOKEN || '',
+
+  environment: process.env.NODE_ENV || 'development',
+
+  active: true,
+});
 require('dotenv').config();
 const { connectES } = require('./config/elasticsearch');
 const express = require('express');
