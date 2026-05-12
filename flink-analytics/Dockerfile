@@ -11,3 +11,5 @@ WORKDIR /opt/flink
 
 # ก๊อปปี้ไฟล์ JAR ไปไว้ใน usrlib (เพื่อให้ Flink เห็น Class ต่างๆ)
 COPY --from=builder /app/target/flink-analytics-*.jar /opt/flink/usrlib/flink-analytics.jar
+# เพิ่มไว้ล่างสุดของ Dockerfile
+ENTRYPOINT ["/docker-entrypoint.sh"]

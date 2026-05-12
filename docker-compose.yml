@@ -1,15 +1,26 @@
 services:
-  # RabbitMQ Message Broker
+  # ─────────────────────────────────────────────────────────────
+  # INFRASTRUCTURE & DATABASES  (Guaranteed Group)
+  # จองแรมสูง + OOM Score ต่ำ → Linux ฆ่าทีหลังสุด
+  # ─────────────────────────────────────────────────────────────
+
   rabbitmq:
     image: rabbitmq:3-management
     container_name: secure-video-rabbitmq
     restart: unless-stopped
+    oom_score_adj: -500
     ports:
       - "5672:5672"
       - "15672:15672"
     environment:
       - RABBITMQ_DEFAULT_USER=guest
       - RABBITMQ_DEFAULT_PASS=guest
+    deploy:
+      resources:
+        reservations:
+          memory: 512M
+        limits:
+          memory: 1G
     networks:
       - secure-video-network
     volumes:
@@ -20,211 +31,22 @@ services:
       timeout: 5s
       retries: 5
 
-  # Email Worker
-  email-worker:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: secure-video-email-worker
-    restart: unless-stopped
-    command: ["node", "workers/emailWorker.js"]
-    user: "1001:1001"
-    read_only: true
-    tmpfs:
-      - /tmp
-      - /app/tmp
-    env_file:
-      - ./BackEnd/.env
-    environment:
-      - NODE_ENV=production
-      - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672
-    networks:
-      - secure-video-network
-    depends_on:
-      rabbitmq:
-        condition: service_healthy
-    volumes:
-      - ./BackEnd/keys:/app/keys:ro
-  # Transcode Worker
-  transcode-worker:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: secure-video-transcode-worker
-    restart: unless-stopped
-    command: ["node", "workers/transcodeWorker.js"]
-    env_file:
-      - ./BackEnd/.env
-    environment:
-      - NODE_ENV=production
-    networks:
-      - secure-video-network
-    depends_on:
-      rabbitmq:
-        condition: service_healthy
-      mongodb1:
-        condition: service_healthy
-    user: "1001:1001"
-    read_only: true
-    tmpfs:
-      - /tmp
-      - /app/tmp
-
-  # Analytics Worker
-  analytics-worker:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: secure-video-analytics-worker
-    command: ["node", "workers/analystic.js"]
-    user: "1001:1001"
-    read_only: true
-    tmpfs:
-      - /tmp
-      - /app/tmp
-    env_file:
-      - ./BackEnd/.env
-    environment:
-      - NODE_ENV=production
-      - KAFKA_BROKERS=kafka:9092
-      - CLICKHOUSE_HOST=clickhouse
-      - CLICKHOUSE_PORT=8123
-      - CLICKHOUSE_USER=app_user
-      - CLICKHOUSE_PASSWORD=strong_password
-      - CLICKHOUSE_DB=app_db
-    restart: unless-stopped
-    # ✅ FIX 1: depends_on ที่ถูกต้อง
-    depends_on:
-      kafka:
-        condition: service_healthy
-      clickhouse:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    # ✅ FIX 2: healthcheck
-    healthcheck:
-      test: ["CMD-SHELL", "node -e \"require('http').get('http://localhost:3098/health', r => process.exit(r.statusCode === 200 ? 0 : 1))\""]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 30s
-    networks:
-      - secure-video-network
-  trending-worker:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: trending_worker
-    command: ["node", "workers/trendingWorker.js"]
-    env_file: ./BackEnd/.env
-    environment:
-      - NODE_ENV=production
-      - REDIS_HOST=redis
-      - REDIS_PORT=6379
-      - REDIS_PASSWORD=redispassword123
-    restart: unless-stopped
-    # ✅ FIX 1: เพิ่ม depends_on ที่ถูกต้อง
-    depends_on:
-      redis:
-        condition: service_healthy
-      clickhouse:
-        condition: service_healthy
-    # ✅ FIX 2: healthcheck ตรวจว่า worker ยัง alive
-    healthcheck:
-      test: ["CMD-SHELL", "node -e \"require('http').get('http://localhost:3099/health', r => process.exit(r.statusCode === 200 ? 0 : 1))\""]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 15s
-    networks:
-      - secure-video-network
-  # Main Node.js API
-  app:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: secure-video-app
-    restart: unless-stopped
-    expose:
-      - "3000"
-    env_file:
-      - ./BackEnd/.env
-    environment:
-      - NODE_ENV=production
-      - PORT=3000
-      - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672
-      - KAFKA_BROKERS=kafka:9092
-      - REDIS_HOST=redis
-      - REDIS_PORT=6379
-      - REDIS_PASSWORD=redispassword123
-      # ✅ เพิ่ม Elastic 
-      - ELASTICSEARCH_URL=http://elasticsearch:9200
-      - ELASTIC_APM_SERVER_URL=http://fleet-server:8200
-      - ELASTIC_APM_SERVICE_NAME=my-securevideo-backend
-      - ELASTIC_APM_ENVIRONMENT=development
-      - ELASTIC_APM_ACTIVE=true
-      - ELASTIC_APM_SECRET_TOKEN=YOUR_FLEET_APM_SECRET_TOKEN
-    volumes:
-      - ./BackEnd/keys:/app/keys:ro
-      - ./BackEnd/vault/certs:/app/vault-certs:ro
-      - ./logs:/app/logs
-    networks:
-      - secure-video-network
-    depends_on:
-      mongodb1:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-      rabbitmq:
-        condition: service_healthy
-      kafka:
-        condition: service_healthy
-    user: "1001:1001"
-    read_only: true
-    tmpfs:
-      - /tmp
-      - /app/tmp
-    security_opt:
-      - no-new-privileges:true
-    cap_drop:
-      - ALL
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost/api/health"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 30s
-  recommendation-service:
-    build:
-      context: ./grpc-service
-      dockerfile: Dockerfile 
-    container_name: recommendation-service-grpc
-    expose:
-      - "50051"          # ไม่ expose ออก host — คุยแค่ใน network
-    env_file:
-      - ./BackEnd/.env  
-    volumes:
-      - ./BackEnd/proto:/proto   
-      # - ./grpc-service/requirements.txt:/app/requirements.txt:ro
-    healthcheck:
-      test: ["CMD", "python", "-c", 
-             "import grpc; ch=grpc.insecure_channel('localhost:50051'); grpc.channel_ready_future(ch).result(timeout=5)"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 10s
-    networks:
-      - secure-video-network
-    restart: unless-stopped
-
-  # MongoDB
   mongodb1:
     image: mongo:7.0
     container_name: secure-video-mongodb1
     restart: unless-stopped
+    oom_score_adj: -500
     command: ["--replSet", "rs0", "--bind_ip_all"]
     environment:
       MONGO_INITDB_DATABASE: secure-video
+    deploy:
+      resources:
+        reservations:
+          cpus: '0.5'
+          memory: 1.5G
+        limits:
+          cpus: '1.0'
+          memory: 2G
     ports:
       - "27017:27017"
     volumes:
@@ -242,7 +64,14 @@ services:
     image: mongo:7.0
     container_name: secure-video-mongodb2
     restart: unless-stopped
+    oom_score_adj: -400
     command: ["--replSet", "rs0", "--bind_ip_all"]
+    deploy:
+      resources:
+        reservations:
+          memory: 1G
+        limits:
+          memory: 1.5G
     ports:
       - "27018:27017"
     volumes:
@@ -254,7 +83,14 @@ services:
     image: mongo:7.0
     container_name: secure-video-mongodb3
     restart: unless-stopped
+    oom_score_adj: -400
     command: ["--replSet", "rs0", "--bind_ip_all"]
+    deploy:
+      resources:
+        reservations:
+          memory: 1G
+        limits:
+          memory: 1.5G
     ports:
       - "27019:27017"
     volumes:
@@ -293,13 +129,19 @@ services:
     networks:
       - secure-video-network
 
-  # Redis
   redis:
     image: redis:7.2-alpine
     container_name: secure-video-redis
     restart: unless-stopped
+    oom_score_adj: -400
     expose:
       - "6379"
+    deploy:
+      resources:
+        reservations:
+          memory: 256M
+        limits:
+          memory: 512M
     volumes:
       - redis_data:/data
     networks:
@@ -311,29 +153,36 @@ services:
       timeout: 10s
       retries: 3
 
-  # Kafka (KRaft Mode)
+  # ─────────────────────────────────────────────────────────────
+  # KAFKA  (KRaft Mode)
+  # ─────────────────────────────────────────────────────────────
+
   kafka:
     image: apache/kafka:latest
     container_name: secure-video-kafka
     restart: unless-stopped
+    oom_score_adj: -300
     expose:
       - "9092"
     user: root
     environment:
       KAFKA_NODE_ID: 1
       KAFKA_PROCESS_ROLES: broker,controller
-      # แก้ไข: เปลี่ยนจาก 1@kafka เป็น 1@secure-video-kafka
-      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093  # ใช้ service name
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
       KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
-      # แก้ไข: เปลี่ยนเป็นชื่อคอนเทนเนอร์จริง
       KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
       KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
       KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
       CLUSTER_ID: 'MkU3OEVBNTcwNTJENDM2Qk'
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
-      # เพิ่มเติม: ระบุไดเรกทอรีเก็บข้อมูลให้ชัดเจน
       KAFKA_LOG_DIRS: /tmp/kraft-combined-logs
+    deploy:
+      resources:
+        reservations:
+          memory: 1G
+        limits:
+          memory: 2G
     networks:
       - secure-video-network
     volumes:
@@ -343,7 +192,8 @@ services:
       interval: 15s
       timeout: 10s
       retries: 5
-      start_period: 60s  # เพิ่มเป็น 60s เพราะ Kafka ใช้เวลา start นานกว่า 40s
+      start_period: 60s
+
   kafka-exporter:
     image: danielqsj/kafka-exporter:latest
     container_name: kafka-exporter
@@ -354,9 +204,149 @@ services:
     depends_on:
       - kafka
     networks:
-      - secure-video-network # เปลี่ยนให้ตรงกับ network ที่คุณใช้อยู่
+      - secure-video-network
 
-  # Nginx — serve static React + proxy API (ไม่มี react-app service แล้ว)
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: kafka-ui
+    ports:
+      - "8080:8080"
+    environment:
+      - MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE=prometheus,health,info
+      - MANAGEMENT_METRICS_EXPORT_PROMETHEUS_ENABLED=true
+      - KAFKA_CLUSTERS_0_NAME=local
+      - KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS=kafka:9092
+    networks:
+      - secure-video-network
+    depends_on:
+      - kafka
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:latest
+    container_name: clickhouse_db
+    restart: always
+    oom_score_adj: -300
+    ports:
+      - "8123:8123"
+    environment:
+      CLICKHOUSE_USER: app_user
+      CLICKHOUSE_PASSWORD: strong_password
+      CLICKHOUSE_DB: app_db
+    deploy:
+      resources:
+        reservations:
+          memory: 1G
+        limits:
+          memory: 2G
+    volumes:
+      - clickhouse_data:/var/lib/clickhouse
+      - ./init-clickhouse:/docker-entrypoint-initdb.d
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+    networks:
+      - secure-video-network
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8123/ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # ─────────────────────────────────────────────────────────────
+  # APPLICATION SERVICES
+  # ─────────────────────────────────────────────────────────────
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: secure-video-app
+    restart: unless-stopped
+    expose:
+      - "3000"
+    env_file:
+      - ./BackEnd/.env
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672
+      - KAFKA_BROKERS=kafka:9092
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=redispassword123
+      - ELASTICSEARCH_URL=http://elasticsearch:9200
+      - ELASTIC_APM_SERVER_URL=http://fleet-server:8200
+      - ELASTIC_APM_SERVICE_NAME=my-securevideo-backend
+      - ELASTIC_APM_ENVIRONMENT=development
+      - ELASTIC_APM_ACTIVE=true
+      - ELASTIC_APM_SECRET_TOKEN=YOUR_FLEET_APM_SECRET_TOKEN
+    deploy:
+      resources:
+        reservations:
+          memory: 512M
+        limits:
+          memory: 1G
+    volumes:
+      - ./BackEnd/keys:/app/keys:ro
+      - ./BackEnd/vault/certs:/app/vault-certs:ro
+      - ./logs:/app/logs
+    networks:
+      - secure-video-network
+    depends_on:
+      mongodb1:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    user: "1001:1001"
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /app/tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  recommendation-service:
+    build:
+      context: ./grpc-service
+      dockerfile: Dockerfile
+    container_name: recommendation-service-grpc
+    expose:
+      - "50051"
+    env_file:
+      - ./BackEnd/.env
+    volumes:
+      - ./BackEnd/proto:/proto
+    deploy:
+      resources:
+        reservations:
+          memory: 256M
+        limits:
+          memory: 512M
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import grpc; ch=grpc.insecure_channel('localhost:50051'); grpc.channel_ready_future(ch).result(timeout=5)"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - secure-video-network
+    restart: unless-stopped
+
   nginx:
     image: nginx:1.25-alpine
     container_name: secure-video-nginx
@@ -364,24 +354,390 @@ services:
     ports:
       - "80:80"
       - "443:443"
+    deploy:
+      resources:
+        reservations:
+          memory: 64M
+        limits:
+          memory: 256M
     volumes:
       - ./BackEnd/nginx.conf:/etc/nginx/nginx.conf:ro
       - ./BackEnd/ssl:/etc/nginx/ssl:ro
       - nginx_logs:/var/log/nginx
-      - ./Frontvideo1/dist:/var/www/html:ro   # ← dist ที่ build แล้ว
+      - ./Frontvideo1/dist:/var/www/html:ro
     networks:
       - secure-video-network
     depends_on:
       app:
         condition: service_healthy
- 
-  # Monitoring
+
+  # ─────────────────────────────────────────────────────────────
+  # WORKERS  (Burstable Group)
+  # ─────────────────────────────────────────────────────────────
+
+  email-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: secure-video-email-worker
+    restart: unless-stopped
+    command: ["node", "workers/emailWorker.js"]
+    user: "1001:1001"
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /app/tmp
+    env_file:
+      - ./BackEnd/.env
+    environment:
+      - NODE_ENV=production
+      - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672
+    deploy:
+      resources:
+        reservations:
+          memory: 128M
+        limits:
+          memory: 256M
+    networks:
+      - secure-video-network
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    volumes:
+      - ./BackEnd/keys:/app/keys:ro
+
+  transcode-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: secure-video-transcode-worker
+    restart: unless-stopped
+    command: ["node", "workers/transcodeWorker.js"]
+    env_file:
+      - ./BackEnd/.env
+    environment:
+      - NODE_ENV=production
+    deploy:
+      resources:
+        reservations:
+          memory: 256M
+        limits:
+          cpus: '2.0'
+          memory: 1G
+    networks:
+      - secure-video-network
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      mongodb1:
+        condition: service_healthy
+    user: "1001:1001"
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /app/tmp
+
+  analytics-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: secure-video-analytics-worker
+    command: ["node", "workers/analystic.js"]
+    user: "1001:1001"
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /app/tmp
+    env_file:
+      - ./BackEnd/.env
+    environment:
+      - NODE_ENV=production
+      - KAFKA_BROKERS=kafka:9092
+      - CLICKHOUSE_HOST=clickhouse
+      - CLICKHOUSE_PORT=8123
+      - CLICKHOUSE_USER=app_user
+      - CLICKHOUSE_PASSWORD=strong_password
+      - CLICKHOUSE_DB=app_db
+    deploy:
+      resources:
+        reservations:
+          memory: 256M
+        limits:
+          memory: 512M
+    restart: unless-stopped
+    depends_on:
+      kafka:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"require('http').get('http://localhost:3098/health', r => process.exit(r.statusCode === 200 ? 0 : 1))\""]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    networks:
+      - secure-video-network
+
+  trending-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: trending_worker
+    command: ["node", "workers/trendingWorker.js"]
+    env_file: ./BackEnd/.env
+    environment:
+      - NODE_ENV=production
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=redispassword123
+    deploy:
+      resources:
+        reservations:
+          memory: 128M
+        limits:
+          memory: 256M
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"require('http').get('http://localhost:3099/health', r => process.exit(r.statusCode === 200 ? 0 : 1))\""]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    networks:
+      - secure-video-network
+
+  # ─────────────────────────────────────────────────────────────
+  # ML WORKERS  (Burstable — CPU burst สูงตอนประมวลผล)
+  # ─────────────────────────────────────────────────────────────
+
+  ml-worker-history:
+    build:
+      context: ./ml-worker/history
+      dockerfile: Dockerfile
+    container_name: secure-video-ml-worker-history
+    restart: unless-stopped
+    depends_on:
+      kafka:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      - KAFKA_BROKERS=kafka:9092
+      - REDIS_HOST=redis
+      - PYTHONUNBUFFERED=1
+    deploy:
+      resources:
+        reservations:
+          memory: 256M
+        limits:
+          memory: 512M
+    env_file:
+      - ./BackEnd/.env
+    networks:
+      - secure-video-network
+
+  ml-worker-embedder:
+    build:
+      context: ./ml-worker/embedder
+      dockerfile: Dockerfile
+    container_name: secure-video-ml-worker-embedder
+    restart: unless-stopped
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672
+      - PYTHONUNBUFFERED=1
+      - TRANSFORMERS_CACHE=/app/model-cache
+      - SENTENCE_TRANSFORMERS_HOME=/app/model-cache
+    deploy:
+      resources:
+        reservations:
+          cpus: '1.0'
+          memory: 1.5G
+        limits:
+          cpus: '2.0'   # burst ตอนโหลด/รัน model
+          memory: 3G
+    env_file:
+      - ./BackEnd/.env
+    volumes:
+      - ml-model-cache:/app/model-cache
+    networks:
+      - secure-video-network
+
+  user-vector-producer:
+    build:
+      context: ./ml-worker/user-vector
+      dockerfile: Dockerfile
+    container_name: user-vector-producer
+    restart: unless-stopped
+    command: python user-vector-producer.py
+    env_file:
+      - ./BackEnd/.env
+    environment:
+      KAFKA_BROKERS: kafka:9092
+      KAFKA_TOPIC: user-vector-refresh
+    depends_on:
+      kafka:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: "512M"
+    networks:
+      - secure-video-network
+
+  user-vector-worker:
+    build:
+      context: ./ml-worker/user-vector
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    command: python user-vector-worker.py
+    env_file:
+      - ./BackEnd/.env
+    environment:
+      KAFKA_BROKERS: kafka:9092
+      KAFKA_TOPIC: user-vector-refresh
+      KAFKA_GROUP: vector-workers
+      WORKER_ID: "worker-{{.Task.Slot}}"
+      SEED_LIMIT: "10"
+      USER_VECTOR_TTL: "7200"
+      THREAD_WORKERS: "8"
+      MAX_POLL_RECORDS: "50"
+    depends_on:
+      kafka:
+        condition: service_healthy
+    deploy:
+      replicas: 3
+      resources:
+        reservations:
+          memory: 512M
+        limits:
+          cpus: "1"
+          memory: "1G"
+    networks:
+      - secure-video-network
+
+  # ─────────────────────────────────────────────────────────────
+  # APACHE FLINK  (Stream Processing)
+  # ─────────────────────────────────────────────────────────────
+
+  flink-jobmanager:
+    build:
+      context: ./flink-analytics
+      dockerfile: Dockerfile
+    image: flink-analytics:latest
+    container_name: secure-video-flink-jobmanager
+    restart: unless-stopped
+    expose:
+      - "6123"
+    ports:
+      - "8082:8081"
+    command: standalone-job --job-classname com.securevideo.FlinkBehaviorJob
+    environment:
+      - REDIS_HOST=redis
+      - REDIS_PASSWORD=redispassword123
+      - KAFKA_BROKERS=kafka:9092
+      - |
+        FLINK_PROPERTIES=
+        state.checkpoints.dir: file:///opt/flink/checkpoints
+        state.savepoints.dir: file:///opt/flink/savepoints
+        jobmanager.rpc.address: flink-jobmanager
+        jobmanager.rpc.port: 6123
+        rest.port: 8081
+    deploy:
+      resources:
+        reservations:
+          memory: 512M
+        limits:
+          memory: 1G
+    networks:
+      - secure-video-network
+    depends_on:
+      kafka:
+        condition: service_healthy
+    volumes:
+      - ./flink-checkpoints:/opt/flink/checkpoints
+      - ./flink-savepoints:/opt/flink/savepoints
+
+  flink-taskmanager:
+    build:
+      context: ./flink-analytics
+      dockerfile: Dockerfile
+    image: flink-analytics:latest
+    container_name: secure-video-flink-taskmanager
+    restart: unless-stopped
+    depends_on:
+      flink-jobmanager:
+        condition: service_started
+      kafka:
+        condition: service_healthy
+    command:
+      - taskmanager
+    environment:
+      - REDIS_HOST=redis
+      - REDIS_PASSWORD=redispassword123
+      - KAFKA_BROKERS=kafka:9092
+      - |
+        FLINK_PROPERTIES=
+        jobmanager.rpc.address: flink-jobmanager
+        jobmanager.rpc.port: 6123
+        taskmanager.numberOfTaskSlots: 4
+        taskmanager.memory.process.size: 1728m
+        taskmanager.rpc.port: 6122
+    deploy:
+      resources:
+        reservations:
+          memory: 1.5G
+        limits:
+          memory: 2G
+    networks:
+      - secure-video-network
+
+  # ─────────────────────────────────────────────────────────────
+  # MONITORING STACK
+  # ─────────────────────────────────────────────────────────────
+
+  # cAdvisor — ดึง CPU/RAM ของทุก Container ส่ง Prometheus
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:latest
+    container_name: cadvisor
+
+    ports:
+      - "8089:8080"
+
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker:/var/lib/docker:ro
+      - /dev/disk:/dev/disk:ro
+
+    devices:
+      - /dev/kmsg
+
+    privileged: true
+
+    restart: unless-stopped
   prometheus:
     image: prom/prometheus:v2.47.0
     container_name: secure-video-prometheus
     restart: unless-stopped
     ports:
       - "9090:9090"
+    deploy:
+      resources:
+        limits:
+          memory: 1G
     volumes:
       - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus_data:/prometheus
@@ -405,6 +761,12 @@ services:
     environment:
       GF_SECURITY_ADMIN_PASSWORD: grafana123
       GF_INSTALL_PLUGINS: grafana-clickhouse-datasource
+    deploy:
+      resources:
+        reservations:
+          memory: 256M
+        limits:
+          memory: 512M
     volumes:
       - grafana_data:/var/lib/grafana
       - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
@@ -416,34 +778,42 @@ services:
     profiles:
       - monitoring
 
-  # ClickHouse
-  clickhouse:
-    image: clickhouse/clickhouse-server:latest
-    container_name: clickhouse_db
-    restart: always
-    ports:
-      - "8123:8123"
-    environment:
-      CLICKHOUSE_USER: app_user
-      CLICKHOUSE_PASSWORD: strong_password
-      CLICKHOUSE_DB: app_db
-    volumes:
-      - clickhouse_data:/var/lib/clickhouse
-      - ./init-clickhouse:/docker-entrypoint-initdb.d
-    ulimits:
-      nofile:
-        soft: 262144
-        hard: 262144
+  loki:
+    image: grafana/loki:latest
+    container_name: secure-video-loki
+    expose:
+      - "3100"
+    command: -config.file=/etc/loki/local-config.yaml
+    deploy:
+      resources:
+        limits:
+          memory: 512M
     networks:
       - secure-video-network
-    healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8123/ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 10s
+    volumes:
+      - loki-storage:/loki
+      - ./loki-config.yaml:/etc/loki/local-config.yaml
 
-  # Mongo Express (Admin UI — internal only)
+  promtail:
+    image: grafana/promtail:latest
+    container_name: promtail
+    volumes:
+      - ./promtail-config.yaml:/etc/promtail/config.yaml
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/log/app_logs:/var/log/app_logs
+    command: -config.file=/etc/promtail/config.yaml
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+    networks:
+      - secure-video-network
+
+  # ─────────────────────────────────────────────────────────────
+  # ADMIN UIs
+  # ─────────────────────────────────────────────────────────────
+
   mongo-express:
     image: mongo-express:latest
     container_name: secure-video-mongo-express
@@ -454,6 +824,10 @@ services:
       ME_CONFIG_BASICAUTH: "false"
       ME_CONFIG_MONGODB_ENABLE_ADMIN: "false"
       ME_CONFIG_MONGODB_URL: mongodb://mongodb1:27017,mongodb2:27017,mongodb3:27017/secure-video?replicaSet=rs0
+    deploy:
+      resources:
+        limits:
+          memory: 256M
     networks:
       - secure-video-network
     depends_on:
@@ -461,199 +835,6 @@ services:
       - mongodb2
       - mongodb3
 
-  # Loki
-  loki:
-    image: grafana/loki:latest
-    expose:
-      - "3100"
-    command: -config.file=/etc/loki/local-config.yaml
-    networks:
-      - secure-video-network
-    volumes:
-      - loki-storage:/loki
-      - ./loki-config.yaml:/etc/loki/local-config.yaml
-
-  # Promtail
-  promtail:
-    image: grafana/promtail:latest
-    container_name: promtail
-    volumes:
-      - ./promtail-config.yaml:/etc/promtail/config.yaml
-      - /var/run/docker.sock:/var/run/docker.sock  # ✅ ต้องมีตรงนี้
-      - /var/log/app_logs:/var/log/app_logs
-    command: -config.file=/etc/promtail/config.yaml
-    networks:
-      - secure-video-network
-
-  # ML Worker
-  ml-worker-history:
-    build:
-      context: ./ml-worker/history
-      dockerfile: Dockerfile
-    container_name: secure-video-ml-worker-history
-    restart: unless-stopped
-    depends_on:
-      kafka:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    environment:
-      - KAFKA_BROKERS=kafka:9092
-      - REDIS_HOST=redis
-      - PYTHONUNBUFFERED=1
-    env_file:
-      - ./BackEnd/.env
-    networks:
-      - secure-video-network
-
-  # ── ML Worker: Embedder (RabbitMQ + Pinecone) ─────────────
-  ml-worker-embedder:
-    build:
-      context: ./ml-worker/embedder
-      dockerfile: Dockerfile
-    container_name: secure-video-ml-worker-embedder
-    restart: unless-stopped
-    depends_on:
-      rabbitmq:
-        condition: service_healthy
-    environment:
-      - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672
-      - PYTHONUNBUFFERED=1
-      - TRANSFORMERS_CACHE=/app/model-cache
-      - SENTENCE_TRANSFORMERS_HOME=/app/model-cache
-    env_file:
-      - ./BackEnd/.env
-    mem_limit: 2g
-    cpus: 2.0
-    volumes:
-      - ml-model-cache:/app/model-cache   # ✅ cache model ข้าม restart
-    networks:
-      - secure-video-network
-  # docker-compose เพิ่ม
-  user-vector-producer:
-    build:
-      context: ./ml-worker/user-vector
-      dockerfile: Dockerfile
-    container_name: user-vector-producer
-    restart: unless-stopped
-    command: python user-vector-producer.py
-    env_file:
-      - ./BackEnd/.env
-    environment:
-      KAFKA_BROKERS: kafka:9092
-      KAFKA_TOPIC: user-vector-refresh
-    depends_on:
-      kafka:
-        condition: service_healthy
-    deploy:
-      resources:
-        limits:
-          cpus: "0.5"
-          memory: "512M"
-    networks:
-      - secure-video-network
-  # ── Workers (scale ได้) ────────────────────────────────
-  user-vector-worker:
-    build:
-      context: ./ml-worker/user-vector
-      dockerfile: Dockerfile
-    restart: unless-stopped
-    command: python user-vector-worker.py
-    env_file:
-      - ./BackEnd/.env
-    environment:
-      KAFKA_BROKERS:    kafka:9092
-      KAFKA_TOPIC:      user-vector-refresh
-      KAFKA_GROUP:      vector-workers
-      WORKER_ID:        "worker-{{.Task.Slot}}"  # unique per replica
-      SEED_LIMIT:       "10"
-      USER_VECTOR_TTL:  "7200"
-      THREAD_WORKERS:   "8"      # threads ต่อ 1 process
-      MAX_POLL_RECORDS: "50"
-    depends_on:
-      kafka:
-        condition: service_healthy
-    deploy:
-      replicas: 3        # เริ่มที่ 10 workers
-      resources:
-        limits:
-          cpus: "1"
-          memory: "1G"
-    networks:
-      - secure-video-network
-  # Kafka UI
-  kafka-ui:
-    image: provectuslabs/kafka-ui:latest
-    container_name: kafka-ui
-    ports:
-      - "8080:8080"
-    environment:
-      - KAFKA_CLUSTERS_0_NAME=local
-      - KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS=kafka:9092
-    networks:
-      - secure-video-network
-    depends_on:
-      - kafka
-# ── Apache Flink (Stream Processing) ──────────────────────
-  # Flink Master Node & Web UI
-  flink-jobmanager:
-    build:
-      context: ./flink-analytics
-      dockerfile: Dockerfile
-    image: flink-analytics:latest
-    container_name: secure-video-flink-jobmanager
-    restart: unless-stopped
-    expose:
-      - "6123"
-    ports:
-      - "8082:8081"
-    command: jobmanager
-    environment:
-    - REDIS_HOST=redis
-    - REDIS_PASSWORD=redispassword123
-    - KAFKA_BROKERS=kafka:9092
-    - |
-      FLINK_PROPERTIES=
-      jobmanager.rpc.address: flink-jobmanager
-      jobmanager.rpc.port: 6123
-      rest.port: 8081
-    networks:
-      - secure-video-network
-    depends_on:
-      kafka:
-        condition: service_healthy
-
-  flink-taskmanager:
-    build:
-      context: ./flink-analytics
-      dockerfile: Dockerfile
-    image: flink-analytics:latest
-    container_name: secure-video-flink-taskmanager
-    restart: unless-stopped
-    depends_on:
-      flink-jobmanager:
-        condition: service_started
-      kafka:
-        condition: service_healthy
-    command:
-      - taskmanager
-    environment:
-    - REDIS_HOST=redis
-    - REDIS_PASSWORD=redispassword123
-    - KAFKA_BROKERS=kafka:9092
-    - |
-      FLINK_PROPERTIES=
-      jobmanager.rpc.address: flink-jobmanager
-      jobmanager.rpc.port: 6123
-      taskmanager.numberOfTaskSlots: 4
-      taskmanager.memory.process.size: 1728m
-      taskmanager.rpc.port: 6122
-    deploy:
-      resources:
-        limits:
-          memory: 2G
-    networks:
-      - secure-video-network
 networks:
   secure-video-network:
     driver: bridge

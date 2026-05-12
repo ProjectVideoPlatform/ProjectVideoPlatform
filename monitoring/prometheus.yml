@@ -16,3 +16,12 @@ scrape_configs:
     static_configs:
       - targets:
           - "kafka-exporter:9308" # พอร์ตมาตรฐานของ Kafka Exporter
+  - job_name: "cadvisor"
+    static_configs:
+      - targets:
+          - "cadvisor:8080"
+  - job_name: 'kafka-ui'
+    metrics_path: '/actuator/prometheus' # ต้องระบุ Path นี้
+    static_configs:
+      - targets: 
+          - "kafka-ui:8080" # ใส่ชื่อ container และ port ของ kafka-ui
