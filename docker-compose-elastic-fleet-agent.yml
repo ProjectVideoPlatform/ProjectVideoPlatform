@@ -10,8 +10,8 @@ services:
       environment:
         - FLEET_ENROLL=1
         - KIBANA_HOST=
-        - FLEET_URL=https://c7bffa3c61cf4dd4bdffa0a06501aac4.fleet.us-central1.gcp.elastic.cloud:443
-        - FLEET_ENROLLMENT_TOKEN=ZnFfZ0g1NEIwVmZ3VUF3LVB2V2Y6ZEdYdGU5NkExLXZZOXVjSng0UnBvUQ==
+        - FLEET_URL=https://315d8352573d457bb3aaf3f55c8e9dd1.fleet.ap-southeast-1.aws.found.io:443
+        - FLEET_ENROLLMENT_TOKEN=X0s2YklKNEJ0aC1CZjZTa0plYkk6S0s0eHlGRVUwOXU3SFA5WmprUkhUQQ==
       volumes:
         # เชื่อมต่อกับ Docker Socket เพื่อให้ Agent เห็นรายชื่อ Container ทั้งหมด
         - /var/run/docker.sock:/var/run/docker.sock:ro
@@ -19,12 +19,32 @@ services:
         - /var/lib/docker/containers:/var/lib/docker/containers:ro
         - /var/log:/var/log:ro
         # สำหรับเก็บสถานะของ Agent เอง
-        - elastic-agent-data2:/usr/share/elastic-agent/state
+        - elastic-agent-data1new:/usr/share/elastic-agent/state
       # ป้องกันปัญหามองไม่เห็น Network ของเพื่อน
       networks:
         - secure-video-network
+  elastic-agent3:
+    image: docker.elastic.co/elastic-agent/elastic-agent:8.14.1
+    container_name: elastic-agent3
+    user: root
+    restart: always
+
+    environment:
+      - FLEET_ENROLL=1
+      - FLEET_URL=https://315d8352573d457bb3aaf3f55c8e9dd1.fleet.ap-southeast-1.aws.found.io:443
+      - FLEET_ENROLLMENT_TOKEN=X0s2YklKNEJ0aC1CZjZTa0plYkk6S0s0eHlGRVUwOXU3SFA5WmprUkhUQQ==
+      - FLEET_INSECURE=false
+
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /proc:/hostfs/proc:ro
+      - /sys/fs/cgroup:/hostfs/sys/fs/cgroup:ro
+      - /:/hostfs:ro
+    networks:
+      - secure-video-network
+    privileged: true
 networks:
   secure-video-network:
     driver: bridge
 volumes:
-  elastic-agent-data2:
+  elastic-agent-data1new:
