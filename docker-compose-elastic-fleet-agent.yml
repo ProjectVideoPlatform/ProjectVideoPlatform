@@ -19,7 +19,7 @@ services:
         - /var/lib/docker/containers:/var/lib/docker/containers:ro
         - /var/log:/var/log:ro
         # สำหรับเก็บสถานะของ Agent เอง
-        - elastic-agent-data1new:/usr/share/elastic-agent/state
+        - elastic-agent-data1new1:/usr/share/elastic-agent/state
       # ป้องกันปัญหามองไม่เห็น Network ของเพื่อน
       networks:
         - secure-video-network
@@ -47,4 +47,4 @@ networks:
   secure-video-network:
     driver: bridge
 volumes:
-  elastic-agent-data1new:
+  elastic-agent-data1new1:
