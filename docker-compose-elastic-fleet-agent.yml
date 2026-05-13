@@ -1,0 +1,30 @@
+services:
+
+  elastic-agent:
+      image: docker.elastic.co/beats/elastic-agent:8.14.1
+      container_name: elastic-agent
+      restart: unless-stopped
+      user: root # จำเป็นต้องใช้ root เพื่อ อ่าน log และส่อง container อื่น
+      env_file:
+        - ./BackEnd/.env
+      environment:
+        - FLEET_ENROLL=1
+        - KIBANA_HOST=
+        - FLEET_URL=https://c7bffa3c61cf4dd4bdffa0a06501aac4.fleet.us-central1.gcp.elastic.cloud:443
+        - FLEET_ENROLLMENT_TOKEN=ZnFfZ0g1NEIwVmZ3VUF3LVB2V2Y6ZEdYdGU5NkExLXZZOXVjSng0UnBvUQ==
+      volumes:
+        # เชื่อมต่อกับ Docker Socket เพื่อให้ Agent เห็นรายชื่อ Container ทั้งหมด
+        - /var/run/docker.sock:/var/run/docker.sock:ro
+        # เชื่อมต่อเพื่อดึง Log ของ Container อื่นๆ มาวิเคราะห์
+        - /var/lib/docker/containers:/var/lib/docker/containers:ro
+        - /var/log:/var/log:ro
+        # สำหรับเก็บสถานะของ Agent เอง
+        - elastic-agent-data2:/usr/share/elastic-agent/state
+      # ป้องกันปัญหามองไม่เห็น Network ของเพื่อน
+      networks:
+        - secure-video-network
+networks:
+  secure-video-network:
+    driver: bridge
+volumes:
+  elastic-agent-data2:
