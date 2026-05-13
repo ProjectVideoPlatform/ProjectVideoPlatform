@@ -41,15 +41,7 @@ require('dotenv').config();
 // });
 
 // Add this to the very top of the first file loaded in your app
-var apm = require('elastic-apm-node').start({
-  serviceName: 'my-service-name',
-
-  secretToken: 'daKOcKJAjufYfSQLz2',
-
-  serverUrl: 'https://b329e4682f5a4731bb28e4719291303e.apm.ap-southeast-1.aws.cloud.es.io:443',
-
-  environment: 'my-environment'
-})
+var apm = require('elastic-apm-node').start()
 const { connectES } = require('./config/elasticsearch');
 const express = require('express');
 const http = require('http');

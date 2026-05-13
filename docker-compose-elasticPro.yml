@@ -1,0 +1,44 @@
+version: '3.8'
+
+services:
+  fleet-server:
+    image: docker.elastic.co/beats/elastic-agent:8.13.0
+    container_name: fleet-server
+    restart: always
+    ports:
+      - "8220:8220"
+    environment:
+      # ตั้งค่าให้ตัวนี้ทำหน้าที่เป็น Fleet Server
+      - FLEET_SERVER_ENABLE=1
+      - FLEET_SERVER_ELASTICSEARCH_HOSTS=https://5ce83707fd4d4bc0bf1863572a29e3f8.ap-southeast-1.aws.found.io:443
+      - FLEET_SERVER_SERVICE_TOKEN=AAEAAWVsYXN0aWMvZmxlZXQtc2VydmVyL3Rva2VuLTE3Nzg2NTIzODc0OTg6S1VySnNBQndUZ0NDNGZNZmgtWFRDdw
+      - FLEET_SERVER_POLICY_ID=fleet-server-policy
+      - FLEET_SERVER_PORT=8220
+      # หากระบบไม่ได้ใช้ SSL แบบสาธารณะที่ Verified อาจต้องปิดการเช็ค Cert เบื้องต้น
+      # - NODE_NAME=fleet-server
+    hostname: fleet-server
+    networks:
+      - fleet-network
+
+  elastic-agent:
+    image: docker.elastic.co/beats/elastic-agent:8.13.0
+    container_name: elastic-agent
+    restart: always
+    user: root
+    depends_on:
+      - fleet-server
+    environment:
+      # ตัวนี้คือตัวลูก (Agent) ที่จะมาเกาะกับ Fleet Server ด้านบน
+      # ถ้า Fleet Server รันใน Docker network เดียวกัน สามารถใช้ชื่อ service ได้เลย
+      - FLEET_URL=http://fleet-server:8220
+      - FLEET_ENROLLMENT_TOKEN=YOUR_AGENT_ENROLLMENT_TOKEN_HERE # <-- อย่าลืมเอา Token ตัวลูกมาใส่ตรงนี้
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /proc:/hostfs/proc:ro
+      - /sys/fs/cgroup:/hostfs/sys/fs/cgroup:ro
+    networks:
+      - fleet-network
+networks:
+  fleet-network:
+    driver: bridge

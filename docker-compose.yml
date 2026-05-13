@@ -257,7 +257,11 @@ services:
   # ─────────────────────────────────────────────────────────────
   # APPLICATION SERVICES
   # ─────────────────────────────────────────────────────────────
-
+      # - ELASTIC_APM_SERVER_URL=http://apm-server:8200
+      # - ELASTIC_APM_SERVICE_NAME=my-securevideo-backend
+      # - ELASTIC_APM_ENVIRONMENT=development
+      # - ELASTIC_APM_ACTIVE=true
+      # - ELASTIC_APM_SECRET_TOKEN=YOUR_FLEET_APM_SECRET_TOKEN
   app:
     build:
       context: .
@@ -276,12 +280,6 @@ services:
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - REDIS_PASSWORD=redispassword123
-      - ELASTICSEARCH_URL=http://elasticsearch:9200
-      # - ELASTIC_APM_SERVER_URL=http://apm-server:8200
-      # - ELASTIC_APM_SERVICE_NAME=my-securevideo-backend
-      # - ELASTIC_APM_ENVIRONMENT=development
-      # - ELASTIC_APM_ACTIVE=true
-      # - ELASTIC_APM_SECRET_TOKEN=YOUR_FLEET_APM_SECRET_TOKEN
     deploy:
       resources:
         reservations:
@@ -367,9 +365,9 @@ services:
       - ./Frontvideo1/dist:/var/www/html:ro
     networks:
       - secure-video-network
-    depends_on:
-      app:
-        condition: service_healthy
+    # depends_on:
+    #   app:
+    #     condition: service_healthy
 
   # ─────────────────────────────────────────────────────────────
   # WORKERS  (Burstable Group)
