@@ -1,8 +1,8 @@
-# recommendation-service/server.py
 import grpc
 import json
 import asyncio
 from concurrent import futures
+from functools import partial
 
 import recommendation_pb2
 import recommendation_pb2_grpc
@@ -13,8 +13,8 @@ from motor.motor_asyncio import AsyncIOMotorClient
 import os
 
 # ── init clients ──────────────────────────────────────────────────────────────
-pc        = Pinecone(api_key=os.environ["PINECONE_API_KEY"])
-pine_idx  = pc.Index("video-catalog")
+pc       = Pinecone(api_key=os.environ["PINECONE_API_KEY"])
+pine_idx = pc.Index("video-catalog")
 
 REDIS_HOST     = os.environ.get("REDIS_HOST", "redis")
 REDIS_PASSWORD = os.environ.get("REDIS_PASSWORD")
@@ -23,12 +23,18 @@ redis_client = aioredis.from_url(
     f"redis://{REDIS_HOST}:6379",
     password=REDIS_PASSWORD or None
 )
-mongo        = AsyncIOMotorClient(os.environ["MONGO_URI"])
-db           = mongo["secure-video"]  # ← เปลี่ยนชื่อ DB
+mongo = AsyncIOMotorClient(os.environ["MONGO_URI"])
+db    = mongo["secure-video"]
 
 PINECONE_FETCH_LIMIT = 50
 SEED_LIMIT           = 10
 COWATCH_LIMIT        = 10
+
+# จำกัด watched history ที่ดึงมา — production ไม่ดึงทั้งหมด
+# ใช้แค่ recent N เพื่อ exclude; ยอมให้วิดีโอเก่ามากๆ โผล่ได้บ้าง
+WATCHED_EXCLUSION_LIMIT = 200
+
+_executor = futures.ThreadPoolExecutor(max_workers=4)
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
@@ -52,6 +58,27 @@ def to_proto_video(doc: dict) -> recommendation_pb2.Video:
     )
 
 
+async def pinecone_query(vector: list[float], top_k: int):
+    """
+    Pinecone SDK (sync) ต้อง wrap ด้วย run_in_executor
+    มิฉะนั้น blocking call จะ block event loop ทั้งหมด
+    """
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(
+        _executor,
+        partial(pine_idx.query, vector=vector, top_k=top_k, include_metadata=True)
+    )
+
+
+async def pinecone_fetch(ids: list[str]):
+    """Pinecone fetch ก็ sync เหมือนกัน"""
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(
+        _executor,
+        partial(pine_idx.fetch, ids)
+    )
+
+
 async def get_user_vector(user_id: str) -> list[float] | None:
     cached = await redis_client.get(f"user:vector:{user_id}")
     if cached:
@@ -66,7 +93,8 @@ async def get_user_vector(user_id: str) -> list[float] | None:
         return None
 
     seed_ids      = [h["videoId"] for h in history]
-    fetch_response = pine_idx.fetch(seed_ids)
+    # ใช้ async wrapper แทน sync call
+    fetch_response = await pinecone_fetch(seed_ids)
     records       = fetch_response.vectors or {}
     vectors       = [records[id].values for id in seed_ids if id in records]
 
@@ -113,41 +141,47 @@ class RecommendationServicer(recommendation_pb2_grpc.RecommendationServiceServic
         limit   = request.limit or 12
 
         try:
-            # 1. watched set
-            watched_redis = await redis_client.zrange(f"user:watched:{user_id}", 0, -1)
-            watched_mongo = await db["watchhistories"].find(
-                {"userId": user_id}, {"videoId": 1}
-            ).to_list(None)
-
-            watched_set = set(
-                [id.decode() if isinstance(id, bytes) else id for id in watched_redis] +
-                [h["videoId"] for h in watched_mongo]
+            # ── Step 1: gather watched_set + boost + user_vector พร้อมกันทีเดียว ──
+            #
+            # Production approach สำหรับ watched exclusion:
+            # - ดึงแค่ recent WATCHED_EXCLUSION_LIMIT (200) รายการ แทนที่จะดึงทั้งหมด
+            # - Redis zrange ใช้ recent items อยู่แล้ว (sorted by score/time)
+            # - MongoDB ก็ sort desc + limit — ยอมให้วิดีโอเก่ามากๆ โผล่ได้บ้าง
+            #   เพราะ user ที่ดูวิดีโอหลักพันรายการ ไม่น่าจำได้ว่าดูอะไรไปนานแล้ว
+            #
+            (
+                watched_redis_raw,
+                watched_mongo_raw,
+                boost_raw,
+            ), user_vector = await asyncio.gather(
+                asyncio.gather(
+                    redis_client.zrange(f"user:watched:{user_id}", 0, -1),
+                    db["watchhistories"].find(
+                        {"userId": user_id}, {"videoId": 1}
+                    ).sort("watchedAt", -1).limit(WATCHED_EXCLUSION_LIMIT).to_list(WATCHED_EXCLUSION_LIMIT),
+                    redis_client.get(f"user:boost:{user_id}"),
+                ),
+                get_user_vector(user_id),
             )
 
-            if not watched_set:
-                trending = await get_trending(limit)
-                return recommendation_pb2.VideoListResponse(
-                    videos=[to_proto_video(v) for v in trending],
-                    source="trending_cold_start"
-                )
-
-            # 2. user vector + boost พร้อมกัน
-            user_vector, boost_raw = await asyncio.gather(
-                get_user_vector(user_id),
-                redis_client.get(f"user:boost:{user_id}")
+            watched_set = set(
+                [id.decode() if isinstance(id, bytes) else id for id in watched_redis_raw] +
+                [h["videoId"] for h in watched_mongo_raw]
             )
             boost_category = boost_raw.decode() if isinstance(boost_raw, bytes) else boost_raw
 
-            if not user_vector:
+            # ── Step 2: cold start — ไม่มี history เลย ──
+            if not watched_set or not user_vector:
+                source   = "trending_cold_start" if not watched_set else "trending_no_vector"
                 trending = await get_trending(limit)
                 return recommendation_pb2.VideoListResponse(
                     videos=[to_proto_video(v) for v in trending],
-                    source="trending_no_vector"
+                    source=source
                 )
 
-            # 3. Pinecone query
+            # ── Step 3: Pinecone query (async via executor) ──
             top_k    = min(limit + len(watched_set), PINECONE_FETCH_LIMIT)
-            response = pine_idx.query(vector=user_vector, top_k=top_k, include_metadata=True)
+            response = await pinecone_query(user_vector, top_k)
 
             if not response.matches:
                 trending = await get_trending(limit)
@@ -156,7 +190,7 @@ class RecommendationServicer(recommendation_pb2_grpc.RecommendationServiceServic
                     source="trending_no_matches"
                 )
 
-            # 4. filter watched
+            # ── Step 4: filter watched ──
             recommended_ids = []
             for match in response.matches:
                 if match.id not in watched_set:
@@ -171,14 +205,14 @@ class RecommendationServicer(recommendation_pb2_grpc.RecommendationServiceServic
                     source="trending_all_watched"
                 )
 
-            # 5. ดึงจาก MongoDB
-            docs     = await db["videos"].find(
+            # ── Step 5: ดึง metadata จาก MongoDB ──
+            docs = await db["videos"].find(
                 {"id": {"$in": recommended_ids}, "uploadStatus": "completed"}
             ).to_list(limit)
 
-            order    = {id: i for i, id in enumerate(recommended_ids)}
+            order   = {id: i for i, id in enumerate(recommended_ids)}
             docs.sort(key=lambda v: order.get(v["id"], 99))
-            boosted  = apply_boost(docs, boost_category)
+            boosted = apply_boost(docs, boost_category)
 
             return recommendation_pb2.VideoListResponse(
                 videos         = [to_proto_video(v) for v in boosted],

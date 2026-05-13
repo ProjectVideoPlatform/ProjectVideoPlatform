@@ -18,6 +18,7 @@
   "author": "Your Name",
   "license": "ISC",
   "dependencies": {
+    "@aws-sdk/client-mediaconvert": "^3.896.0",
     "@aws-sdk/client-s3": "^3.896.0",
     "@aws-sdk/lib-storage": "^3.876.0",
     "@aws-sdk/s3-request-presigner": "^3.896.0",
@@ -28,7 +29,6 @@
     "@pinecone-database/pinecone": "^7.2.0",
     "amqplib": "^0.10.9",
     "aws-cloudfront-sign": "^3.0.2",
-    "aws-sdk": "^2.1467.0",
     "axios": "^1.13.2",
     "bcryptjs": "^2.4.3",
     "body-parser": "^2.2.0",

@@ -4,7 +4,8 @@ const { authenticateToken, requireAdmin } = require('../middleware/auth');
 const { generatePresignedUploadUrl, validateVideoFile, validateFileSize } = require('../services/s3Upload');
 const queueService = require('../services/queueService');
 const { generateSignedCookies, setCookiesInResponse } = require('../services/cloudfront');
-const { config,s3 } = require('../config/aws');
+const { config, s3 } = require('../config/aws');
+const { ListObjectsV2Command } = require('@aws-sdk/client-s3');
 const Video = require('../models/Video');
 const Purchase = require('../models/Purchase');
 const escapeStringRegexp = require('escape-string-regexp');
@@ -595,10 +596,11 @@ router.post(
         video.uploadStatus = "completed";
 
         try {
-          const listResult = await s3.listObjectsV2({
+          const command = new ListObjectsV2Command({
             Bucket: process.env.HLS_OUTPUT_BUCKET,
             Prefix: `videos/${videoId}/thumbnails/`,
-          }).promise();
+          });
+          const listResult = await s3.send(command);
 
           const thumbs = listResult.Contents
             ?.map(o => o.Key)

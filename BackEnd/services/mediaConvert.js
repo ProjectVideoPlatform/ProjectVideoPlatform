@@ -1,4 +1,6 @@
+const { MediaConvertClient, CreateJobCommand, GetJobCommand, CancelJobCommand, ListJobsCommand } = require('@aws-sdk/client-mediaconvert');
 const { mediaConvert, config } = require('../config/aws');
+
 // สร้าง MediaConvert Job สำหรับ HLS
 const createMediaConvertJob = async (inputS3Path, outputS3Path, videoId) => {
   const jobSettings = {
@@ -206,7 +208,8 @@ const createMediaConvertJob = async (inputS3Path, outputS3Path, videoId) => {
   };
 
   try {
-    const result = await mediaConvert.createJob(params).promise();
+    const command = new CreateJobCommand(params);
+    const result = await mediaConvert.send(command);
     console.log(`MediaConvert job created: ${result.Job.Id} for video: ${videoId}`);
     return result.Job;
   } catch (error) {
@@ -219,7 +222,8 @@ const createMediaConvertJob = async (inputS3Path, outputS3Path, videoId) => {
 const getJobStatus = async (jobId) => {
   try {
     const params = { Id: jobId };
-    const result = await mediaConvert.getJob(params).promise();
+    const command = new GetJobCommand(params);
+    const result = await mediaConvert.send(command);
     return result.Job;
   } catch (error) {
     console.error('Failed to get job status:', error);
@@ -231,7 +235,8 @@ const getJobStatus = async (jobId) => {
 const cancelJob = async (jobId) => {
   try {
     const params = { Id: jobId };
-    const result = await mediaConvert.cancelJob(params).promise();
+    const command = new CancelJobCommand(params);
+    const result = await mediaConvert.send(command);
     console.log(`MediaConvert job cancelled: ${jobId}`);
     return result;
   } catch (error) {
@@ -252,7 +257,8 @@ const listJobs = async (status = null, maxResults = 20) => {
       params.Status = status;
     }
     
-    const result = await mediaConvert.listJobs(params).promise();
+    const command = new ListJobsCommand(params);
+    const result = await mediaConvert.send(command);
     return result.Jobs;
   } catch (error) {
     console.error('Failed to list jobs:', error);

@@ -14,20 +14,42 @@
 //   environment: process.env.NODE_ENV || 'production',
 //   active: true,
 // });
-const apm = require('elastic-apm-node').start({
-  serviceName: 'toteja-backend',
+// const apm = require('elastic-apm-node').start({
+//   serviceName: 'toteja-backend',
 
-  // ชี้ไป APM Server
-  serverUrl: process.env.ELASTIC_APM_SERVER_URL || 'http://apm-server:8200',
+//   // ชี้ไป APM Server
+//   serverUrl: process.env.ELASTIC_APM_SERVER_URL || 'http://apm-server:8200',
 
-  // standalone local dev ไม่ต้องใช้ token ก็ได้
-  secretToken: process.env.ELASTIC_APM_SECRET_TOKEN || '',
+//   // standalone local dev ไม่ต้องใช้ token ก็ได้
+//   secretToken: process.env.ELASTIC_APM_SECRET_TOKEN || '',
 
-  environment: process.env.NODE_ENV || 'development',
+//   environment: process.env.NODE_ENV || 'development',
 
-  active: true,
-});
+//   active: true,
+// });
+//online APM
+// Add this to the very top of the first file loaded in your app
 require('dotenv').config();
+
+// require('elastic-apm-node').start({
+//   serviceName: process.env.ELASTIC_APM_SERVICE_NAME,
+//   serverUrl: process.env.ELASTIC_APM_SERVER_URL_PRODUCTION,
+//   apiKey: process.env.ELASTIC_APM_API_KEY,
+//   environment: "production",
+//   active: true,
+//   logLevel: 'trace',
+// });
+
+// Add this to the very top of the first file loaded in your app
+var apm = require('elastic-apm-node').start({
+  serviceName: 'my-service-name',
+
+  secretToken: 'daKOcKJAjufYfSQLz2',
+
+  serverUrl: 'https://b329e4682f5a4731bb28e4719291303e.apm.ap-southeast-1.aws.cloud.es.io:443',
+
+  environment: 'my-environment'
+})
 const { connectES } = require('./config/elasticsearch');
 const express = require('express');
 const http = require('http');
@@ -94,7 +116,7 @@ app.use((error, req, res, next) => {
 const startServer = async () => {
   try {
     await connectDB();
-    // await connectES();
+    await connectES();
     console.log('Connected to MongoDB and Elasticsearch');
     const PORT = process.env.PORT || 3000;
 

@@ -1,11 +1,14 @@
-  const AWS = require('aws-sdk');
+  const { S3Client } = require('@aws-sdk/client-s3');
+  const { MediaConvertClient } = require('@aws-sdk/client-mediaconvert');
   const path = require('path');
     require('dotenv').config({ path: path.resolve(__dirname, '../.env') });
   // AWS Configuration
   const config = {
     region:  'ap-southeast-1',
-    accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+    credentials: {
+      accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+      secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+    },
     
     // S3 Buckets
     uploadsBucket: process.env.UPLOADS_BUCKET || 'your-uploads-bucket',
@@ -22,18 +25,16 @@
     cloudFrontPrivateKey: process.env.CLOUDFRONT_PRIVATE_KEY
   };
 
-  // Configure AWS SDK
-  AWS.config.update({
-    accessKeyId: config.accessKeyId,
-    secretAccessKey: config.secretAccessKey,
-    region: config.region
+  // Create AWS service instances (SDK v3)
+  const s3 = new S3Client({
+    region: config.region,
+    credentials: config.credentials
   });
-
-  // Create AWS service instances
-  const s3 = new AWS.S3();
-  const mediaConvert = new AWS.MediaConvert({
-    endpoint: config.mediaConvertEndpoint,
-      region:  'us-east-1'
+  
+  const mediaConvert = new MediaConvertClient({
+    region: 'us-east-1',
+    credentials: config.credentials,
+    endpoint: config.mediaConvertEndpoint
   });
 
   module.exports = {
