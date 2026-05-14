@@ -1,0 +1,25 @@
+version: '3.9'
+
+services:
+  pf-host-agent:
+    image: docker.elastic.co/observability/profiling-agent:9.4.1
+    container_name: pf-host-agent
+    env_file:
+      - ./BackEnd/.env
+    privileged: true
+    pid: host
+    restart: always
+    volumes:
+      - /etc/machine-id:/etc/machine-id:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /sys/kernel/debug:/sys/kernel/debug:ro
+    command: >
+      /root/pf-host-agent
+      -project-id=1
+      -secret-token=HlHQQB8tIWZjl472
+      -collection-agent=b329e4682f5a4731bb28e4719291303e.profiling.ap-southeast-1.aws.cloud.es.io:443
+    networks:
+      - secure-video-network
+networks:
+  secure-video-network:
+    driver: bridge

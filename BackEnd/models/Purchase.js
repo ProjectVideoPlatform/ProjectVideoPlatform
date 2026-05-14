@@ -1,4 +1,39 @@
 const mongoose = require('mongoose');
+const ElasticsearchService = require('../services/ElasticsearchService');
+
+const ES_INDEX_NAME = 'purchases';
+
+// Elasticsearch mapping for purchases index
+const ES_MAPPING = {
+  settings: {
+    number_of_shards: 1,
+    number_of_replicas: 1
+  },
+  mappings: {
+    properties: {
+      userId: { type: 'keyword' },
+      videoId: { type: 'keyword' },
+      amount: { type: 'float' },
+      currency: { type: 'keyword' },
+      paymentMethod: { type: 'keyword' },
+      status: { type: 'keyword' },
+      purchaseDate: { type: 'date' },
+      expiresAt: { type: 'date' },
+      processedAt: { type: 'date' },
+      refundedAt: { type: 'date' },
+      transactionId: { type: 'keyword' },
+      bulkId: { type: 'keyword' },
+      accessCount: { type: 'integer' },
+      watchDuration: { type: 'long' },
+      completionRate: { type: 'float' },
+      paymentMethod: { type: 'keyword' },
+      originalPrice: { type: 'float' },
+      lastAccessedAt: { type: 'date' },
+      createdAt: { type: 'date' },
+      updatedAt: { type: 'date' }
+    }
+  }
+};
 
 const purchaseSchema = new mongoose.Schema({
   // Core references
@@ -321,6 +356,82 @@ purchaseSchema.pre('save', function(next) {
   next();
 });
 
+// ===== ELASTICSEARCH HOOKS =====
+// Index to Elasticsearch after save
+purchaseSchema.post('save', async function(doc) {
+  try {
+    await ElasticsearchService.indexDocument(
+      ES_INDEX_NAME,
+      doc._id.toString(),
+      {
+        userId: doc.userId.toString(),
+        videoId: doc.videoId.toString(),
+        amount: doc.amount,
+        currency: doc.currency,
+        paymentMethod: doc.paymentMethod,
+        status: doc.status,
+        purchaseDate: doc.purchaseDate,
+        expiresAt: doc.expiresAt,
+        processedAt: doc.processedAt,
+        refundedAt: doc.refundedAt,
+        transactionId: doc.transactionId,
+        bulkId: doc.bulkId,
+        accessCount: doc.accessCount,
+        watchDuration: doc.watchDuration,
+        completionRate: doc.completionRate,
+        lastAccessedAt: doc.lastAccessedAt,
+        originalPrice: doc.originalPrice,
+        createdAt: doc.createdAt,
+        updatedAt: doc.updatedAt
+      }
+    );
+  } catch (error) {
+    console.error('❌ Error indexing purchase to ES:', error.message);
+    // Don't throw - prevent blocking MongoDB save
+  }
+});
+
+// Update in Elasticsearch after findOneAndUpdate
+purchaseSchema.post('findOneAndUpdate', async function(doc) {
+  try {
+    if (doc && doc._id) {
+      const updateData = {
+        status: doc.status,
+        processedAt: doc.processedAt,
+        refundedAt: doc.refundedAt,
+        accessCount: doc.accessCount,
+        watchDuration: doc.watchDuration,
+        completionRate: doc.completionRate,
+        lastAccessedAt: doc.lastAccessedAt,
+        updatedAt: doc.updatedAt
+      };
+
+      await ElasticsearchService.updateDocument(
+        ES_INDEX_NAME,
+        doc._id.toString(),
+        updateData
+      );
+    }
+  } catch (error) {
+    console.error('❌ Error updating purchase in ES:', error.message);
+  }
+});
+
+// Delete from Elasticsearch before deleteOne
+purchaseSchema.pre('deleteOne', async function() {
+  try {
+    const doc = this.getFilter();
+    if (doc._id) {
+      await ElasticsearchService.deleteDocument(
+        ES_INDEX_NAME,
+        doc._id.toString()
+      );
+    }
+  } catch (error) {
+    console.error('❌ Error deleting purchase from ES:', error.message);
+  }
+});
+
 purchaseSchema.pre('findOneAndUpdate', function(next) {
   const update = this.getUpdate();
   
@@ -349,6 +460,182 @@ purchaseSchema.virtual('daysSincePurchase').get(function() {
 purchaseSchema.virtual('totalWatchedHours').get(function() {
   return Math.round((this.watchDuration || 0) / 3600 * 100) / 100;
 });
+
+// ===== STATIC METHODS FOR ELASTICSEARCH =====
+purchaseSchema.statics.initializeESIndex = async function() {
+  try {
+    await ElasticsearchService.createIndex(ES_INDEX_NAME, ES_MAPPING);
+  } catch (error) {
+    console.error('❌ Failed to initialize ES index:', error.message);
+  }
+};
+
+// Search purchases with advanced filters
+purchaseSchema.statics.searchPurchases = async function(filters = {}, options = {}) {
+  const {
+    page = 1,
+    limit = 20,
+    sortBy = 'purchaseDate',
+    order = 'desc'
+  } = options;
+
+  const from = (page - 1) * limit;
+  const esFilters = [];
+
+  // Apply filters
+  if (filters.userId) {
+    esFilters.push({ term: { userId: filters.userId.toString() } });
+  }
+
+  if (filters.videoId) {
+    esFilters.push({ term: { videoId: filters.videoId.toString() } });
+  }
+
+  if (filters.status) {
+    if (Array.isArray(filters.status)) {
+      esFilters.push({ terms: { status: filters.status } });
+    } else {
+      esFilters.push({ term: { status: filters.status } });
+    }
+  }
+
+  if (filters.paymentMethod) {
+    esFilters.push({ term: { paymentMethod: filters.paymentMethod } });
+  }
+
+  if (filters.currency) {
+    esFilters.push({ term: { currency: filters.currency } });
+  }
+
+  if (filters.dateRange) {
+    esFilters.push({
+      range: {
+        purchaseDate: {
+          gte: filters.dateRange.from,
+          lte: filters.dateRange.to
+        }
+      }
+    });
+  }
+
+  if (filters.amountRange) {
+    esFilters.push({
+      range: {
+        amount: {
+          gte: filters.amountRange.min,
+          lte: filters.amountRange.max
+        }
+      }
+    });
+  }
+
+  const esQuery = {
+    size: limit,
+    from,
+    sort: [{ [sortBy]: order }],
+    query: {
+      bool: {
+        filter: esFilters.length > 0 ? esFilters : undefined,
+        must: [{ match_all: {} }]
+      }
+    }
+  };
+
+  try {
+    const response = await ElasticsearchService.searchDocuments(ES_INDEX_NAME, esQuery);
+    
+    return {
+      data: response.hits.hits.map(hit => ({
+        _id: hit._id,
+        ...hit._source
+      })),
+      total: response.hits.total.value,
+      page,
+      limit,
+      pages: Math.ceil(response.hits.total.value / limit)
+    };
+  } catch (error) {
+    console.error('❌ Error searching purchases:', error.message);
+    throw error;
+  }
+};
+
+// Get revenue analytics
+purchaseSchema.statics.getRevenueAnalytics = async function(filters = {}) {
+  const esFilters = [];
+  
+  if (filters.status) {
+    esFilters.push({ term: { status: filters.status || 'completed' } });
+  } else {
+    esFilters.push({ term: { status: 'completed' } });
+  }
+
+  if (filters.dateRange) {
+    esFilters.push({
+      range: {
+        purchaseDate: {
+          gte: filters.dateRange.from,
+          lte: filters.dateRange.to
+        }
+      }
+    });
+  }
+
+  const esQuery = {
+    size: 0,
+    query: {
+      bool: { filter: esFilters }
+    },
+    aggs: {
+      total_revenue: { sum: { field: 'amount' } },
+      by_currency: {
+        terms: { field: 'currency', size: 10 }
+      },
+      by_payment_method: {
+        terms: { field: 'paymentMethod', size: 10 }
+      },
+      by_video: {
+        terms: { field: 'videoId', size: 100 }
+      },
+      daily_revenue: {
+        date_histogram: {
+          field: 'purchaseDate',
+          calendar_interval: 'day'
+        },
+        aggs: {
+          daily_sum: { sum: { field: 'amount' } }
+        }
+      }
+    }
+  };
+
+  try {
+    const response = await ElasticsearchService.searchDocuments(ES_INDEX_NAME, esQuery);
+    
+    return {
+      totalRevenue: response.aggregations.total_revenue.value,
+      byCurrency: response.aggregations.by_currency.buckets,
+      byPaymentMethod: response.aggregations.by_payment_method.buckets,
+      byVideo: response.aggregations.by_video.buckets,
+      dailyRevenue: response.aggregations.daily_revenue.buckets
+    };
+  } catch (error) {
+    console.error('❌ Error getting revenue analytics:', error.message);
+    throw error;
+  }
+};
+
+// Bulk sync purchases to Elasticsearch
+purchaseSchema.statics.syncToElasticsearch = async function() {
+  try {
+    const purchases = await this.find().lean();
+    await ElasticsearchService.bulkIndex(ES_INDEX_NAME, purchases);
+    console.log(`✅ Synced ${purchases.length} purchases to Elasticsearch`);
+  } catch (error) {
+    console.error('❌ Error syncing purchases to ES:', error.message);
+    throw error;
+  }
+};
 
 // ===== QUERY HELPERS =====
 purchaseSchema.query.active = function() {

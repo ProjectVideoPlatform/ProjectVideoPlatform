@@ -109,6 +109,16 @@ const startServer = async () => {
   try {
     await connectDB();
     await connectES();
+    
+    // ===== INITIALIZE ELASTICSEARCH INDEXES =====
+    const Video = require('./models/Video');
+    const Purchase = require('./models/Purchase');
+    
+    console.log('🔄 Initializing Elasticsearch indexes...');
+    await Video.initializeESIndex();
+    await Purchase.initializeESIndex();
+    console.log('✅ Elasticsearch indexes initialized');
+    
     console.log('Connected to MongoDB and Elasticsearch');
     const PORT = process.env.PORT || 3000;
 
