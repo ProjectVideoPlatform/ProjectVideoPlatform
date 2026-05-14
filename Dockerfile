@@ -53,6 +53,7 @@ COPY --from=deps-prod --chown=appuser:nodejs /app/node_modules ./node_modules
 COPY --from=builder --chown=appuser:nodejs /app/package.json ./
 
 # Copy only necessary files
+COPY --from=builder --chown=appuser:nodejs /app/scripts ./scripts
 COPY --from=builder --chown=appuser:nodejs /app/grpc ./grpc
 COPY --from=builder --chown=appuser:nodejs /app/proto ./proto
 COPY --from=builder --chown=appuser:nodejs /app/server.js ./
@@ -68,6 +69,10 @@ COPY --from=builder --chown=appuser:nodejs /app/websocket.js ./websocket.js
 COPY --from=builder --chown=appuser:nodejs /app/workers ./workers
 COPY --from=builder --chown=appuser:nodejs /app/stripeWebhook.js ./stripeWebhook.js
 
+# Copy docker entrypoint script
+COPY --from=builder --chown=appuser:nodejs /app/docker-entrypoint.sh ./docker-entrypoint.sh
+RUN chmod +x /app/docker-entrypoint.sh
+
 # หรือถ้ามี dist/ จาก build
 # COPY --from=builder --chown=appuser:nodejs /app/dist ./dist
 
@@ -82,8 +87,8 @@ ENV NODE_ENV=production \
 # Expose port
 EXPOSE 3000
 
-# Use tini as init
-ENTRYPOINT ["/sbin/tini", "--"]
+# Use tini as init and run entrypoint script
+ENTRYPOINT ["/sbin/tini", "--", "/app/docker-entrypoint.sh"]
 
 # Health check
 HEALTHCHECK --interval=30s \
@@ -91,9 +96,6 @@ HEALTHCHECK --interval=30s \
             --start-period=30s \
             --retries=3 \
   CMD ["node", "healthcheck.js"]
-
-# Start app
-CMD ["node", "server.js"]
 
 # Labels
 LABEL maintainer="your-team@company.com" \

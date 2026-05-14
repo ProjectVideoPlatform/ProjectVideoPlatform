@@ -92,6 +92,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/videos', videoRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/user', UserRoute);
+app.use('/api/elasticsearch', require('./routes/elasticsearch'));
 app.use('/api/public', require('./routes/analyze'));
 
 app.get('/api/health', (req, res) => {
