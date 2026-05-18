@@ -103,31 +103,37 @@ class ElasticsearchService {
   /**
    * Bulk index documents (for initial sync)
    */
-  static async bulkIndex(indexName, documents) {
-    try {
-      const body = documents.flatMap(doc => [
-        { index: { _index: indexName, _id: doc._id.toString() } },
-        doc
-      ]);
+// ElasticsearchService.js — แก้ตรงนี้
+static async bulkIndex(indexName, documents) {
+  try {
+    const body = documents.flatMap(doc => {
+      // ✅ แยก _id ออกจาก body ก่อน spread
+      const { _id, __v, ...docBody } = doc;
+      
+      return [
+        { index: { _index: indexName, _id: _id.toString() } },
+        docBody  // ← ไม่มี _id แล้ว
+      ];
+    });
 
-      const response = await esClient.bulk({ body });
-      
-      if (response.errors) {
-        console.error(`⚠️  Some documents failed to index in ${indexName}`);
-      } else {
-        console.log(`✅ Bulk indexed ${documents.length} documents in ${indexName}`);
-      }
-      
-      return response;
-    } catch (error) {
-      console.error(`❌ Error bulk indexing in ${indexName}:`, error.message);
-      throw error;
+    const response = await esClient.bulk({ body });
+    
+    if (response.errors) {
+      const failed = response.items
+        .filter(i => i.index?.error)
+        .map(i => ({ id: i.index._id, status: i.index.status, error: i.index.error }));
+      console.error(`⚠️ Bulk errors in ${indexName}:`, JSON.stringify(failed, null, 2));
+    } else {
+      console.log(`✅ Bulk indexed ${documents.length} documents in ${indexName}`);
     }
+    
+    return response;
+  } catch (error) {
+    console.error(`❌ Error bulk indexing in ${indexName}:`, error.message);
+    throw error;
   }
-
-  /**
-   * Get document by ID
-   */
+}
+  
   static async getDocument(indexName, documentId) {
     try {
       const response = await esClient.get({
@@ -174,5 +180,4 @@ class ElasticsearchService {
     }
   }
 }
-
 module.exports = ElasticsearchService;

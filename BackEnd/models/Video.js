@@ -3,15 +3,36 @@ const ElasticsearchService = require('../services/ElasticsearchService');
 
 const ES_INDEX_NAME = 'videos';
 
-// Elasticsearch mapping for videos index
 const ES_MAPPING = {
   settings: {
     number_of_shards: 1,
     number_of_replicas: 1,
     analysis: {
       analyzer: {
+        // ✅ แก้: standard → custom + thai tokenizer
         thai_analyzer: {
-          type: 'standard' // ใช้ Thai tokenizer ถ้า plugin installed
+          type: 'custom',
+          tokenizer: 'thai',
+          filter: ['lowercase', 'thai_stop']
+        },
+        // ✅ เพิ่ม: สำหรับ autocomplete ภาษาไทย
+        thai_autocomplete_analyzer: {
+          type: 'custom',
+          tokenizer: 'thai',
+          filter: ['lowercase', 'thai_stop', 'autocomplete_filter']
+        }
+      },
+      filter: {
+        // ✅ เพิ่ม: ตัด stopword ภาษาไทย เช่น "และ", "หรือ", "ที่"
+        thai_stop: {
+          type: 'stop',
+          stopwords: '_thai_'
+        },
+        // ✅ เพิ่ม: edge_ngram สำหรับ autocomplete
+        autocomplete_filter: {
+          type: 'edge_ngram',
+          min_gram: 1,
+          max_gram: 20
         }
       }
     }
@@ -20,45 +41,33 @@ const ES_MAPPING = {
     properties: {
       title: {
         type: 'text',
+        analyzer: 'thai_autocomplete_analyzer',  // ✅ แก้: ใช้ thai + autocomplete
+        search_analyzer: 'thai_analyzer',         // ✅ เพิ่ม: search ด้วย thai ปกติ
         fields: {
           keyword: { type: 'keyword' },
-          thai: { type: 'text', analyzer: 'thai_analyzer' }
+          // ✅ เพิ่ม: search_as_you_type สำหรับ autocomplete
+          autocomplete: { type: 'search_as_you_type' },
+          english: { type: 'text', analyzer: 'english' }
         }
       },
       description: {
         type: 'text',
-        analyzer: 'thai_analyzer'
+        analyzer: 'thai_analyzer',
+        fields: {
+          english: { type: 'text', analyzer: 'english' }
+        }
       },
-      tags: {
-        type: 'keyword'
-      },
-      accessType: {
-        type: 'keyword'
-      },
-      price: {
-        type: 'float'
-      },
-      duration: {
-        type: 'integer'
-      },
-      fileSize: {
-        type: 'long'
-      },
-      uploadStatus: {
-        type: 'keyword'
-      },
-      isActive: {
-        type: 'boolean'
-      },
-      createdAt: {
-        type: 'date'
-      },
-      updatedAt: {
-        type: 'date'
-      },
-      thumbnailPath: {
-        type: 'keyword'
-      }
+      // ── ส่วนที่เหมือนเดิม (ถูกอยู่แล้ว) ──────────────────
+      tags: { type: 'keyword' },
+      accessType: { type: 'keyword' },
+      price: { type: 'float' },
+      duration: { type: 'integer' },
+      fileSize: { type: 'long' },
+      uploadStatus: { type: 'keyword' },
+      isActive: { type: 'boolean' },
+      createdAt: { type: 'date' },
+      updatedAt: { type: 'date' },
+      thumbnailPath: { type: 'keyword', index: false }
     }
   }
 };
@@ -85,10 +94,10 @@ const videoSchema = new mongoose.Schema({
     default: 'uploading'
   },
   mediaConvertJobId: String,
-  hlsManifestPath: String, // path ใน S3 ของ master.m3u8
+  hlsManifestPath: String,
   thumbnailPath: String,
-  duration: Number, // duration in seconds
-  fileSize: Number, // file size in bytes
+  duration: Number,
+  fileSize: Number,
   price: { 
     type: Number, 
     default: 0,
@@ -98,7 +107,7 @@ const videoSchema = new mongoose.Schema({
     type: String,
     enum: ['free', 'paid', 'subscription_only'],
     default: 'free',
-    index: true // ทำ Index ไว้เพราะต้องใช้ Filter บ่อย
+    index: true
   },
   tags: [String],
   isActive: {
@@ -122,7 +131,7 @@ videoSchema.pre('save', function(next) {
 });
 
 // ===== ELASTICSEARCH HOOKS =====
-// Index to Elasticsearch after save
+
 videoSchema.post('save', async function(doc) {
   try {
     await ElasticsearchService.indexDocument(
@@ -145,11 +154,9 @@ videoSchema.post('save', async function(doc) {
     );
   } catch (error) {
     console.error('❌ Error indexing video to ES:', error.message);
-    // Don't throw - prevent blocking MongoDB save
   }
 });
 
-// Update in Elasticsearch after findOneAndUpdate
 videoSchema.post('findOneAndUpdate', async function() {
   try {
     const doc = this.getUpdate();
@@ -177,7 +184,6 @@ videoSchema.post('findOneAndUpdate', async function() {
   }
 });
 
-// Delete from Elasticsearch before deleteOne
 videoSchema.pre('deleteOne', async function() {
   try {
     const doc = this.getFilter();
@@ -193,6 +199,7 @@ videoSchema.pre('deleteOne', async function() {
 });
 
 // ===== STATIC METHODS =====
+
 videoSchema.statics.initializeESIndex = async function() {
   try {
     await ElasticsearchService.createIndex(ES_INDEX_NAME, ES_MAPPING);
@@ -201,12 +208,12 @@ videoSchema.statics.initializeESIndex = async function() {
   }
 };
 
-// Search videos with Elasticsearch
+// ✅ แก้: เพิ่ม fuzziness + highlight + ครอบคลุมทุก filter
 videoSchema.statics.searchVideos = async function(query, options = {}) {
   const {
     page = 1,
     limit = 20,
-    sortBy = '_score',
+    sortBy = 'createdAt',
     order = 'desc'
   } = options;
 
@@ -214,63 +221,63 @@ videoSchema.statics.searchVideos = async function(query, options = {}) {
   const must = [];
   const filter = [];
 
-  // Text search
+  // ✅ แก้: เพิ่ม fuzziness + boost ต่างกันแต่ละ field
   if (query.search) {
     must.push({
       multi_match: {
         query: query.search,
-        fields: ['title^2', 'description', 'tags']
+        fields: ['title^4', 'title.english^3', 'description^2', 'tags^2'],
+        fuzziness: 'AUTO',      // ✅ typo tolerance
+        prefix_length: 1,       // ตัวแรกต้องถูก
+        operator: 'or'
       }
     });
   }
 
-  // Filters
-  if (query.accessType) {
-    filter.push({ term: { accessType: query.accessType } });
-  }
-  
-  if (query.isActive !== undefined) {
-    filter.push({ term: { isActive: query.isActive } });
-  }
-
-  if (query.uploadStatus) {
-    filter.push({ term: { uploadStatus: query.uploadStatus } });
-  }
-
+  if (query.accessType) filter.push({ term: { accessType: query.accessType } });
+  if (query.uploadStatus) filter.push({ term: { uploadStatus: query.uploadStatus } });
+  if (query.isActive !== undefined) filter.push({ term: { isActive: query.isActive } });
+  if (query.tags?.length > 0) filter.push({ terms: { tags: query.tags } });
   if (query.priceRange) {
-    filter.push({
-      range: {
-        price: {
-          gte: query.priceRange.min,
-          lte: query.priceRange.max
-        }
-      }
-    });
+    filter.push({ range: { price: { gte: query.priceRange.min, lte: query.priceRange.max } } });
   }
 
-  if (query.tags && query.tags.length > 0) {
-    filter.push({ terms: { tags: query.tags } });
-  }
+  // ✅ แก้: ถ้ามี search ให้ sort ด้วย _score ก่อน
+  const sort = query.search
+    ? [{ _score: 'desc' }, { [sortBy]: order }]
+    : [{ [sortBy]: order }];
 
   const esQuery = {
     size: limit,
     from,
-    sort: [{ [sortBy]: order }],
+    sort,
     query: {
       bool: {
         must: must.length > 0 ? must : [{ match_all: {} }],
         filter: filter.length > 0 ? filter : undefined
       }
-    }
+    },
+    // ✅ เพิ่ม: highlight คำที่ตรง
+    ...(query.search && {
+      highlight: {
+        fields: {
+          title: { number_of_fragments: 0 },
+          description: { number_of_fragments: 2 }
+        },
+        pre_tags: ['<mark>'],
+        post_tags: ['</mark>']
+      }
+    })
   };
 
   try {
     const response = await ElasticsearchService.searchDocuments(ES_INDEX_NAME, esQuery);
-    
     return {
       data: response.hits.hits.map(hit => ({
         _id: hit._id,
-        ...hit._source
+        ...hit._source,
+        score: hit._score,
+        highlight: hit.highlight || null
       })),
       total: response.hits.total.value,
       page,
@@ -279,12 +286,55 @@ videoSchema.statics.searchVideos = async function(query, options = {}) {
     };
   } catch (error) {
     console.error('❌ Error searching videos:', error.message);
-    // Fallback to MongoDB query
-    return this.find(query).limit(limit).skip(from).lean();
+    // Fallback to MongoDB
+    return this.find({ uploadStatus: 'completed', isActive: true })
+      .limit(limit).skip(from).lean();
   }
 };
 
-// Bulk sync videos to Elasticsearch
+// ✅ แก้: ใช้ match_phrase_prefix + search_as_you_type แทน match ธรรมดา
+videoSchema.statics.searchAutocomplete = async function(prefix, limit = 8) {
+  try {
+    const esQuery = {
+      size: limit,
+      query: {
+        bool: {
+          must: [
+            {
+              multi_match: {
+                query: prefix,
+                fields: [
+                  'title.autocomplete',
+                  'title.autocomplete._2gram',
+                  'title.autocomplete._3gram'
+                ],
+                type: 'bool_prefix'   // ✅ เหมาะกับ search_as_you_type
+              }
+            }
+          ],
+          filter: [
+            { term: { uploadStatus: 'completed' } },
+            { term: { isActive: true } }
+          ]
+        }
+      },
+      _source: ['title', 'tags', 'accessType', 'thumbnailPath']
+    };
+
+    const response = await ElasticsearchService.searchDocuments(ES_INDEX_NAME, esQuery);
+    return response.hits.hits.map(hit => ({
+      id: hit._id,
+      title: hit._source.title,
+      tags: hit._source.tags,
+      accessType: hit._source.accessType,
+      thumbnailPath: hit._source.thumbnailPath
+    }));
+  } catch (error) {
+    console.error('❌ Autocomplete error:', error.message);
+    return [];
+  }
+};
+
 videoSchema.statics.syncToElasticsearch = async function() {
   try {
     const videos = await this.find({ uploadStatus: 'completed' }).lean();
@@ -296,7 +346,6 @@ videoSchema.statics.syncToElasticsearch = async function() {
   }
 };
 
-// Index for better query performance
 videoSchema.index({ uploadStatus: 1, isActive: 1 });
 videoSchema.index({ createdAt: -1 });
 

@@ -11,17 +11,6 @@ const router = express.Router();
 /**
  * Search Videos with Elasticsearch
  * GET /api/elasticsearch/videos/search
- * 
- * Query params:
- *   - q: search term
- *   - accessType: free|paid|subscription_only
- *   - tags: comma-separated tags
- *   - priceMin: minimum price
- *   - priceMax: maximum price
- *   - page: page number (default 1)
- *   - limit: results per page (default 20)
- *   - sort: createdAt|price|_score
- *   - order: asc|desc
  */
 router.get('/videos/search', async (req, res) => {
   try {
@@ -38,11 +27,11 @@ router.get('/videos/search', async (req, res) => {
     } = req.query;
 
     const query = {};
-    
+
     if (q) query.search = q;
     if (accessType) query.accessType = accessType;
     if (tags) query.tags = tags.split(',').map(t => t.trim());
-    
+
     if (priceMin !== undefined || priceMax !== undefined) {
       query.priceRange = {
         min: priceMin ? parseFloat(priceMin) : 0,
@@ -69,16 +58,16 @@ router.get('/videos/search', async (req, res) => {
     });
   } catch (error) {
     console.error('❌ Error searching videos:', error);
-    res.status(500).json({ 
-      success: false, 
-      error: error.message 
-    });
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
 /**
  * Search Purchases (Admin only)
  * GET /api/elasticsearch/purchases/search
+ *
+ * ✅ Populate videoId (title, price) และ userId (email) หลัง ES query
+ *    เพราะ ES เก็บแค่ raw ObjectId ไม่มี join
  */
 router.get('/purchases/search', authenticateToken, requireAdmin, async (req, res) => {
   try {
@@ -99,20 +88,20 @@ router.get('/purchases/search', authenticateToken, requireAdmin, async (req, res
     } = req.query;
 
     const filters = {};
-    
-    if (userId) filters.userId = userId;
-    if (videoId) filters.videoId = videoId;
-    if (status) filters.status = status.split(',');
+
+    if (userId)        filters.userId        = userId;
+    if (videoId)       filters.videoId       = videoId;
+    if (status)        filters.status        = status.split(',');
     if (paymentMethod) filters.paymentMethod = paymentMethod;
-    if (currency) filters.currency = currency;
-    
+    if (currency)      filters.currency      = currency;
+
     if (dateFrom || dateTo) {
       filters.dateRange = {
         from: dateFrom || '2000-01-01',
-        to: dateTo || new Date().toISOString()
+        to:   dateTo   || new Date().toISOString()
       };
     }
-    
+
     if (amountMin !== undefined || amountMax !== undefined) {
       filters.amountRange = {
         min: amountMin ? parseFloat(amountMin) : 0,
@@ -121,28 +110,56 @@ router.get('/purchases/search', authenticateToken, requireAdmin, async (req, res
     }
 
     const results = await Purchase.searchPurchases(filters, {
-      page: parseInt(page),
-      limit: parseInt(limit),
+      page:   parseInt(page),
+      limit:  parseInt(limit),
       sortBy: sort,
       order
     });
 
+    // ✅ Populate videoId + userId จาก MongoDB หลัง ES ตอบ
+    // ES คืน plain objects → ต้อง re-fetch ด้วย _id array แล้ว map กลับ
+    let populated = results.data;
+
+    try {
+      const ids = results.data.map(p => p._id).filter(Boolean);
+
+      if (ids.length > 0) {
+        const docs = await Purchase.find({ _id: { $in: ids } })
+          .populate('videoId', 'title price accessType')
+          .populate('userId',  'email')
+          .lean();
+
+        // map _id → populated doc เพื่อ merge กลับ (รักษา ES order)
+        const docMap = Object.fromEntries(docs.map(d => [d._id.toString(), d]));
+
+        populated = results.data.map(p => {
+          const doc = docMap[p._id?.toString()];
+          if (!doc) return p;
+          return {
+            ...p,
+            videoId: doc.videoId || p.videoId,   // { _id, title, price, accessType }
+            userId:  doc.userId  || p.userId,     // { _id, email }
+          };
+        });
+      }
+    } catch (populateErr) {
+      // populate ล้มเหลว → คืนข้อมูล ES ดิบ ไม่ crash
+      console.warn('⚠️  Populate failed, returning raw ES data:', populateErr.message);
+    }
+
     res.json({
       success: true,
-      data: results.data,
+      data: populated,
       pagination: {
         total: results.total,
-        page: results.page,
+        page:  results.page,
         limit: results.limit,
         pages: results.pages
       }
     });
   } catch (error) {
     console.error('❌ Error searching purchases:', error);
-    res.status(500).json({ 
-      success: false, 
-      error: error.message 
-    });
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
@@ -154,18 +171,14 @@ router.get('/purchases/search', authenticateToken, requireAdmin, async (req, res
  */
 router.get('/analytics/revenue', authenticateToken, requireAdmin, async (req, res) => {
   try {
-    const {
-      status = 'completed',
-      dateFrom,
-      dateTo
-    } = req.query;
+    const { status = 'completed', dateFrom, dateTo } = req.query;
 
     const filters = { status };
-    
+
     if (dateFrom || dateTo) {
       filters.dateRange = {
         from: dateFrom || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(),
-        to: dateTo || new Date().toISOString()
+        to:   dateTo   || new Date().toISOString()
       };
     }
 
@@ -176,12 +189,12 @@ router.get('/analytics/revenue', authenticateToken, requireAdmin, async (req, re
       data: {
         summary: {
           totalRevenue: analytics.totalRevenue,
-          currency: 'THB' // default
+          currency: 'THB'
         },
         breakdown: {
-          byCurrency: analytics.byCurrency,
+          byCurrency:      analytics.byCurrency,
           byPaymentMethod: analytics.byPaymentMethod,
-          byVideo: analytics.byVideo
+          byVideo:         analytics.byVideo
         },
         trends: {
           dailyRevenue: analytics.dailyRevenue
@@ -190,10 +203,7 @@ router.get('/analytics/revenue', authenticateToken, requireAdmin, async (req, re
     });
   } catch (error) {
     console.error('❌ Error getting revenue analytics:', error);
-    res.status(500).json({ 
-      success: false, 
-      error: error.message 
-    });
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
@@ -217,19 +227,16 @@ router.get('/stats/:indexName', authenticateToken, requireAdmin, async (req, res
     res.json({
       success: true,
       data: {
-        index: indexName,
-        documents: stats.primaries.docs.count,
-        deleted: stats.primaries.docs.deleted,
+        index:       indexName,
+        documents:   stats.primaries.docs.count,
+        deleted:     stats.primaries.docs.deleted,
         sizeInBytes: stats.primaries.store.size_in_bytes,
-        sizeInMB: (stats.primaries.store.size_in_bytes / 1024 / 1024).toFixed(2)
+        sizeInMB:    (stats.primaries.store.size_in_bytes / 1024 / 1024).toFixed(2)
       }
     });
   } catch (error) {
     console.error('❌ Error getting index stats:', error);
-    res.status(500).json({ 
-      success: false, 
-      error: error.message 
-    });
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
@@ -240,32 +247,19 @@ router.get('/stats/:indexName', authenticateToken, requireAdmin, async (req, res
 router.post('/admin/recreate', authenticateToken, requireAdmin, async (req, res) => {
   try {
     const { models = ['videos', 'purchases'] } = req.body;
-
     const results = {};
 
     for (const model of models) {
       try {
         if (model === 'videos') {
-          // Delete old index
           await ElasticsearchService.deleteIndex('videos');
-          
-          // Create new index
           await Video.initializeESIndex();
-          
-          // Sync data
           await Video.syncToElasticsearch();
-          
           results.videos = { status: 'success', message: 'Videos index recreated' };
         } else if (model === 'purchases') {
-          // Delete old index
           await ElasticsearchService.deleteIndex('purchases');
-          
-          // Create new index
           await Purchase.initializeESIndex();
-          
-          // Sync data
           await Purchase.syncToElasticsearch();
-          
           results.purchases = { status: 'success', message: 'Purchases index recreated' };
         }
       } catch (error) {
@@ -273,16 +267,10 @@ router.post('/admin/recreate', authenticateToken, requireAdmin, async (req, res)
       }
     }
 
-    res.json({
-      success: true,
-      data: results
-    });
+    res.json({ success: true, data: results });
   } catch (error) {
     console.error('❌ Error recreating indexes:', error);
-    res.status(500).json({ 
-      success: false, 
-      error: error.message 
-    });
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
@@ -293,7 +281,6 @@ router.post('/admin/recreate', authenticateToken, requireAdmin, async (req, res)
 router.post('/admin/sync', authenticateToken, requireAdmin, async (req, res) => {
   try {
     const { models = ['videos', 'purchases'] } = req.body;
-
     const results = {};
 
     for (const model of models) {
@@ -312,16 +299,10 @@ router.post('/admin/sync', authenticateToken, requireAdmin, async (req, res) => 
       }
     }
 
-    res.json({
-      success: true,
-      data: results
-    });
+    res.json({ success: true, data: results });
   } catch (error) {
     console.error('❌ Error syncing data:', error);
-    res.status(500).json({ 
-      success: false, 
-      error: error.message 
-    });
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
@@ -342,16 +323,10 @@ router.delete('/admin/index/:indexName', authenticateToken, requireAdmin, async 
 
     await ElasticsearchService.deleteIndex(indexName);
 
-    res.json({
-      success: true,
-      message: `Index '${indexName}' deleted successfully`
-    });
+    res.json({ success: true, message: `Index '${indexName}' deleted successfully` });
   } catch (error) {
     console.error('❌ Error deleting index:', error);
-    res.status(500).json({ 
-      success: false, 
-      error: error.message 
-    });
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 

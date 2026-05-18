@@ -14,7 +14,7 @@ import ForYouPage from './components/ForYou';
 import UserProfile from './components/UserProfile.jsx';
 import { NotifProvider } from './NotifContext';
 import GlobalNotification from './components/GlobalNotification';
-
+import Elasticsearch from './components/Elasticsearch.jsx';
 const Fallback = () => <div>กำลังโหลด...</div>;
 
 const wrap = (Component) => (
@@ -40,6 +40,7 @@ function App() {
             <Route path="/UserProfile" element={<ProtectedRoute>{wrap(UserProfile)}</ProtectedRoute>} />
             <Route path="/foryou"      element={<ProtectedRoute>{wrap(ForYouPage)}</ProtectedRoute>} />
             <Route path="/videoDetails/:id" element={<ProtectedRoute>{wrap(VideoDetails)}</ProtectedRoute>} />
+            <Route path="/elasticsearch" element={<ProtectedRoute>{wrap(Elasticsearch)}</ProtectedRoute>} />
           </Routes>
         </NotifProvider>
       </AuthProvider>
