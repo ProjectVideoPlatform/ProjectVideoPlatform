@@ -1,61 +1,44 @@
   const { S3Client } = require('@aws-sdk/client-s3');
   const { MediaConvertClient } = require('@aws-sdk/client-mediaconvert');
-  const vaultService = require('./vault');
+  const path = require('path');
+    require('dotenv').config({ path: path.resolve(__dirname, '../.env') });
+  // AWS Configuration
+  const config = {
+    region:  'ap-southeast-1',
+    credentials: {
+      accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+      secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+    },
+    
+    // S3 Buckets
+    uploadsBucket: process.env.UPLOADS_BUCKET || 'your-uploads-bucket',
+    hlsOutputBucket: process.env.HLS_OUTPUT_BUCKET || 'your-hls-output-bucket',
+    
+    // MediaConvert
+    mediaConvertEndpoint: process.env.MEDIACONVERT_ENDPOINT,
+    mediaConvertRole: process.env.MEDIACONVERT_ROLE,
+    mediaConvertQueueArn: process.env.MEDIACONVERT_QUEUE_ARN,
+    // CloudFront
+    cloudFrontDomain: process.env.CLOUDFRONT_DOMAIN,
+    cloudFrontKeyPairId: process.env.CLOUDFRONT_KEY_PAIR_ID,
+    cloudFrontPrivateKeyPath: process.env.CLOUDFRONT_PRIVATE_KEY_PATH || '../keys/cloudfront-private-key.pem',
+    cloudFrontPrivateKey: process.env.CLOUDFRONT_PRIVATE_KEY
+  };
 
-  let s3 = null;
-  let mediaConvert = null;
-  let config = null;
-
-  async function initAWS() {
-    if (s3 && mediaConvert) {
-      return { config, s3, mediaConvert };
-    }
-
-    try {
-      // ✅ Initialize Vault and get AWS config
-      await vaultService.initialize();
-      const awsConfig = vaultService.getAWSConfig();
-
-      console.log('☁️  Initializing AWS services...');
-
-      // Update config object
-      config = {
-        region: awsConfig.region || 'ap-southeast-1',
-        credentials: awsConfig.credentials,
-        uploadsBucket: awsConfig.uploadsBucket,
-        hlsOutputBucket: awsConfig.hlsOutputBucket,
-        mediaConvert: awsConfig.mediaConvert,
-        cloudFront: {
-          domain: vaultService.get('CLOUDFRONT_DOMAIN'),
-          keyPairId: vaultService.get('CLOUDFRONT_KEY_PAIR_ID'),
-          privateKeyPath: vaultService.get('CLOUDFRONT_PRIVATE_KEY_PATH')
-        }
-      };
-
-      // Create AWS service instances (SDK v3)
-      s3 = new S3Client({
-        region: config.region,
-        credentials: config.credentials
-      });
-      
-      mediaConvert = new MediaConvertClient({
-        region: 'us-east-1',
-        credentials: config.credentials,
-        endpoint: config.mediaConvert.endpoint
-      });
-
-      console.log('✅ AWS services initialized');
-
-      return { config, s3, mediaConvert };
-    } catch (error) {
-      console.error('❌ Failed to initialize AWS:', error.message);
-      throw error;
-    }
-  }
+  // Create AWS service instances (SDK v3)
+  const s3 = new S3Client({
+    region: config.region,
+    credentials: config.credentials
+  });
+  
+  const mediaConvert = new MediaConvertClient({
+    region: 'us-east-1',
+    credentials: config.credentials,
+    endpoint: config.mediaConvertEndpoint
+  });
 
   module.exports = {
-    initAWS,
-    get config() { return config; },
-    get s3() { return s3; },
-    get mediaConvert() { return mediaConvert; }
+    config,
+    s3,
+    mediaConvert
   };

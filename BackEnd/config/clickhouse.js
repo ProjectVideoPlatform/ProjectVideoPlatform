@@ -1,47 +1,13 @@
-// config/clickhouse.js - ✅ Using Vault for secrets
+// config/clickhouse.js  ← สร้างไฟล์นี้ก่อน
 'use strict';
 
 const { createClient } = require('@clickhouse/client');
-const vaultService = require('./vault');
 
-let clickhouseClient = null;
+const clickhouse = createClient({
+  url:      process.env.CLICKHOUSE_URL      || 'http://clickhouse:8123',
+  username: process.env.CLICKHOUSE_USER     || 'app_user',
+  password: process.env.CLICKHOUSE_PASSWORD || 'strong_password',
+  database: process.env.CLICKHOUSE_DB       || 'app_db',
+});
 
-async function initClickhouse() {
-  if (clickhouseClient) {
-    return clickhouseClient;
-  }
-
-  try {
-    // ✅ Initialize Vault first
-    await vaultService.initialize();
-
-    // ✅ Get ClickHouse config from Vault
-    const config = vaultService.getClickHouseConfig();
-
-    console.log('📊 Connecting to ClickHouse...');
-    clickhouseClient = createClient({
-      url: config.url,
-      username: config.username,
-      password: config.password,
-      database: config.database,
-    });
-
-    // Test connection
-    const result = await clickhouseClient.query({
-      query: 'SELECT version()',
-    });
-
-    console.log('✅ ClickHouse connected successfully');
-    console.log('   Version:', result.data);
-
-    return clickhouseClient;
-  } catch (error) {
-    console.error('❌ ClickHouse connection failed:', error.message);
-    throw error;
-  }
-}
-
-module.exports = { 
-  clickhouse: clickhouseClient,
-  initClickhouse 
-};
+module.exports = { clickhouse };

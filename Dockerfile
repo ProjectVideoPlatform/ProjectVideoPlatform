@@ -80,10 +80,11 @@ RUN chmod +x /app/docker-entrypoint.sh
 USER appuser
 
 # Environment
-# ✅ Optimized for production
+# 🛠️ สิ่งที่เพิ่ม: เปิดตัวเลือกให้ Node.js บันทึกข้อมูลแผนที่โค้ด (JIT Symbols)
+# ตัวนี้ช่วยให้ Elastic Agent เข้าใจโค้ด JavaScript ที่ถูกคอมไพล์ใน RAM ได้ด้วย
 ENV NODE_ENV=production \
     PORT=3000 \
-    NODE_OPTIONS="--max-old-space-size=512"
+    NODE_OPTIONS="--max-old-space-size=512 --perf-prof"
 
 # Expose port
 EXPOSE 3000
