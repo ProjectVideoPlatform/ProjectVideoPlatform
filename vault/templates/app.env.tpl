@@ -31,12 +31,14 @@ COLLECTION_PORT=443
 
 # ── Secrets from Vault ─────────────────────────────────────
 
-{{ with secret "secret/data/database/mongodb" }}
-MONGO_URI={{ .Data.data.MONGO_URI }}
-MONGO_REPLICA_SET={{ .Data.data.MONGO_REPLICA_SET }}
-MONGO_DB={{ .Data.data.MONGO_DB }}
+{{ with secret "database/creds/backend-role" }}
+MONGO_USERNAME={{ .Data.username }}
+MONGO_PASSWORD={{ .Data.password }}
 {{ end }}
 
+MONGO_URI=mongodb://{{ with secret "database/creds/backend-role" }}{{ .Data.username }}:{{ .Data.password }}{{ end }}@mongodb1:27017,mongodb2:27017,mongodb3:27017/secure-video?replicaSet=rs0
+MONGO_DB=secure-video
+MONGO_REPLICA_SET=rs0
 {{ with secret "secret/data/redis/main" }}
 REDIS_URL={{ .Data.data.REDIS_URL }}
 REDIS_HOST={{ .Data.data.REDIS_HOST }}

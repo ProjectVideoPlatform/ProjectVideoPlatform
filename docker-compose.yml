@@ -30,14 +30,30 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+  mongo-keyfile-init:
+    image: mongo:7.0
+    container_name: mongo-keyfile-init
+    restart: "no"
+    volumes:
+      - ./BackEnd/mongo-keyfile:/source/keyfile:ro
+      - mongo-keyfile-vol:/etc/mongo
+    command: >
+      bash -c "
+        cp /source/keyfile /etc/mongo/keyfile &&
+        chown 999:999 /etc/mongo/keyfile &&
+        chmod 400 /etc/mongo/keyfile &&
+        echo 'keyfile permission fixed'
+      "
 
   mongodb1:
     image: mongo:7.0
     container_name: secure-video-mongodb1
     restart: unless-stopped
     oom_score_adj: -500
-    command: ["--replSet", "rs0", "--bind_ip_all"]
+    command: ["--replSet", "rs0", "--bind_ip_all", "--auth", "--keyFile", "/etc/mongo/keyfile"]
     environment:
+      MONGO_INITDB_ROOT_USERNAME: admin
+      MONGO_INITDB_ROOT_PASSWORD: adminpassword
       MONGO_INITDB_DATABASE: secure-video
     deploy:
       resources:
@@ -52,20 +68,25 @@ services:
     volumes:
       - mongodb_data:/data/db
       - ./BackEnd/mongo-init:/docker-entrypoint-initdb.d
+      - mongo-keyfile-vol:/etc/mongo:ro
     networks:
       - secure-video-network
+    depends_on:
+      mongo-keyfile-init:
+        condition: service_completed_successfully
     healthcheck:
-      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      test: ["CMD", "mongosh", "-u", "admin", "-p", "adminpassword", "--authenticationDatabase", "admin", "--eval", "db.adminCommand('ping')"]
       interval: 30s
       timeout: 10s
-      retries: 3
+      retries: 5
+      start_period: 30s
 
   mongodb2:
     image: mongo:7.0
     container_name: secure-video-mongodb2
     restart: unless-stopped
     oom_score_adj: -400
-    command: ["--replSet", "rs0", "--bind_ip_all"]
+    command: ["--replSet", "rs0", "--bind_ip_all", "--auth", "--keyFile", "/etc/mongo/keyfile"]
     deploy:
       resources:
         reservations:
@@ -76,6 +97,10 @@ services:
       - "27018:27017"
     volumes:
       - mongodb2_data:/data/db
+      - mongo-keyfile-vol:/etc/mongo:ro
+    depends_on:
+      mongo-keyfile-init:
+        condition: service_completed_successfully
     networks:
       - secure-video-network
 
@@ -84,7 +109,7 @@ services:
     container_name: secure-video-mongodb3
     restart: unless-stopped
     oom_score_adj: -400
-    command: ["--replSet", "rs0", "--bind_ip_all"]
+    command: ["--replSet", "rs0", "--bind_ip_all", "--auth", "--keyFile", "/etc/mongo/keyfile"]
     deploy:
       resources:
         reservations:
@@ -95,6 +120,10 @@ services:
       - "27019:27017"
     volumes:
       - mongodb3_data:/data/db
+      - mongo-keyfile-vol:/etc/mongo:ro
+    depends_on:
+      mongo-keyfile-init:
+        condition: service_completed_successfully
     networks:
       - secure-video-network
 
@@ -111,10 +140,10 @@ services:
     restart: "no"
     entrypoint: >
       bash -c "
-      echo 'Waiting for MongoDB instances to be ready...' &&
+      echo 'Waiting for MongoDB instances...' &&
       sleep 10 &&
       echo 'Initializing replica set...' &&
-      mongosh --host mongodb1:27017 --eval '
+      mongosh --host mongodb1:27017 -u admin -p adminpassword --authenticationDatabase admin --eval '
         rs.initiate({
           _id: \"rs0\",
           members: [
@@ -128,6 +157,7 @@ services:
       "
     networks:
       - secure-video-network
+
 
   redis:
     image: redis:7.2-alpine
@@ -270,18 +300,9 @@ services:
     restart: unless-stopped
     expose:
       - "3000"
-    labels:
-      - "co.elastic.profiling/service-name=node-backend"
-    env_file:
-      - ./BackEnd/.env
+    # labels:
+    #   - "co.elastic.profiling/service-name=node-backend"
     environment:
-      - NODE_ENV=production
-      - PORT=3000
-      - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672
-      - KAFKA_BROKERS=kafka:9092
-      - REDIS_HOST=redis
-      - REDIS_PORT=6379
-      - REDIS_PASSWORD=redispassword123
       - ELASTIC_APM_SERVICE_NAME=node-backend
     deploy:
       resources:
@@ -293,6 +314,7 @@ services:
       - ./BackEnd/keys:/app/keys:ro
       - ./BackEnd/vault/certs:/app/vault-certs:ro
       - ./logs:/app/logs
+      - vault-agent-secretsja:/vault/secrets:ro    # << เพิ่ม
     networks:
       - secure-video-network
     depends_on:
@@ -886,3 +908,5 @@ volumes:
   ml-model-cache:
   flink-checkpoints:
   flink-savepoints:
+  mongo-keyfile-vol:
+  vault-agent-secretsja:
