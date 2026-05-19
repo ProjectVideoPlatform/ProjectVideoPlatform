@@ -31,59 +31,68 @@ COLLECTION_PORT=443
 
 # ── Secrets from Vault ─────────────────────────────────────
 
+# 💾 MongoDB Dynamic Credentials
 {{ with secret "database/creds/backend-role" }}
-MONGO_USERNAME={{ .Data.username }}
-MONGO_PASSWORD={{ .Data.password }}
+MONGO_USERNAME="{{ .Data.username }}"
+MONGO_PASSWORD="{{ .Data.password }}"
+MONGO_URI="mongodb://{{ .Data.username }}:{{ .Data.password }}@mongodb1:27017,mongodb2:27017,mongodb3:27017/secure-video?replicaSet=rs0"
 {{ end }}
-
-MONGO_URI=mongodb://{{ with secret "database/creds/backend-role" }}{{ .Data.username }}:{{ .Data.password }}{{ end }}@mongodb1:27017,mongodb2:27017,mongodb3:27017/secure-video?replicaSet=rs0
 MONGO_DB=secure-video
 MONGO_REPLICA_SET=rs0
+
+# 🔴 Redis Secrets
 {{ with secret "secret/data/redis/main" }}
-REDIS_URL={{ .Data.data.REDIS_URL }}
-REDIS_HOST={{ .Data.data.REDIS_HOST }}
-REDIS_PORT={{ .Data.data.REDIS_PORT }}
-REDIS_PASSWORD={{ .Data.data.REDIS_PASSWORD }}
+REDIS_URL="{{ .Data.data.REDIS_URL }}"
+REDIS_HOST="{{ .Data.data.REDIS_HOST }}"
+REDIS_PORT="{{ .Data.data.REDIS_PORT }}"
+REDIS_PASSWORD="{{ .Data.data.REDIS_PASSWORD }}"
 {{ end }}
 
+# ☁️ AWS Secrets
 {{ with secret "secret/data/aws/main" }}
-AWS_ACCESS_KEY_ID={{ .Data.data.AWS_ACCESS_KEY_ID }}
-AWS_SECRET_ACCESS_KEY={{ .Data.data.AWS_SECRET_ACCESS_KEY }}
-AWS_REGION={{ .Data.data.AWS_REGION }}
-MEDIACONVERT_ROLE={{ .Data.data.MEDIACONVERT_ROLE }}
-MEDIACONVERT_QUEUE_ARN={{ .Data.data.MEDIACONVERT_QUEUE_ARN }}
+AWS_ACCESS_KEY_ID="{{ .Data.data.AWS_ACCESS_KEY_ID }}"
+AWS_SECRET_ACCESS_KEY="{{ .Data.data.AWS_SECRET_ACCESS_KEY }}"
+AWS_REGION="{{ .Data.data.AWS_REGION }}"
+MEDIACONVERT_ROLE="{{ .Data.data.MEDIACONVERT_ROLE }}"
+MEDIACONVERT_QUEUE_ARN="{{ .Data.data.MEDIACONVERT_QUEUE_ARN }}"
 {{ end }}
 
+# 🔑 JWT Secrets
 {{ with secret "secret/data/jwt/main" }}
-JWT_SECRET={{ .Data.data.JWT_SECRET }}
-JWT_REFRESH_SECRET={{ .Data.data.JWT_REFRESH_SECRET }}
+JWT_SECRET="{{ .Data.data.JWT_SECRET }}"
+JWT_REFRESH_SECRET="{{ .Data.data.JWT_REFRESH_SECRET }}"
 {{ end }}
 
+# 💳 Stripe Secrets
 {{ with secret "secret/data/stripe/production" }}
-STRIPE_SECRET_KEY={{ .Data.data.STRIPE_SECRET_KEY }}
-STRIPE_WEBHOOK_SECRET={{ .Data.data.STRIPE_WEBHOOK_SECRET }}
+STRIPE_SECRET_KEY="{{ .Data.data.STRIPE_SECRET_KEY }}"
+STRIPE_WEBHOOK_SECRET="{{ .Data.data.STRIPE_WEBHOOK_SECRET }}"
 {{ end }}
 
+# 🌐 CloudFront Keys
 {{ with secret "secret/data/cloudfront/keys" }}
-CLOUDFRONT_PRIVATE_KEY={{ .Data.data.CLOUDFRONT_PRIVATE_KEY }}
+CLOUDFRONT_PRIVATE_KEY="{{ .Data.data.CLOUDFRONT_PRIVATE_KEY }}"
 {{ end }}
 
+# 📧 Email Secrets
 {{ with secret "secret/data/email/gmail" }}
-EMAIL_USER={{ .Data.data.EMAIL_USER }}
-EMAIL_APP_PASSWORD={{ .Data.data.EMAIL_APP_PASSWORD }}
+EMAIL_USER="{{ .Data.data.EMAIL_USER }}"
+EMAIL_APP_PASSWORD="{{ .Data.data.EMAIL_APP_PASSWORD }}"
 {{ end }}
 
+# 🌲 Pinecone Secrets
 {{ with secret "secret/data/pinecone/main" }}
-PINECONE_API_KEY={{ .Data.data.PINECONE_API_KEY }}
-PINECONE_ENVIRONMENT={{ .Data.data.PINECONE_ENVIRONMENT }}
+PINECONE_API_KEY="{{ .Data.data.PINECONE_API_KEY }}"
+PINECONE_ENVIRONMENT="{{ .Data.data.PINECONE_ENVIRONMENT }}"
 {{ end }}
 
+# 🔍 Elasticsearch & APM Secrets (จุดเสี่ยงที่มีตัวแปรแปลกปลอม)
 {{ with secret "secret/data/elasticsearch/backend" }}
-ELASTICSEARCH_URL={{ .Data.data.ELASTICSEARCH_URL }}
-ELASTIC_PASSWORD={{ .Data.data.ELASTIC_PASSWORD }}
-ELASTIC_CLOUD_ID={{ .Data.data.ELASTIC_CLOUD_ID }}
-ELASTICSEARCH_API_KEY={{ .Data.data.ELASTICSEARCH_API_KEY }}
-ELASTIC_APM_SERVER_URL={{ .Data.data.ELASTIC_APM_SERVER_URL }}
-ELASTIC_APM_SECRET_TOKEN={{ .Data.data.ELASTIC_APM_SECRET_TOKEN }}
-SECRET_TOKEN={{ .Data.data.SECRET_TOKEN }}
+ELASTICSEARCH_URL="{{ .Data.data.ELASTICSEARCH_URL }}"
+ELASTIC_PASSWORD="{{ .Data.data.ELASTIC_PASSWORD }}"
+ELASTIC_CLOUD_ID="{{ .Data.data.ELASTIC_CLOUD_ID }}"
+ELASTICSEARCH_API_KEY="{{ .Data.data.ELASTICSEARCH_API_KEY }}"
+ELASTIC_APM_SERVER_URL="{{ .Data.data.ELASTIC_APM_SERVER_URL }}"
+ELASTIC_APM_SECRET_TOKEN="{{ .Data.data.ELASTIC_APM_SECRET_TOKEN }}"
+SECRET_TOKEN="{{ .Data.data.SECRET_TOKEN }}"
 {{ end }}

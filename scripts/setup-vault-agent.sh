@@ -11,7 +11,7 @@ YELLOW='\033[1;33m'
 NC='\033[0m'
 
 echo -e "${BLUE}================================${NC}"
-echo -e "${BLUE}Vault AppRole Setup${NC}"
+echo -e "${BLUE}Vault AppRole Setup (Fixed Version)${NC}"
 echo -e "${BLUE}================================${NC}\n"
 
 # 1. Enable AppRole auth method
@@ -19,69 +19,51 @@ echo -e "${YELLOW}Step 1: Enable AppRole auth method${NC}"
 docker exec -e VAULT_ADDR="$VAULT_ADDR" -e VAULT_TOKEN="$VAULT_TOKEN" vault vault auth enable approle 2>/dev/null || echo "AppRole already enabled"
 echo -e "${GREEN}✅ AppRole enabled\n${NC}"
 
-# 2. Create backend policy
+# 2. Create backend policy (อัปเดตชื่อเป็น backend-policy และเพิ่มสิทธิ์ MongoDB Dynamic)
 echo -e "${YELLOW}Step 2: Create backend policy${NC}"
 docker exec -i vault sh -c 'cat << EOF > /tmp/backend-policy.hcl
-path "secret/data/database/mongodb" {
+# 💾 🌟 จุดที่เพิ่ม: อนุญาตให้ดึงรหัสผ่าน Dynamic ของ MongoDB Cluster
+path "database/creds/backend-role" {
   capabilities = ["read"]
 }
-path "secret/data/redis/main" {
-  capabilities = ["read"]
-}
-path "secret/data/aws/main" {
-  capabilities = ["read"]
-}
-path "secret/data/jwt/main" {
-  capabilities = ["read"]
-}
-path "secret/data/stripe/production" {
-  capabilities = ["read"]
-}
-path "secret/data/cloudfront/keys" {
-  capabilities = ["read"]
-}
-path "secret/data/email/gmail" {
-  capabilities = ["read"]
-}
-path "secret/data/pinecone/main" {
-  capabilities = ["read"]
-}
-path "secret/data/elasticsearch/backend" {
-  capabilities = ["read"]
-}
-path "secret/metadata/*" {
-  capabilities = ["list"]
-}
-path "auth/token/renew-self" {
-  capabilities = ["update"]
-}
-path "auth/token/lookup-self" {
-  capabilities = ["read"]
-}
+
+# 🟢 Static Secrets เดิมทั้งหมด
+path "secret/data/database/mongodb" { capabilities = ["read"] }
+path "secret/data/redis/main" { capabilities = ["read"] }
+path "secret/data/aws/main" { capabilities = ["read"] }
+path "secret/data/jwt/main" { capabilities = ["read"] }
+path "secret/data/stripe/production" { capabilities = ["read"] }
+path "secret/data/cloudfront/keys" { capabilities = ["read"] }
+path "secret/data/email/gmail" { capabilities = ["read"] }
+path "secret/data/pinecone/main" { capabilities = ["read"] }
+path "secret/data/elasticsearch/backend" { capabilities = ["read"] }
+path "secret/metadata/*" { capabilities = ["list"] }
+path "auth/token/renew-self" { capabilities = ["update"] }
+path "auth/token/lookup-self" { capabilities = ["read"] }
 EOF'
 
-docker exec -e VAULT_ADDR="$VAULT_ADDR" -e VAULT_TOKEN="$VAULT_TOKEN" vault vault policy write backend /tmp/backend-policy.hcl
+docker exec -e VAULT_ADDR="$VAULT_ADDR" -e VAULT_TOKEN="$VAULT_TOKEN" vault vault policy write backend-policy /tmp/backend-policy.hcl
 echo -e "${GREEN}✅ Backend policy created\n${NC}"
 
-# 3. Create AppRole
-echo -e "${YELLOW}Step 3: Create AppRole for backend${NC}"
-docker exec -e VAULT_ADDR="$VAULT_ADDR" -e VAULT_TOKEN="$VAULT_TOKEN" vault vault write auth/approle/role/backend \
+# 3. Create AppRole (🌟 เปลี่ยนชื่อเป็น backend-role ให้ตรงกับ Agent และผูก backend-policy)
+echo -e "${YELLOW}Step 3: Create AppRole for backend-role${NC}"
+docker exec -e VAULT_ADDR="$VAULT_ADDR" -e VAULT_TOKEN="$VAULT_TOKEN" vault vault write auth/approle/role/backend-role \
   bind_secret_id=true \
   secret_id_ttl=24h \
   secret_id_num_uses=0 \
   token_ttl=1h \
   token_max_ttl=24h \
-  policies="backend"
+  policies="backend-policy"
 echo -e "${GREEN}✅ AppRole created\n${NC}"
 
 # 4. Get RoleID
 echo -e "${YELLOW}Step 4: Get RoleID${NC}"
-ROLE_ID=$(docker exec -e VAULT_ADDR="$VAULT_ADDR" -e VAULT_TOKEN="$VAULT_TOKEN" vault vault read auth/approle/role/backend/role-id | grep -E '^role_id[[:space:]]+' | awk '{print $2}')
+ROLE_ID=$(docker exec -e VAULT_ADDR="$VAULT_ADDR" -e VAULT_TOKEN="$VAULT_TOKEN" vault vault read auth/approle/role/backend-role/role-id | grep -E '^role_id[[:space:]]+' | awk '{print $2}')
 echo -e "${GREEN}Role ID: ${ROLE_ID}\n${NC}"
 
 # 5. Create SecretID
 echo -e "${YELLOW}Step 5: Create SecretID${NC}"
-SECRET_ID=$(docker exec -e VAULT_ADDR="$VAULT_ADDR" -e VAULT_TOKEN="$VAULT_TOKEN" vault vault write -field=secret_id -f auth/approle/role/backend/secret-id)
+SECRET_ID=$(docker exec -e VAULT_ADDR="$VAULT_ADDR" -e VAULT_TOKEN="$VAULT_TOKEN" vault vault write -field=secret_id -f auth/approle/role/backend-role/secret-id)
 echo -e "${GREEN}Secret ID: ${SECRET_ID}\n${NC}"
 
 # 6. Save to files
@@ -118,8 +100,3 @@ fi
 echo -e "${BLUE}================================${NC}"
 echo -e "${BLUE}Setup Complete!${NC}"
 echo -e "${BLUE}================================${NC}"
-echo -e "${YELLOW}Next steps:${NC}"
-echo "1. ✅ role_id / secret_id ถูกบันทึกที่ ./BackEnd/keys/ แล้ว"
-echo "2. รัน: docker compose up vault-agent -d"
-echo "3. ตรวจสอบ: docker exec vault-agent cat /vault/secrets/app.env"
-echo ""

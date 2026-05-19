@@ -29,7 +29,7 @@ listener "tcp" {
 template {
   source      = "/vault/templates/app.env.tpl"
   destination = "/vault/secrets/app.env"
-  perms       = "0640"
+  perms       = "0644"
   # render ใหม่อัตโนมัติก่อน credentials หมดอายุ
   left_delimiter  = "{{"
   right_delimiter = "}}"

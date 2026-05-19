@@ -300,10 +300,10 @@ services:
     restart: unless-stopped
     expose:
       - "3000"
-    # labels:
-    #   - "co.elastic.profiling/service-name=node-backend"
-    env_file:
-      - ./BackEnd/.env
+    labels:
+      - "co.elastic.profiling/service-name=node-backend"
+    # env_file:
+    #   - ./BackEnd/.env
     environment:
       - ELASTIC_APM_SERVICE_NAME=node-backend
     deploy:

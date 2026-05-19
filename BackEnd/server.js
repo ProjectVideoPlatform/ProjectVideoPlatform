@@ -2,7 +2,7 @@
 
 // const apm = require('elastic-apm-node').start({
 //   serviceName: 'toteja-backend',
-  
+   
 //   // 1. เปลี่ยน URL ให้ชี้ไปที่ Elastic Agent (Fleet)
 //   // ถ้าแอปอยู่ใน Docker Network เดียวกัน ให้ใช้ชื่อ Service ของ Fleet
 //   serverUrl: process.env.ELASTIC_APM_SERVER_URL || 'http://fleet-server:8200',
@@ -89,7 +89,7 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 // ====== ROUTES ======
 app.use('/api/purchase', purchaseRoutes);
 app.use('/api/auth', authRoutes);
-app.use('/api/videos', videoRoutes);
+  app.use('/api/videos', videoRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/user', UserRoute);
 app.use('/api/search', require('./routes/searchroute'));
@@ -139,4 +139,49 @@ const startServer = async () => {
   }
 };
 
+// สั่งรันเซิร์ฟเวอร์หลัก
 startServer();
+
+
+// =========================================================================
+// 🌟 ⚡ PRODUCTION DYNAMIC SECRETS: APP-MANAGED CONFIG WATCHER 🌟 ⚡
+// =========================================================================
+const fs = require('fs');
+const dotenv = require('dotenv');
+const mongoose = require('mongoose');
+const vaultEnvPath = '/vault/secrets/app.env';
+
+if (fs.existsSync(vaultEnvPath)) {
+  console.log('👀 [Vault Watcher] Active: Monitoring app.env for dynamic credential rotations...');
+
+  // ใช้ watchFile (Polling) เพื่อความเสถียรสูงสุดบน Docker Volumes ข้ามระบบปฏิบัติการ
+  fs.watchFile(vaultEnvPath, { interval: 5000 }, async (curr, prev) => {
+    // เงื่อนไข: ถ้าเวลาการแก้ไขไฟล์ (mtime) มีค่าใหม่กว่าเดิม แปลว่า Vault Agent เพิ่งเขียนรหัสชุดใหม่เสร็จ
+    if (curr.mtime > prev.mtime) {
+      console.log('🔄 [Vault Watcher] Modification detected in app.env! Initiating hot-reload...');
+
+      try {
+        // 1. โหลดข้อมูลสิทธิ์ตัวใหม่เข้าสู่หน่วยความจำหลัก (process.env)
+        const envConfig = dotenv.parse(fs.readFileSync(vaultEnvPath));
+        for (const key in envConfig) {
+          process.env[key] = envConfig[key];
+        }
+        console.log('✅ [Vault Watcher] Successfully updated process.env keys in memory');
+
+        // 2. เคลียร์สายสัญญาณการเชื่อมต่อก้อนเก่า (เพื่อป้องกันอาการล็อกอินพังหลังคีย์เดิมหมดอายุ)
+        if (mongoose.connection.readyState !== 0) {
+          console.log('🔄 [Vault Watcher] Closing old MongoDB active connections pool...');
+          await mongoose.disconnect();
+        }
+
+        // 3. ปลุกระดมท่อเชื่อมต่อก้อนใหม่ผ่านรหัสผ่านล่าสุดทันที
+        console.log('🔄 [Vault Watcher] Re-establishing Mongoose cluster link with fresh tokens...');
+        await connectDB();
+        console.log('🚀 [Vault Watcher] Hot-Reload Complete! System smoothly rotated credentials without downtime.');
+
+      } catch (error) {
+        console.error('❌ [Vault Watcher] Error during app-managed hot-reload execution:', error);
+      }
+    }
+  });
+}
