@@ -1,5 +1,5 @@
 # ====== STAGE 1: Production Dependencies ======
-FROM node:20-alpine AS deps-prod
+FROM node:22-alpine AS deps-prod
 
 WORKDIR /app
 
@@ -11,7 +11,7 @@ RUN npm ci --only=production --no-audit --prefer-offline && \
     npm cache clean --force
 
 # ====== STAGE 2: Development Dependencies (ถ้าต้อง build) ======
-FROM node:20-alpine AS deps-dev
+FROM node:22-alpine AS deps-dev
 
 WORKDIR /app
 
@@ -21,7 +21,7 @@ COPY BackEnd/package.json BackEnd/package-lock.json ./
 RUN npm ci --no-audit --prefer-offline
 
 # ====== STAGE 3: Builder (ถ้ามี build step) ======
-FROM node:20-alpine AS builder
+FROM node:22-alpine AS builder
 
 WORKDIR /app
 
@@ -35,10 +35,10 @@ COPY BackEnd/ ./
 RUN npm run build --if-present
 
 # ====== STAGE 4: Production Runner ======
-FROM node:20-alpine AS runner
+FROM node:22-alpine AS runner
 
-# Security: Install only tini + dumb-init
-RUN apk add --no-cache tini dumb-init && \
+# Security & Profiling: Install tini, dumb-init, and perf for JIT symbols
+RUN apk add --no-cache tini dumb-init perf && \
     addgroup -g 1001 -S nodejs && \
     adduser -S appuser -u 1001 -G nodejs && \
     mkdir -p /app/logs /app/tmp && \
@@ -80,9 +80,11 @@ RUN chmod +x /app/docker-entrypoint.sh
 USER appuser
 
 # Environment
+# 🛠️ สิ่งที่เพิ่ม: เปิดตัวเลือกให้ Node.js บันทึกข้อมูลแผนที่โค้ด (JIT Symbols)
+# ตัวนี้ช่วยให้ Elastic Agent เข้าใจโค้ด JavaScript ที่ถูกคอมไพล์ใน RAM ได้ด้วย
 ENV NODE_ENV=production \
     PORT=3000 \
-    NODE_OPTIONS="--max-old-space-size=512"
+    NODE_OPTIONS="--max-old-space-size=512 --perf-prof"
 
 # Expose port
 EXPOSE 3000
@@ -101,4 +103,3 @@ HEALTHCHECK --interval=30s \
 LABEL maintainer="your-team@company.com" \
       version="1.0.0" \
       description="Production Node.js Backend"
-    

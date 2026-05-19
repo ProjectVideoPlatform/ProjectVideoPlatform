@@ -270,6 +270,8 @@ services:
     restart: unless-stopped
     expose:
       - "3000"
+    labels:
+      - "co.elastic.profiling/service-name=node-backend"
     env_file:
       - ./BackEnd/.env
     environment:
@@ -280,7 +282,7 @@ services:
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - REDIS_PASSWORD=redispassword123
-      
+      - ELASTIC_APM_SERVICE_NAME=node-backend
     deploy:
       resources:
         reservations:
@@ -325,8 +327,12 @@ services:
     container_name: recommendation-service-grpc
     expose:
       - "50051"
+    labels:
+      - "co.elastic.profiling/service-name=recommendation-service"
     env_file:
       - ./BackEnd/.env
+    environment:
+      - ELASTIC_APM_SERVICE_NAME=recommendation-service
     volumes:
       - ./BackEnd/proto:/proto
     deploy:
@@ -386,11 +392,14 @@ services:
     tmpfs:
       - /tmp
       - /app/tmp
+    labels:
+      - "co.elastic.profiling/service-name=email-worker"
     env_file:
       - ./BackEnd/.env
     environment:
       - NODE_ENV=production
       - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672
+      - ELASTIC_APM_SERVICE_NAME=email-worker
     deploy:
       resources:
         reservations:
@@ -412,10 +421,13 @@ services:
     container_name: secure-video-transcode-worker
     restart: unless-stopped
     command: ["node", "workers/transcodeWorker.js"]
+    labels:
+      - "co.elastic.profiling/service-name=transcode-worker"
     env_file:
       - ./BackEnd/.env
     environment:
       - NODE_ENV=production
+      - ELASTIC_APM_SERVICE_NAME=transcode-worker
     deploy:
       resources:
         reservations:
@@ -447,6 +459,8 @@ services:
     tmpfs:
       - /tmp
       - /app/tmp
+    labels:
+      - "co.elastic.profiling/service-name=analytics-worker"
     env_file:
       - ./BackEnd/.env
     environment:
@@ -457,6 +471,7 @@ services:
       - CLICKHOUSE_USER=app_user
       - CLICKHOUSE_PASSWORD=strong_password
       - CLICKHOUSE_DB=app_db
+      - ELASTIC_APM_SERVICE_NAME=analytics-worker
     deploy:
       resources:
         reservations:
@@ -486,12 +501,15 @@ services:
       dockerfile: Dockerfile
     container_name: trending_worker
     command: ["node", "workers/trendingWorker.js"]
+    labels:
+      - "co.elastic.profiling/service-name=trending-worker"
     env_file: ./BackEnd/.env
     environment:
       - NODE_ENV=production
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - REDIS_PASSWORD=redispassword123
+      - ELASTIC_APM_SERVICE_NAME=trending-worker
     deploy:
       resources:
         reservations:
@@ -523,6 +541,8 @@ services:
       dockerfile: Dockerfile
     container_name: secure-video-ml-worker-history
     restart: unless-stopped
+    labels:
+      - "co.elastic.profiling/service-name=ml-worker-history"
     depends_on:
       kafka:
         condition: service_healthy
@@ -532,6 +552,7 @@ services:
       - KAFKA_BROKERS=kafka:9092
       - REDIS_HOST=redis
       - PYTHONUNBUFFERED=1
+      - ELASTIC_APM_SERVICE_NAME=ml-worker-history
     deploy:
       resources:
         reservations:
@@ -549,6 +570,8 @@ services:
       dockerfile: Dockerfile
     container_name: secure-video-ml-worker-embedder
     restart: unless-stopped
+    labels:
+      - "co.elastic.profiling/service-name=ml-worker-embedder"
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -557,13 +580,14 @@ services:
       - PYTHONUNBUFFERED=1
       - TRANSFORMERS_CACHE=/app/model-cache
       - SENTENCE_TRANSFORMERS_HOME=/app/model-cache
+      - ELASTIC_APM_SERVICE_NAME=ml-worker-embedder
     deploy:
       resources:
         reservations:
           cpus: '1.0'
           memory: 1.5G
         limits:
-          cpus: '2.0'   # burst ตอนโหลด/รัน model
+          cpus: '2.0'
           memory: 3G
     env_file:
       - ./BackEnd/.env
@@ -579,11 +603,14 @@ services:
     container_name: user-vector-producer
     restart: unless-stopped
     command: python user-vector-producer.py
+    labels:
+      - "co.elastic.profiling/service-name=user-vector-producer"
     env_file:
       - ./BackEnd/.env
     environment:
       KAFKA_BROKERS: kafka:9092
       KAFKA_TOPIC: user-vector-refresh
+      ELASTIC_APM_SERVICE_NAME: user-vector-producer
     depends_on:
       kafka:
         condition: service_healthy
@@ -601,6 +628,8 @@ services:
       dockerfile: Dockerfile
     restart: unless-stopped
     command: python user-vector-worker.py
+    labels:
+      - "co.elastic.profiling/service-name=user-vector-worker"
     env_file:
       - ./BackEnd/.env
     environment:
@@ -612,6 +641,7 @@ services:
       USER_VECTOR_TTL: "7200"
       THREAD_WORKERS: "8"
       MAX_POLL_RECORDS: "50"
+      ELASTIC_APM_SERVICE_NAME: user-vector-worker
     depends_on:
       kafka:
         condition: service_healthy
@@ -637,6 +667,8 @@ services:
     image: flink-analytics:latest
     container_name: secure-video-flink-jobmanager
     restart: unless-stopped
+    labels:
+      - "co.elastic.profiling/service-name=flink-jobmanager"
     expose:
       - "6123"
     ports:
@@ -646,6 +678,7 @@ services:
       - REDIS_HOST=redis
       - REDIS_PASSWORD=redispassword123
       - KAFKA_BROKERS=kafka:9092
+      - ELASTIC_APM_SERVICE_NAME=flink-jobmanager
       - |
         FLINK_PROPERTIES=
         state.checkpoints.dir: file:///opt/flink/checkpoints
@@ -675,6 +708,8 @@ services:
     image: flink-analytics:latest
     container_name: secure-video-flink-taskmanager
     restart: unless-stopped
+    labels:
+      - "co.elastic.profiling/service-name=flink-taskmanager"
     depends_on:
       flink-jobmanager:
         condition: service_started
@@ -686,6 +721,7 @@ services:
       - REDIS_HOST=redis
       - REDIS_PASSWORD=redispassword123
       - KAFKA_BROKERS=kafka:9092
+      - ELASTIC_APM_SERVICE_NAME=flink-taskmanager
       - |
         FLINK_PROPERTIES=
         jobmanager.rpc.address: flink-jobmanager
@@ -710,23 +746,19 @@ services:
   cadvisor:
     image: gcr.io/cadvisor/cadvisor:latest
     container_name: cadvisor
-
     ports:
       - "8089:8080"
-
     volumes:
       - /:/rootfs:ro
       - /var/run:/var/run:ro
       - /sys:/sys:ro
       - /var/lib/docker:/var/lib/docker:ro
       - /dev/disk:/dev/disk:ro
-
     devices:
       - /dev/kmsg
-
     privileged: true
-
     restart: unless-stopped
+
   prometheus:
     image: prom/prometheus:v2.47.0
     container_name: secure-video-prometheus

@@ -930,7 +930,7 @@ const AdminDashboard = () => {
     { id:'videos',       label:'Videos',      icon:Film            },
     { id:'users',        label:'Users',       icon:Users           },
     { id:'purchases',    label:'Purchases',   icon:ShoppingBag     },
-    { id:'refunds',      label:'Refunds',     icon:RotateCcw,  badge:pendingCount },
+    // { id:'refunds',      label:'Refunds',     icon:RotateCcw,  badge:pendingCount },
     { id:'elasticsearch',label:'Elasticsearch',icon:Database,   esTab:true },
   ];
 

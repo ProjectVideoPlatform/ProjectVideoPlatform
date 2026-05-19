@@ -5,8 +5,7 @@ const esClient = new Client({
     id: process.env.ELASTIC_CLOUD_ID,
   },
   auth: {
-    username: 'elastic',
-    password: process.env.ELASTIC_PASSWORD,
+  apiKey: process.env.ELASTICSEARCH_API_KEY
   },
 });
 

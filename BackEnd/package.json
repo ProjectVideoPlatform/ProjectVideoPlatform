@@ -6,6 +6,7 @@
   "scripts": {
     "test": "jest",
     "test:coverage": "jest --coverage --coverageReporters=lcov text",
+    "test-vault": "node test-vault.js",
     "sonar": "sonar-scanner",
     "rabbit:setup": "node services/rabbitmq/setupInfra.js"
   },

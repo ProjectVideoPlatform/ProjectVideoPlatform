@@ -66,3 +66,14 @@ Thumbs.db
 .secrets/
 
 terraform-lambda/
+# Vault secrets — ห้าม commit เด็ดขาด
+BackEnd/keys/role_id
+BackEnd/keys/secret_id
+BackEnd/keys/cloudfront-private-key.pem
+BackEnd/.env
+vault/secrets/
+
+# Env files
+.env
+.env.*
+!.env.example
