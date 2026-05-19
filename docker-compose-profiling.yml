@@ -22,22 +22,11 @@ services:
       - /sys/kernel/tracing:/sys/kernel/tracing:ro
       - /usr/lib/debug:/usr/lib/debug:ro
       - /lib/modules:/lib/modules:ro
-    # command: >
-    #       /root/pf-host-agent
-    #       -project-id=1
-    #       -secret-token=HlHQQB8tIWZjl472
-    #       -collection-agent=b329e4682f5a4731bb28e4719291303e.profiling.ap-southeast-1.aws.cloud.es.io:443
-    #       -probabilistic-threshold=50
-    #       -probabilistic-interval=1m
-    #       -log-level=error
     command: >
-          /root/pf-host-agent
-          -project-id=1
-          -secret-token=HlHQQB8tIWZjl472
-          -collection-agent=b329e4682f5a4731bb28e4719291303e.profiling.ap-southeast-1.aws.cloud.es.io:443
-          -probabilistic-threshold=50
-          -probabilistic-interval=1m
-          -log-level=error    
+      /root/pf-host-agent
+      -project-id=1
+      -secret-token=HlHQQB8tIWZjl472
+      -collection-agent=b329e4682f5a4731bb28e4719291303e.profiling.ap-southeast-1.aws.cloud.es.io:443
     networks:
       - secure-video-network
 

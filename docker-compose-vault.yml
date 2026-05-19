@@ -29,32 +29,11 @@ services:
     volumes:
       - vault-agent-secretsja:/vault/secrets
 
-  vault-agent:
-    image: hashicorp/vault:1.15
-    container_name: vault-agent
-    restart: unless-stopped
-    command: agent -config=/vault/config/agent.hcl
-    environment:
-      VAULT_ADDR: http://vault:8200
-    user: root
-    volumes:
-      - ./vault/agent.hcl:/vault/config/agent.hcl:ro
-      - ./vault/templates:/vault/templates:ro
-      - vault-agent-secretsja:/vault/secrets
-      - ./BackEnd/keys:/app/keys:ro
-    networks:
-      - secure-video-network
-    depends_on:
-      vault:
-        condition: service_healthy
-      vault-secrets-init:
-        condition: service_completed_successfully
-    cap_add:
-      - IPC_LOCK
+
 
 networks:
   secure-video-network:
-    driver: bridge
+       driver: bridge
 
 
 volumes:

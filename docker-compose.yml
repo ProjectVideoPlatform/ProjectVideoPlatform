@@ -1,9 +1,85 @@
 services:
   # ─────────────────────────────────────────────────────────────
-  # INFRASTRUCTURE & DATABASES  (Guaranteed Group)
-  # จองแรมสูง + OOM Score ต่ำ → Linux ฆ่าทีหลังสุด
+  # VAULT
   # ─────────────────────────────────────────────────────────────
+  vault:
+    image: hashicorp/vault:1.15
+    container_name: vault
+    restart: unless-stopped
+    ports:
+      - "8200:8200"
+    environment:
+      VAULT_DEV_ROOT_TOKEN_ID: root
+      VAULT_DEV_LISTEN_ADDRESS: 0.0.0.0:8200
+    command: server -dev
+    cap_add:
+      - IPC_LOCK
+    volumes:
+      - vault_data:/vault/data
+    networks:
+      - secure-video-network
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:8200/v1/sys/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
+  vault-secrets-init:
+    image: busybox
+    container_name: vault-secrets-init
+    restart: "no"
+    command: sh -c "chmod 777 /vault/secrets && echo 'permission fixed'"
+    volumes:
+      - vault-agent-secretsja:/vault/secrets  # named volume
+
+  # vault-agent:
+  #   image: hashicorp/vault:1.15
+  #   container_name: vault-agent
+  #   restart: unless-stopped
+  #   command: agent -config=/vault/config/agent.hcl
+  #   environment:
+  #     VAULT_ADDR: http://vault:8200
+  #   user: root
+  #   volumes:
+  #     - ./vault/agent.hcl:/vault/config/agent.hcl:ro
+  #     - ./vault/templates:/vault/templates:ro
+  #     - vault-agent-secrets:/vault/secrets   # named volume เขียนได้
+  #     - ./BackEnd/keys:/app/keys:ro
+  #   networks:
+  #     - secure-video-network
+  #   depends_on:
+  #     vault:
+  #       condition: service_healthy
+  #     vault-secrets-init:
+  #       condition: service_completed_successfully
+  #   cap_add:
+  #     - IPC_LOCK
+
+  # ─────────────────────────────────────────────────────────────
+  # INFRASTRUCTURE & DATABASES
+  # ─────────────────────────────────────────────────────────────
+  vault-agent:
+      image: hashicorp/vault:1.15
+      container_name: vault-agent
+      restart: unless-stopped
+      command: agent -config=/vault/config/agent.hcl
+      environment:
+        VAULT_ADDR: http://vault:8200
+      user: root
+      volumes:
+        - ./vault/agent.hcl:/vault/config/agent.hcl:ro
+        - ./vault/templates:/vault/templates:ro
+        - vault-agent-secretsja:/vault/secrets
+        - ./BackEnd/keys:/app/keys:ro
+      networks:
+        - secure-video-network
+      depends_on:
+        vault:
+          condition: service_healthy
+        vault-secrets-init:
+          condition: service_completed_successfully
+      cap_add:
+        - IPC_LOCK
   rabbitmq:
     image: rabbitmq:3-management
     container_name: secure-video-rabbitmq
@@ -30,6 +106,7 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+
   mongo-keyfile-init:
     image: mongo:7.0
     container_name: mongo-keyfile-init
@@ -158,7 +235,6 @@ services:
     networks:
       - secure-video-network
 
-
   redis:
     image: redis:7.2-alpine
     container_name: secure-video-redis
@@ -184,9 +260,8 @@ services:
       retries: 3
 
   # ─────────────────────────────────────────────────────────────
-  # KAFKA  (KRaft Mode)
+  # KAFKA
   # ─────────────────────────────────────────────────────────────
-
   kafka:
     image: apache/kafka:latest
     container_name: secure-video-kafka
@@ -242,8 +317,6 @@ services:
     ports:
       - "8080:8080"
     environment:
-      - MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE=prometheus,health,info
-      - MANAGEMENT_METRICS_EXPORT_PROMETHEUS_ENABLED=true
       - KAFKA_CLUSTERS_0_NAME=local
       - KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS=kafka:9092
     networks:
@@ -285,13 +358,8 @@ services:
       start_period: 10s
 
   # ─────────────────────────────────────────────────────────────
-  # APPLICATION SERVICES
+  # APPLICATION
   # ─────────────────────────────────────────────────────────────
-      # - ELASTIC_APM_SERVER_URL=http://apm-server:8200
-      # - ELASTIC_APM_SERVICE_NAME=my-securevideo-backend
-      # - ELASTIC_APM_ENVIRONMENT=development
-      # - ELASTIC_APM_ACTIVE=true
-      # - ELASTIC_APM_SECRET_TOKEN=YOUR_FLEET_APM_SECRET_TOKEN
   app:
     build:
       context: .
@@ -300,8 +368,6 @@ services:
     restart: unless-stopped
     expose:
       - "3000"
-    # labels:
-    #   - "co.elastic.profiling/service-name=node-backend"
     environment:
       - ELASTIC_APM_SERVICE_NAME=node-backend
     deploy:
@@ -314,7 +380,7 @@ services:
       - ./BackEnd/keys:/app/keys:ro
       - ./BackEnd/vault/certs:/app/vault-certs:ro
       - ./logs:/app/logs
-      - vault-agent-secretsja:/vault/secrets:ro    # << เพิ่ม
+      - vault-agent-secretsja:/vault/secrets:ro   # ✅ named volume อ่านอย่างเดียว
     networks:
       - secure-video-network
     depends_on:
@@ -326,6 +392,8 @@ services:
         condition: service_healthy
       kafka:
         condition: service_healthy
+      vault-agent:
+        condition: service_started   # ✅ รอ vault-agent ก่อน
     user: "1001:1001"
     read_only: true
     tmpfs:
@@ -336,7 +404,7 @@ services:
     cap_drop:
       - ALL
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost/api/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]  # ✅ port 3000
       interval: 30s
       timeout: 5s
       retries: 3
@@ -349,14 +417,11 @@ services:
     container_name: recommendation-service-grpc
     expose:
       - "50051"
-    labels:
-      - "co.elastic.profiling/service-name=recommendation-service"
-    env_file:
-      - ./BackEnd/.env
     environment:
       - ELASTIC_APM_SERVICE_NAME=recommendation-service
     volumes:
       - ./BackEnd/proto:/proto
+      - vault-agent-secretsja:/vault/secrets:ro   # ✅ ถ้า grpc service ต้องการ secrets
     deploy:
       resources:
         reservations:
@@ -394,14 +459,10 @@ services:
       - ./Frontvideo1/dist:/var/www/html:ro
     networks:
       - secure-video-network
-    # depends_on:
-    #   app:
-    #     condition: service_healthy
 
   # ─────────────────────────────────────────────────────────────
-  # WORKERS  (Burstable Group)
+  # WORKERS
   # ─────────────────────────────────────────────────────────────
-
   email-worker:
     build:
       context: .
@@ -414,13 +475,8 @@ services:
     tmpfs:
       - /tmp
       - /app/tmp
-    labels:
-      - "co.elastic.profiling/service-name=email-worker"
-    env_file:
-      - ./BackEnd/.env
     environment:
       - NODE_ENV=production
-      - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672
       - ELASTIC_APM_SERVICE_NAME=email-worker
     deploy:
       resources:
@@ -433,8 +489,11 @@ services:
     depends_on:
       rabbitmq:
         condition: service_healthy
+      vault-agent:
+        condition: service_started
     volumes:
       - ./BackEnd/keys:/app/keys:ro
+      - vault-agent-secretsja:/vault/secrets:ro   # ✅
 
   transcode-worker:
     build:
@@ -443,10 +502,6 @@ services:
     container_name: secure-video-transcode-worker
     restart: unless-stopped
     command: ["node", "workers/transcodeWorker.js"]
-    labels:
-      - "co.elastic.profiling/service-name=transcode-worker"
-    env_file:
-      - ./BackEnd/.env
     environment:
       - NODE_ENV=production
       - ELASTIC_APM_SERVICE_NAME=transcode-worker
@@ -464,11 +519,15 @@ services:
         condition: service_healthy
       mongodb1:
         condition: service_healthy
+      vault-agent:
+        condition: service_started
     user: "1001:1001"
     read_only: true
     tmpfs:
       - /tmp
       - /app/tmp
+    volumes:
+      - vault-agent-secretsja:/vault/secrets:ro   # ✅
 
   analytics-worker:
     build:
@@ -481,10 +540,6 @@ services:
     tmpfs:
       - /tmp
       - /app/tmp
-    labels:
-      - "co.elastic.profiling/service-name=analytics-worker"
-    env_file:
-      - ./BackEnd/.env
     environment:
       - NODE_ENV=production
       - KAFKA_BROKERS=kafka:9092
@@ -508,6 +563,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      vault-agent:
+        condition: service_started
     healthcheck:
       test: ["CMD-SHELL", "node -e \"require('http').get('http://localhost:3098/health', r => process.exit(r.statusCode === 200 ? 0 : 1))\""]
       interval: 30s
@@ -516,6 +573,8 @@ services:
       start_period: 30s
     networks:
       - secure-video-network
+    volumes:
+      - vault-agent-secretsja:/vault/secrets:ro   # ✅
 
   trending-worker:
     build:
@@ -523,14 +582,10 @@ services:
       dockerfile: Dockerfile
     container_name: trending_worker
     command: ["node", "workers/trendingWorker.js"]
-    labels:
-      - "co.elastic.profiling/service-name=trending-worker"
-    env_file: ./BackEnd/.env
     environment:
       - NODE_ENV=production
       - REDIS_HOST=redis
       - REDIS_PORT=6379
-      - REDIS_PASSWORD=redispassword123
       - ELASTIC_APM_SERVICE_NAME=trending-worker
     deploy:
       resources:
@@ -544,6 +599,8 @@ services:
         condition: service_healthy
       clickhouse:
         condition: service_healthy
+      vault-agent:
+        condition: service_started
     healthcheck:
       test: ["CMD-SHELL", "node -e \"require('http').get('http://localhost:3099/health', r => process.exit(r.statusCode === 200 ? 0 : 1))\""]
       interval: 30s
@@ -552,19 +609,18 @@ services:
       start_period: 15s
     networks:
       - secure-video-network
+    volumes:
+      - vault-agent-secretsja:/vault/secrets:ro   # ✅
 
   # ─────────────────────────────────────────────────────────────
-  # ML WORKERS  (Burstable — CPU burst สูงตอนประมวลผล)
+  # ML WORKERS
   # ─────────────────────────────────────────────────────────────
-
   ml-worker-history:
     build:
       context: ./ml-worker/history
       dockerfile: Dockerfile
     container_name: secure-video-ml-worker-history
     restart: unless-stopped
-    labels:
-      - "co.elastic.profiling/service-name=ml-worker-history"
     depends_on:
       kafka:
         condition: service_healthy
@@ -581,8 +637,8 @@ services:
           memory: 256M
         limits:
           memory: 512M
-    env_file:
-      - ./BackEnd/.env
+    volumes:
+      - vault-agent-secretsja:/vault/secrets:ro
     networks:
       - secure-video-network
 
@@ -592,8 +648,6 @@ services:
       dockerfile: Dockerfile
     container_name: secure-video-ml-worker-embedder
     restart: unless-stopped
-    labels:
-      - "co.elastic.profiling/service-name=ml-worker-embedder"
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -611,10 +665,9 @@ services:
         limits:
           cpus: '2.0'
           memory: 3G
-    env_file:
-      - ./BackEnd/.env
     volumes:
       - ml-model-cache:/app/model-cache
+      - vault-agent-secretsja:/vault/secrets:ro
     networks:
       - secure-video-network
 
@@ -625,10 +678,6 @@ services:
     container_name: user-vector-producer
     restart: unless-stopped
     command: python user-vector-producer.py
-    labels:
-      - "co.elastic.profiling/service-name=user-vector-producer"
-    env_file:
-      - ./BackEnd/.env
     environment:
       KAFKA_BROKERS: kafka:9092
       KAFKA_TOPIC: user-vector-refresh
@@ -641,6 +690,8 @@ services:
         limits:
           cpus: "0.5"
           memory: "512M"
+    volumes:
+      - vault-agent-secretsja:/vault/secrets:ro
     networks:
       - secure-video-network
 
@@ -650,15 +701,11 @@ services:
       dockerfile: Dockerfile
     restart: unless-stopped
     command: python user-vector-worker.py
-    labels:
-      - "co.elastic.profiling/service-name=user-vector-worker"
-    env_file:
-      - ./BackEnd/.env
     environment:
       KAFKA_BROKERS: kafka:9092
       KAFKA_TOPIC: user-vector-refresh
       KAFKA_GROUP: vector-workers
-      WORKER_ID: "worker-{{.Task.Slot}}"
+      WORKER_ID: "worker-1"
       SEED_LIMIT: "10"
       USER_VECTOR_TTL: "7200"
       THREAD_WORKERS: "8"
@@ -675,13 +722,14 @@ services:
         limits:
           cpus: "1"
           memory: "1G"
+    volumes:
+      - vault-agent-secretsja:/vault/secrets:ro
     networks:
       - secure-video-network
 
   # ─────────────────────────────────────────────────────────────
-  # APACHE FLINK  (Stream Processing)
+  # APACHE FLINK
   # ─────────────────────────────────────────────────────────────
-
   flink-jobmanager:
     build:
       context: ./flink-analytics
@@ -689,8 +737,6 @@ services:
     image: flink-analytics:latest
     container_name: secure-video-flink-jobmanager
     restart: unless-stopped
-    labels:
-      - "co.elastic.profiling/service-name=flink-jobmanager"
     expose:
       - "6123"
     ports:
@@ -730,8 +776,6 @@ services:
     image: flink-analytics:latest
     container_name: secure-video-flink-taskmanager
     restart: unless-stopped
-    labels:
-      - "co.elastic.profiling/service-name=flink-taskmanager"
     depends_on:
       flink-jobmanager:
         condition: service_started
@@ -761,10 +805,8 @@ services:
       - secure-video-network
 
   # ─────────────────────────────────────────────────────────────
-  # MONITORING STACK
+  # MONITORING
   # ─────────────────────────────────────────────────────────────
-
-  # cAdvisor — ดึง CPU/RAM ของทุก Container ส่ง Prometheus
   cadvisor:
     image: gcr.io/cadvisor/cadvisor:latest
     container_name: cadvisor
@@ -866,7 +908,6 @@ services:
   # ─────────────────────────────────────────────────────────────
   # ADMIN UIs
   # ─────────────────────────────────────────────────────────────
-
   mongo-express:
     image: mongo-express:latest
     container_name: secure-video-mongo-express
@@ -893,6 +934,8 @@ networks:
     driver: bridge
 
 volumes:
+  vault_data:
+  vault-agent-secretsja:       # ✅ named volume — ไม่โผล่บน host
   mongodb_data:
   mongodb2_data:
   mongodb3_data:
@@ -909,4 +952,3 @@ volumes:
   flink-checkpoints:
   flink-savepoints:
   mongo-keyfile-vol:
-  vault-agent-secretsja:
