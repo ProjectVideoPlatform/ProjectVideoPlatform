@@ -77,3 +77,4 @@ vault/secrets/
 .env
 .env.*
 !.env.example
+./secret-put-script.sh
