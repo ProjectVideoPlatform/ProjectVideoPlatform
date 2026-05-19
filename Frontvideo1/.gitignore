@@ -79,3 +79,4 @@ vault/secrets/
 !.env.example
 ./secret-put-script.sh
 Backend/secret-put-script.sh
+secret-put-script.sh
