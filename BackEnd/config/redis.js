@@ -63,7 +63,13 @@ class RedisClient {
       });
     });
 
+    console.log('✅ Redis connected successfully');
     return this.publisher;
+    
+    } catch (error) {
+      console.error('❌ Redis connection error:', error.message);
+      throw error;
+    }
   }
 
   // ---------- BASIC COMMANDS ----------

@@ -148,11 +148,34 @@ async loadSecrets() {
       };
       
       console.log(`✅ Successfully loaded ${Object.keys(this.secrets).length} keys into Service memory.`);
+      this.debugSecrets();
       return this.secrets;
     } catch (error) {
       console.error('❌ Failed to load secrets from Vault:', error.message);
       throw error;
     }
+  }
+
+  // ✅ Debug: แสดง secrets ที่โหลดมา (แอบไปส่วน sensitive)
+  debugSecrets() {
+    const maskedSecrets = {};
+    const sensitiveKeys = ['MONGO_URI', 'REDIS_PASSWORD', 'ELASTIC_PASSWORD', 'ELASTICSEARCH_API_KEY', 'JWT_SECRET', 'AWS_SECRET_ACCESS_KEY', 'STRIPE_SECRET_KEY'];
+
+    Object.keys(this.secrets).forEach(key => {
+      if (sensitiveKeys.includes(key)) {
+        const value = String(this.secrets[key]);
+        maskedSecrets[key] = value.substring(0, 5) + '***' + value.substring(value.length - 3);
+      } else {
+        maskedSecrets[key] = this.secrets[key];
+      }
+    });
+
+    console.log('📋 Loaded Secrets:');
+    Object.entries(maskedSecrets).forEach(([key, value]) => {
+      if (value && value !== '' && value !== 'undefined') {
+        console.log(`   ✓ ${key}`);
+      }
+    });
   }
   // ฟังก์ชันสำหรับ rotate JWT secret
   async rotateJWTSecret() {
