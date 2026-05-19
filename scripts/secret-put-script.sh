@@ -27,7 +27,7 @@ echo -e "${GREEN}✅ KV v2 ready\n${NC}"
 echo -e "${YELLOW}Putting MongoDB secrets...${NC}"
 docker exec -e VAULT_ADDR="$VAULT_ADDR" -e VAULT_TOKEN="$VAULT_TOKEN" vault \
   vault kv put secret/database/mongodb \
-    MONGO_URI="mongodb://mongodb1:27017,mongodb2:27017,mongodb3:27017/secure-video?replicaSet=rs0" \
+    MONGO_HOST="mongodb://mongodb1:27017,mongodb2:27017,mongodb3:27017/secure-video?replicaSet=rs0" \
     MONGO_REPLICA_SET="rs0" \
     MONGO_DB="secure-video"
 echo -e "${GREEN}✅ MongoDB secrets stored\n${NC}"

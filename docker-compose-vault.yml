@@ -37,7 +37,6 @@ services:
     environment:
       VAULT_ADDR: http://vault:8200
     user: root
-    pid: "container:secure-video-app"
     volumes:
       - ./vault/agent.hcl:/vault/config/agent.hcl:ro
       - ./vault/templates:/vault/templates:ro

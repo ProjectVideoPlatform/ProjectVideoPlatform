@@ -1,6 +1,5 @@
 #!/bin/bash
-
-# ===== VAULT AppRole SETUP SCRIPT =====
+set -e # 🧙 คาถาเด็ด: บรรทัดไหนพังให้หยุดทำงานทันที ไม่หลอกตาว่า Ready!
 
 VAULT_ADDR="http://127.0.0.1:8200"
 VAULT_TOKEN="root"
@@ -8,95 +7,121 @@ VAULT_TOKEN="root"
 GREEN='\033[0;32m'
 BLUE='\033[0;34m'
 YELLOW='\033[1;33m'
+RED='\033[0;31m'
 NC='\033[0m'
 
-echo -e "${BLUE}================================${NC}"
-echo -e "${BLUE}Vault AppRole Setup (Fixed Version)${NC}"
-echo -e "${BLUE}================================${NC}\n"
+echo -e "${BLUE}==================================================${NC}"
+echo -e "${BLUE}  Vault Cluster Setup: MongoDB Dynamic + AppRole   ${NC}"
+echo -e "${BLUE}==================================================${NC}\n"
 
-# 1. Enable AppRole auth method
-echo -e "${YELLOW}Step 1: Enable AppRole auth method${NC}"
-docker exec -e VAULT_ADDR="$VAULT_ADDR" -e VAULT_TOKEN="$VAULT_TOKEN" vault vault auth enable approle 2>/dev/null || echo "AppRole already enabled"
-echo -e "${GREEN}✅ AppRole enabled\n${NC}"
+# -------------------------------------------------------------
+# PHASE 1: MONGODB ENGINE & ROLES
+# -------------------------------------------------------------
+echo -e "${YELLOW}[PHASE 1] Configuring MongoDB Database Engine...${NC}"
 
-# 2. Create backend policy (อัปเดตชื่อเป็น backend-policy และเพิ่มสิทธิ์ MongoDB Dynamic)
-echo -e "${YELLOW}Step 2: Create backend policy${NC}"
+# สเต็ป 1: เปิดใช้งาน Database Secrets Engine
+docker exec -e VAULT_ADDR="$VAULT_ADDR" -e VAULT_TOKEN="$VAULT_TOKEN" vault \
+  vault secrets enable database 2>/dev/null || echo "-> Database engine already enabled"
+
+# สเต็ป 2: เชื่อมต่อเข้า Cluster MongoDB
+docker exec -e VAULT_ADDR="$VAULT_ADDR" -e VAULT_TOKEN="$VAULT_TOKEN" vault \
+  vault write database/config/mongodb \
+    plugin_name=mongodb-database-plugin \
+    allowed_roles="backend-role,readonly-role" \
+    connection_url="mongodb://{{username}}:{{password}}@mongodb1:27017,mongodb2:27017,mongodb3:27017/admin?replicaSet=rs0&authSource=admin" \
+    username="admin" \
+    password="adminpassword" \
+    root_rotation_statements='{"db":"admin"}'
+
+# สเต็ป 3: สร้าง Role สำหรับแอป (ดึงรหัสผ่านแอปสิทธิ์เขียนอ่าน)
+docker exec -e VAULT_ADDR="$VAULT_ADDR" -e VAULT_TOKEN="$VAULT_TOKEN" vault \
+  vault write database/roles/backend-role \
+    db_name=mongodb \
+    creation_statements='{"db":"admin","roles":[{"role":"readWrite","db":"secure-video"}]}' \
+    revocation_statements='{"db":"admin"}' \
+    default_ttl="1h" \
+    max_ttl="24h"
+
+echo -e "${GREEN}✅ Phase 1: Database Engine Ready\n${NC}"
+
+# -------------------------------------------------------------
+# PHASE 2: UNIFIED POLICY (รวมนโยบายเป็นหนึ่งเดียว)
+# -------------------------------------------------------------
+echo -e "${YELLOW}[PHASE 2] Creating Unified Backend Policy...${NC}"
+
+# ยุบรวม Policy เหลือชื่อเดียวคือ "backend-policy" เปิดสิทธิ์ทั้ง Static และ Dynamic ครบถ้วน
 docker exec -i vault sh -c 'cat << EOF > /tmp/backend-policy.hcl
-# 💾 🌟 จุดที่เพิ่ม: อนุญาตให้ดึงรหัสผ่าน Dynamic ของ MongoDB Cluster
-path "database/creds/backend-role" {
-  capabilities = ["read"]
-}
+# 💾 MongoDB Dynamic Secrets Authorization
+path "database/creds/backend-role"  { capabilities = ["read"] }
+path "database/creds/readonly-role" { capabilities = ["read"] }
 
-# 🟢 Static Secrets เดิมทั้งหมด
+# 🟢 Static Secrets ทั้งหมดของระบบ
 path "secret/data/database/mongodb" { capabilities = ["read"] }
-path "secret/data/redis/main" { capabilities = ["read"] }
-path "secret/data/aws/main" { capabilities = ["read"] }
-path "secret/data/jwt/main" { capabilities = ["read"] }
+path "secret/data/redis/main"        { capabilities = ["read"] }
+path "secret/data/aws/main"          { capabilities = ["read"] }
+path "secret/data/jwt/main"          { capabilities = ["read"] }
 path "secret/data/stripe/production" { capabilities = ["read"] }
-path "secret/data/cloudfront/keys" { capabilities = ["read"] }
-path "secret/data/email/gmail" { capabilities = ["read"] }
-path "secret/data/pinecone/main" { capabilities = ["read"] }
+path "secret/data/cloudfront/keys"   { capabilities = ["read"] }
+path "secret/data/email/gmail"       { capabilities = ["read"] }
+path "secret/data/pinecone/main"     { capabilities = ["read"] }
 path "secret/data/elasticsearch/backend" { capabilities = ["read"] }
-path "secret/metadata/*" { capabilities = ["list"] }
-path "auth/token/renew-self" { capabilities = ["update"] }
-path "auth/token/lookup-self" { capabilities = ["read"] }
+path "secret/metadata/*"             { capabilities = ["list"] }
+path "auth/token/renew-self"         { capabilities = ["update"] }
+path "auth/token/lookup-self"        { capabilities = ["read"] }
 EOF'
 
-docker exec -e VAULT_ADDR="$VAULT_ADDR" -e VAULT_TOKEN="$VAULT_TOKEN" vault vault policy write backend-policy /tmp/backend-policy.hcl
-echo -e "${GREEN}✅ Backend policy created\n${NC}"
+docker exec -e VAULT_ADDR="$VAULT_ADDR" -e VAULT_TOKEN="$VAULT_TOKEN" vault \
+  vault policy write backend-policy /tmp/backend-policy.hcl
 
-# 3. Create AppRole (🌟 เปลี่ยนชื่อเป็น backend-role ให้ตรงกับ Agent และผูก backend-policy)
-echo -e "${YELLOW}Step 3: Create AppRole for backend-role${NC}"
-docker exec -e VAULT_ADDR="$VAULT_ADDR" -e VAULT_TOKEN="$VAULT_TOKEN" vault vault write auth/approle/role/backend-role \
-  bind_secret_id=true \
-  secret_id_ttl=24h \
-  secret_id_num_uses=0 \
-  token_ttl=1h \
-  token_max_ttl=24h \
-  policies="backend-policy"
-echo -e "${GREEN}✅ AppRole created\n${NC}"
+echo -e "${GREEN}✅ Phase 2: Policy Configured (backend-policy)\n${NC}"
 
-# 4. Get RoleID
-echo -e "${YELLOW}Step 4: Get RoleID${NC}"
+# -------------------------------------------------------------
+# PHASE 3: APPROLE CONFIGURATION & KEYS EXPORT
+# -------------------------------------------------------------
+echo -e "${YELLOW}[PHASE 3] Set Up AppRole & Export Keys for Agent...${NC}"
+
+# สเต็ป 1: เปิดระบบ AppRole
+docker exec -e VAULT_ADDR="$VAULT_ADDR" -e VAULT_TOKEN="$VAULT_TOKEN" vault \
+  vault auth enable approle 2>/dev/null || echo "-> AppRole already enabled"
+
+# สเต็ป 2: สร้างบทบาท AppRole ผูกเข้ากับ backend-policy ที่เราเพิ่งทำเสร็จ
+docker exec -e VAULT_ADDR="$VAULT_ADDR" -e VAULT_TOKEN="$VAULT_TOKEN" vault \
+  vault write auth/approle/role/backend-role \
+    bind_secret_id=true \
+    secret_id_ttl=24h \
+    secret_id_num_uses=0 \
+    token_ttl=1h \
+    token_max_ttl=24h \
+    policies="backend-policy"
+
+# สเต็ป 3: ดึงกุญแจทอง RoleID และ SecretID ออกมาจากตู้ Vault หลัก
 ROLE_ID=$(docker exec -e VAULT_ADDR="$VAULT_ADDR" -e VAULT_TOKEN="$VAULT_TOKEN" vault vault read auth/approle/role/backend-role/role-id | grep -E '^role_id[[:space:]]+' | awk '{print $2}')
-echo -e "${GREEN}Role ID: ${ROLE_ID}\n${NC}"
-
-# 5. Create SecretID
-echo -e "${YELLOW}Step 5: Create SecretID${NC}"
 SECRET_ID=$(docker exec -e VAULT_ADDR="$VAULT_ADDR" -e VAULT_TOKEN="$VAULT_TOKEN" vault vault write -field=secret_id -f auth/approle/role/backend-role/secret-id)
-echo -e "${GREEN}Secret ID: ${SECRET_ID}\n${NC}"
 
-# 6. Save to files
-echo -e "${YELLOW}Step 6: Save credentials to BackEnd/keys/${NC}"
+# สเต็ป 4: ลำเลียงกุญแจไปส่งให้ตู้ vault-agent 
+# ⚠️ สังเกตตรงนี้: ตรวจสอบพาร์ทที่ผูกกับ volume ใน docker-compose ให้ตรงกันนะครับ
 mkdir -p ./BackEnd/keys
-
 printf '%s' "$ROLE_ID"   > ./BackEnd/keys/role_id
 printf '%s' "$SECRET_ID" > ./BackEnd/keys/secret_id
+chmod 600 ./BackEnd/keys/role_id ./BackEnd/keys/secret_id
 
-chmod 600 ./BackEnd/keys/role_id
-chmod 600 ./BackEnd/keys/secret_id
+echo -e "${GREEN}✅ Keys dispatched to ./BackEnd/keys/\n${NC}"
 
-echo -e "${GREEN}✅ Saved to ./BackEnd/keys/role_id${NC}"
-echo -e "${GREEN}✅ Saved to ./BackEnd/keys/secret_id\n${NC}"
+# -------------------------------------------------------------
+# PHASE 4: THE ULTIMATE MOMENT (สั่งเปลี่ยนรหัส Root และรีสตาร์ทเพื่อเทสผล)
+# -------------------------------------------------------------
+echo -e "${YELLOW}[PHASE 4] Running Root Rotation & Initializing Agent...${NC}"
 
-# Verify files
-echo -e "${YELLOW}Verify files:${NC}"
-echo "role_id   : $(cat ./BackEnd/keys/role_id)"
-echo "secret_id : $(cat ./BackEnd/keys/secret_id)"
-echo ""
+echo -e "${RED}⚠️  Executing Rotate Root... (Vault will take over MongoDB master credentials)${NC}"
+docker exec -e VAULT_ADDR="$VAULT_ADDR" -e VAULT_TOKEN="$VAULT_TOKEN" vault \
+  vault write -f database/rotate-root/mongodb
 
-# 7. Test login
-echo -e "${YELLOW}Step 7: Test AppRole login${NC}"
-docker exec -e VAULT_ADDR="$VAULT_ADDR" vault vault write auth/approle/login \
-  role_id="$ROLE_ID" \
-  secret_id="$SECRET_ID" > /tmp/vault_test.json
+echo -e "${YELLOW}Restarting vault-agent to deploy the new tokens...${NC}"
+docker compose restart vault-agent
 
-if grep -q "client_token" /tmp/vault_test.json; then
-  echo -e "${GREEN}✅ AppRole login successful\n${NC}"
-else
-  echo -e "${YELLOW}⚠️  Check login result\n${NC}"
-fi
+# ปล่อยให้ระบบขยับกุญแจและเขียนไฟล์ซักครู่หนึ่ง
+sleep 3
 
-echo -e "${BLUE}================================${NC}"
-echo -e "${BLUE}Setup Complete!${NC}"
-echo -e "${BLUE}================================${NC}"
+echo -e "\n${BLUE}==================================================${NC}"
+echo -e "${BLUE}       🎉 SYSTEM DEPLOYMENT COMPLETE 🎉            ${NC}"
+echo -e "${BLUE}==================================================${NC}"

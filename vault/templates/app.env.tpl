@@ -35,11 +35,10 @@ COLLECTION_PORT=443
 {{ with secret "database/creds/backend-role" }}
 MONGO_USERNAME="{{ .Data.username }}"
 MONGO_PASSWORD="{{ .Data.password }}"
-MONGO_URI="mongodb://{{ .Data.username }}:{{ .Data.password }}@mongodb1:27017,mongodb2:27017,mongodb3:27017/secure-video?replicaSet=rs0"
-{{ end }}
+MONGO_URL="mongodb://{{ .Data.username }}:{{ .Data.password }}@mongodb1:27017,mongodb2:27017,mongodb3:27017/secure-video?replicaSet=rs0&authSource=admin"x
 MONGO_DB=secure-video
 MONGO_REPLICA_SET=rs0
-
+{{ end }}
 # 🔴 Redis Secrets
 {{ with secret "secret/data/redis/main" }}
 REDIS_URL="{{ .Data.data.REDIS_URL }}"
