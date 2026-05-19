@@ -1,8 +1,7 @@
+// config/redis.js - ✅ Using Vault for secrets
 const Redis = require('ioredis');
 const logger = require('../utils/logger');
-const path = require('path');
-
-require('dotenv').config({ path: path.resolve(__dirname, '../.env') });
+const vaultService = require('./vault');
 
 class RedisClient {
   constructor() {
@@ -12,12 +11,16 @@ class RedisClient {
     this.messageHandlers = new Map();
   }
 
-  getOptions() {
+  async getOptions() {
+    // ✅ Initialize Vault and get Redis config
+    await vaultService.initialize();
+    const redisConfig = vaultService.getRedisConfig();
+
     return {
-      host: process.env.REDIS_HOST || 'redis',
-      port: process.env.REDIS_PORT || 6379,
-      password: process.env.REDIS_PASSWORD || "redispassword123",
-      db: process.env.REDIS_DB || 0,
+      host: redisConfig.host || 'redis',
+      port: redisConfig.port || 6379,
+      password: redisConfig.password || 'redispassword123',
+      db: 0,
       retryStrategy: (times) => Math.min(times * 50, 2000),
       maxRetriesPerRequest: 3,
     };
@@ -26,8 +29,11 @@ class RedisClient {
   async connect() {
     if (this.publisher) return this.publisher;
 
-    const options = this.getOptions();
-    this.publisher  = new Redis(options);
+    try {
+      const options = await this.getOptions();
+      
+      console.log('🔴 Connecting to Redis...');
+      this.publisher = new Redis(options);
     this.subscriber = new Redis(options);
 
     this.publisher.on('connect', () => {

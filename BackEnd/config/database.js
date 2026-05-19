@@ -1,31 +1,33 @@
+// config/database.js - ✅ Using Vault for secrets
 const mongoose = require('mongoose');
-const path = require('path');
-
-require('dotenv').config({ path: path.resolve(__dirname, '../.env') });
+const vaultService = require('./vault');
 
 async function connectDB() {
   try {
+    // ✅ Initialize Vault and get MongoDB config
+    await vaultService.initialize();
+    const mongoConfig = vaultService.getMongoConfig();
 
-    const mongoUri =
-      process.env.MONGO_URI ||
-      'mongodb://localhost:27017,localhost:27018,localhost:27019/secure-video?replicaSet=rs0';
+    console.log('🗄️  Connecting to MongoDB...');
 
-    await mongoose.connect(mongoUri, {
+    await mongoose.connect(mongoConfig.uri, {
       maxPoolSize: 10,
       serverSelectionTimeoutMS: 5000,
       socketTimeoutMS: 45000,
 
       // production practice
-     readPreference: 'primary',
+      readPreference: 'primary',
       retryWrites: true,
       retryReads: true,             
       w: 'majority'
     });
 
-    console.log('MongoDB Replica Set Connected');
+    console.log('✅ MongoDB Replica Set Connected');
+    console.log(`   Database: ${mongoConfig.database}`);
+    console.log(`   ReplicaSet: ${mongoConfig.replicaSet}`);
 
   } catch (error) {
-    console.error('MongoDB connection error:', error);
+    console.error('❌ MongoDB connection error:', error.message);
     process.exit(1);
   }
 }

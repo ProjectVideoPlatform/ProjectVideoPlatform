@@ -1,23 +1,43 @@
+// config/elasticsearch.js - ✅ Using Vault for secrets
 const { Client } = require('@elastic/elasticsearch');
+const vaultService = require('./vault');
 
-const esClient = new Client({
-  cloud: {
-    id: process.env.ELASTIC_CLOUD_ID,
-  },
-  auth: {
-  apiKey: process.env.ELASTICSEARCH_API_KEY
-  },
-});
+let esClient = null;
 
-async function connectES() {
+async function initElasticsearch() {
+  if (esClient) {
+    return esClient;
+  }
+
   try {
+    // ✅ Initialize Vault first
+    await vaultService.initialize();
+
+    // ✅ Get Elasticsearch config from Vault
+    const config = vaultService.getElasticsearchConfig();
+
+    console.log('🔍 Connecting to Elasticsearch...');
+    esClient = new Client(config);
+
+    // Test connection
     const info = await esClient.info();
 
-    console.log('✅ Elasticsearch connected');
-    console.log(info.version.number);
-  } catch (err) {
-    console.error(err);
+    console.log('✅ Elasticsearch connected successfully');
+    console.log('   Version:', info.version.number);
+
+    return esClient;
+  } catch (error) {
+    console.error('❌ Elasticsearch connection failed:', error.message);
+    throw error;
   }
 }
 
-module.exports = { esClient, connectES };
+async function connectES() {
+  return await initElasticsearch();
+}
+
+module.exports = { 
+  esClient,
+  initElasticsearch,
+  connectES 
+};

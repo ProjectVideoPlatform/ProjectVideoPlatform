@@ -29,8 +29,20 @@
 // });
 //online APM
 // Add this to the very top of the first file loaded in your app
-require('dotenv').config();
+// require('dotenv').config();
+// บรรทัดแรกสุด - อ่าน secret จาก Vault Agent แทน .env
+const fs = require('fs');
+const path = require('path');
 
+const vaultSecretsPath = '/vault/secrets/app.env';
+
+if (fs.existsSync(vaultSecretsPath)) {
+  require('dotenv').config({ path: vaultSecretsPath });  // ← อ่านจาก vault
+  console.log('✅ Loaded secrets from Vault Agent');
+} else {
+  require('dotenv').config();  // ← fallback dev local
+  console.log('⚠️  Vault secrets not found, using .env fallback');
+}
 // require('elastic-apm-node').start({
 //   serviceName: process.env.ELASTIC_APM_SERVICE_NAME,
 //   serverUrl: process.env.ELASTIC_APM_SERVER_URL_PRODUCTION,
@@ -40,8 +52,8 @@ require('dotenv').config();
 //   logLevel: 'trace',
 // });
 
-// Add this to the very top of the first file loaded in your app
-var apm = require('elastic-apm-node').start()
+// // Add this to the very top of the first file loaded in your app
+// var apm = require('elastic-apm-node').start()
 const { connectES } = require('./config/elasticsearch');
 const express = require('express');
 const http = require('http');
@@ -109,32 +121,63 @@ app.use((error, req, res, next) => {
 // ====== START SERVER ======
 const startServer = async () => {
   try {
+    console.log('🚀 Starting backend server...\n');
+
+    // ✅ STEP 1: Initialize Vault (MUST BE FIRST!)
+    console.log('========== INITIALIZING SERVICES ==========\n');
+    
+    const vaultService = require('./config/vault');
+    await vaultService.initialize();
+    console.log('');
+
+    // ✅ STEP 2: Initialize all services that need Vault
+    const { initElasticsearch } = require('./config/elasticsearch');
+    const { initClickhouse } = require('./config/clickhouse');
+    const { initAWS } = require('./config/aws');
+    
+    console.log('📦 Initializing database connections...');
     await connectDB();
-    await connectES();
+    console.log('');
+
+    console.log('🔍 Initializing Elasticsearch...');
+    await initElasticsearch();
+    console.log('');
+
+    console.log('📊 Initializing ClickHouse...');
+    await initClickhouse();
+    console.log('');
+
+    console.log('☁️  Initializing AWS services...');
+    await initAWS();
+    console.log('');
+
+    console.log('🔴 Initializing Redis...');
+    await redisClient.connect();
+    console.log('');
     
     // ===== INITIALIZE ELASTICSEARCH INDEXES =====
+    console.log('🔄 Initializing Elasticsearch indexes...');
     const Video = require('./models/Video');
     const Purchase = require('./models/Purchase');
     
-    console.log('🔄 Initializing Elasticsearch indexes...');
     await Video.initializeESIndex();
     await Purchase.initializeESIndex();
-    console.log('✅ Elasticsearch indexes initialized');
+    console.log('✅ Elasticsearch indexes initialized\n');
     
-    console.log('Connected to MongoDB and Elasticsearch');
-    const PORT = process.env.PORT || 3000;
+    console.log('========== SERVICES INITIALIZED ==========\n');
+    
+    const PORT = vaultService.get('PORT') || 3000;
 
-    console.log('Connecting to Redis...');
-    await redisClient.connect();
     server.listen(PORT, () => {
-      console.log(`Server running on port ${PORT}`);
+      console.log(`✅ Server running on port ${PORT}`);
+      console.log(`📍 http://localhost:${PORT}`);
     });
 
     initWebSocket(server);
-    console.log('WebSocket initialized');
+    console.log('🔌 WebSocket initialized');
 
   } catch (error) {
-    console.error('Failed to start server:', error);
+    console.error('❌ Failed to start server:', error.message);
     process.exit(1);
   }
 };

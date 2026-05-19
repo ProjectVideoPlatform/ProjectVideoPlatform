@@ -226,6 +226,79 @@ async loadSecrets() {
       privateKeyPath: this.get('CLOUDFRONT_PRIVATE_KEY_PATH')
     };
   }
+
+  // ✅ Redis Configuration
+  getRedisConfig() {
+    return {
+      host: this.get('REDIS_HOST'),
+      port: this.get('REDIS_PORT'),
+      password: this.get('REDIS_PASSWORD'),
+      url: this.get('REDIS_URL')
+    };
+  }
+
+  // ✅ Elasticsearch Configuration
+  getElasticsearchConfig() {
+    return {
+      node: this.get('ELASTICSEARCH_URL'),
+      auth: {
+        apiKey: this.get('ELASTICSEARCH_API_KEY')
+      }
+    };
+  }
+
+  // ✅ MongoDB Configuration
+  getMongoConfig() {
+    return {
+      uri: this.get('MONGO_URI'),
+      replicaSet: this.get('MONGO_REPLICA_SET'),
+      database: this.get('MONGO_DB')
+    };
+  }
+
+  // ✅ Stripe Configuration
+  getStripeConfig() {
+    return {
+      secretKey: this.get('STRIPE_SECRET_KEY'),
+      webhookSecret: this.get('STRIPE_WEBHOOK_SECRET')
+    };
+  }
+
+  // ✅ ClickHouse Configuration (placeholder)
+  getClickHouseConfig() {
+    return {
+      url: this.get('CLICKHOUSE_URL') || 'http://clickhouse:8123',
+      username: this.get('CLICKHOUSE_USER') || 'default',
+      password: this.get('CLICKHOUSE_PASSWORD') || '',
+      database: this.get('CLICKHOUSE_DB') || 'default'
+    };
+  }
+
+  // ✅ AWS S3 & MediaConvert Configuration
+  getAWSConfig() {
+    return {
+      region: this.get('AWS_REGION'),
+      credentials: {
+        accessKeyId: this.get('AWS_ACCESS_KEY_ID'),
+        secretAccessKey: this.get('AWS_SECRET_ACCESS_KEY')
+      },
+      uploadsBucket: this.get('AWS_UPLOADS_BUCKET'),
+      hlsOutputBucket: this.get('AWS_HLS_OUTPUT_BUCKET'),
+      mediaConvert: {
+        endpoint: this.get('AWS_MEDIACONVERT_ENDPOINT'),
+        role: this.get('AWS_MEDIACONVERT_ROLE'),
+        queueArn: this.get('AWS_MEDIACONVERT_QUEUE_ARN')
+      }
+    };
+  }
+
+  // ✅ Server Configuration
+  getServerConfig() {
+    return {
+      port: this.get('PORT') || 3000,
+      nodeEnv: this.get('NODE_ENV') || 'production'
+    };
+  }
 }
 
 const vaultService = new VaultService();
