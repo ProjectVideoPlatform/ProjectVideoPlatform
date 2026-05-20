@@ -1,5 +1,5 @@
 #!/bin/bash
-set -e
+set -euo pipefail
 
 VAULT_ADDR="http://127.0.0.1:8200"
 VAULT_TOKEN="root"
@@ -13,6 +13,13 @@ NC='\033[0m'
 echo -e "${BLUE}==================================================${NC}"
 echo -e "${BLUE}  Vault Cluster Setup: MongoDB Dynamic + AppRole   ${NC}"
 echo -e "${BLUE}==================================================${NC}\n"
+
+# Verify vault container is reachable before proceeding
+docker exec -e VAULT_ADDR="$VAULT_ADDR" -e VAULT_TOKEN="$VAULT_TOKEN" vault \
+  vault status > /dev/null 2>&1 || {
+  echo -e "${RED}[ERROR] Cannot reach Vault container. Is it running?${NC}"
+  exit 1
+}
 
 # -------------------------------------------------------------
 # PHASE 1: MONGODB ENGINE & ROLES
@@ -112,15 +119,29 @@ docker exec -e VAULT_ADDR="$VAULT_ADDR" -e VAULT_TOKEN="$VAULT_TOKEN" vault \
 echo -e "${GREEN}✅ Phase 3: AppRole & GitHub Auth Ready\n${NC}"
 
 # -------------------------------------------------------------
+# PHASE 3.5: AUDIT LOG
+# -------------------------------------------------------------
+docker exec -e VAULT_ADDR="$VAULT_ADDR" -e VAULT_TOKEN="$VAULT_TOKEN" vault \
+  vault audit enable file file_path=/vault/logs/audit.log 2>/dev/null || \
+  echo "-> Audit already enabled"
+echo -e "${GREEN}✅ Phase 3.5: Audit Ready\n${NC}"
+
+# -------------------------------------------------------------
 # PHASE 4: ROTATE ROOT
+# (หลัง rotate แล้ว Vault จะเป็นคนเดียวที่รู้ password MongoDB)
 # -------------------------------------------------------------
 echo -e "${YELLOW}[PHASE 4] Rotating MongoDB Root Credentials...${NC}"
+echo -e "${RED}⚠️  Executing Rotate Root — password เดิมใช้ไม่ได้อีกแล้ว${NC}"
 
-echo -e "${RED}⚠️  Executing Rotate Root...${NC}"
 docker exec -e VAULT_ADDR="$VAULT_ADDR" -e VAULT_TOKEN="$VAULT_TOKEN" vault \
   vault write -f database/rotate-root/mongodb
 
 echo -e "${GREEN}✅ Phase 4: Root Rotated\n${NC}"
+
+# -------------------------------------------------------------
+# CLEANUP: ลบ policy temp files ใน container
+# -------------------------------------------------------------
+docker exec vault sh -c 'rm -f /tmp/backend-policy.hcl /tmp/developer-policy.hcl'
 
 echo -e "${BLUE}==================================================${NC}"
 echo -e "${BLUE}       ✅ SETUP COMPLETE                           ${NC}"
