@@ -6,7 +6,9 @@ auto_auth {
   method "approle" {
     config = {
       role_id_file_path   = "/app/keys/role_id"
-      secret_id_file_path = "/app/keys/secret_id"
+      role_id_file_path   = "/tmp/vault-auth/role_id"    # ← tmpfs
+      secret_id_file_path = "/tmp/vault-auth/secret_id"  # ← tmpfs
+              remove_secret_id_file_after_reading = true
     }
   }
   sink "file" {
