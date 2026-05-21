@@ -8,7 +8,7 @@ PROJECT_ROOT=$(dirname "$SCRIPT_DIR")
 cd "$PROJECT_ROOT"
 
 # ✅ เปลี่ยนเป็น HTTPS สำหรับ Vault container
-VAULT_ADDR="https://127.0.0.1:8200"
+VAULT_ADDR="http://127.0.0.1:8200"
 VAULT_SKIP_VERIFY="true"  # ข้าม cert check (development only)
 VAULT_CONTAINER="vault"
 ROLE_NAME="backend-role"
