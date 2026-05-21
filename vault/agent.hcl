@@ -23,11 +23,11 @@ auto_auth {
 template {
   source      = "/vault/templates/app.env.tpl"
   destination = "/vault/secrets/app.env"
-  perms       = "0644"
+  perms       = "0640" # ← เปลี่ยนจาก 0644
 }
 
 template {
   source      = "/vault/templates/cloudfront.pem.tpl"
   destination = "/vault/secrets/cloudfront-private-key.pem"
-  perms       = "0644"
+  perms       = "0640" # ← แนะนำให้เปลี่ยนเป็น "0640" เช่นกันเพื่อความปลอดภัยของ Private Key
 }
