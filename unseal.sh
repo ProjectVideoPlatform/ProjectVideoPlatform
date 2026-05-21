@@ -1,19 +1,21 @@
 #!/bin/bash
 VAULT_ADDR="http://127.0.0.1:8200"
-
+#initก่อน
+# docker exec -it vault vault operator init -address=http://127.0.0.1:8200
 UNSEAL_KEYS=(
-  "nwXfgGscg+OlBqIGJzcgI6+6uOU5uUIcfDCl2Xdn7Mhc"
-  "BYNe+2mvvokcKakZSn0KFuCtYzF1ilGPjOv6pGfY/3CB"
-  "LMe+Mkra6fVYJKp2w83iMHeBdl/PiNc6+//gJg1osNGa"
+  "3fuUjKNK4CEc9bvspyPJjQwT/i/IXatyGC5XE3JGmT9d"
+  "Ia92gj7IK4vTefOaErMPmxb+S+E3Dt70G4inm7z/ydZ+"
+  "kKid9+IREO+flR9LY1fRiVxlxELCxJUQdxpWcys5Ng2w"
 )
-ttpho@kuy:/mnt/c/Github/ProjectVideoPlatform/vault/init$ docker exec -e VAULT_ADDR="http://127.0.0.1:8200" vault vault operator init
-Unseal Key 1: nwXfgGscg+OlBqIGJzcgI6+6uOU5uUIcfDCl2Xdn7Mhc
-Unseal Key 2: BYNe+2mvvokcKakZSn0KFuCtYzF1ilGPjOv6pGfY/3CB
-Unseal Key 3: LMe+Mkra6fVYJKp2w83iMHeBdl/PiNc6+//gJg1osNGa
-Unseal Key 4: oecx+tTWNkd2XzBBTeeB5nKZJl4jdzBk4TOIuIt4U6lK
-Unseal Key 5: yhHbzPbopEDAy37by4LznyE0jtaXpnDOAgKhkUzM15Fh
+# ttpho@kuy:/mnt/c/Github/ProjectVideoPlatform/vault/init$ docker exec -it vault vault operator init -address=http://127.0.0.1:8200
+# Unseal Key 1: 3fuUjKNK4CEc9bvspyPJjQwT/i/IXatyGC5XE3JGmT9d
+# Unseal Key 2: Ia92gj7IK4vTefOaErMPmxb+S+E3Dt70G4inm7z/ydZ+
+# Unseal Key 3: kKid9+IREO+flR9LY1fRiVxlxELCxJUQdxpWcys5Ng2w
+# Unseal Key 4: gJ0PtKCwmvVOSmvWXk8W8EjbL99uwPEgOkKNz9C8I9wn
+# Unseal Key 5: 18KWqRLYRcz/x6Odg9b/tgLTf9O9+M+A3Tz3ehxziJax
 
-Initial Root Token: hvs.5MOc9hr7fNAfvAOswx5uj9E8
+Initial Root Token: hvs.CXFJucJFilt8UGWcTdohtBUA
+
 for key in "${UNSEAL_KEYS[@]}"; do
   docker exec -e VAULT_ADDR="$VAULT_ADDR" vault vault operator unseal "$key"
 done

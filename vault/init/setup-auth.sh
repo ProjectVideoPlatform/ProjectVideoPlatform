@@ -85,9 +85,12 @@ docker exec -e VAULT_ADDR="$VAULT_ADDR" -e VAULT_TOKEN="$VAULT_TOKEN" vault \
     bind_secret_id=true \
     secret_id_ttl=5m \
     secret_id_num_uses=1 \
-    token_ttl=1h \
-    token_max_ttl=24h \
-    policies="backend-policy"
+    token_period="1h" \
+    policies="backend-policy" \
+    token_explicit_max_ttl=0\
+    token_max_ttl=0 \
+    token_ttl="1h"
+    #ตามปกติไม่ควรมี token_ttl ถ้าใช้ token_period
 
 # GitHub org + developer policy
 docker exec -e VAULT_ADDR="$VAULT_ADDR" -e VAULT_TOKEN="$VAULT_TOKEN" vault \

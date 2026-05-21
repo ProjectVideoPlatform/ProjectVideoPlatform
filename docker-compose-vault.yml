@@ -25,10 +25,15 @@ services:
       image: busybox
       container_name: vault-secrets-init
       restart: "no"
-      # เปลี่ยนมาใช้ chown และกำหนดสิทธิ์โฟลเดอร์เป็น 750
-      command: sh -c "chown -R 100:1001 /vault/secrets && chmod 750 /vault/secrets && echo 'permission fixed'"
+      # เพิ่มคำสั่ง chown สิทธิ์ฝั่ง /vault/data ให้เป็นของ user vault (UID 100)
+      command: >
+        sh -c "chown -R 100:1001 /vault/secrets && chmod 750 /vault/secrets &&
+              chown -R 100:1000 /vault/data && chmod 750 /vault/data &&
+              echo 'All permissions fixed!'&&
+               exit 0"
       volumes:
         - vault-agent-secretsja:/vault/secrets
+        - vault_data:/vault/data # ← เมาท์วอลลุ่มของตู้หลักเข้ามาซ่อมสิทธิ์ด้วย
       networks:
         - secure-video-network
 
@@ -64,8 +69,3 @@ networks:
 volumes:
   vault_data:
   vault-agent-secretsja:
-      driver: local
-      driver_opts:
-        type: "tmpfs"
-        device: "tmpfs"
-        o: "size=64m,mode=750,uid=100,gid=1001" # กำหนดขนาด และ Permission ให้เสร็จสรรพตั้งแต่เกิด
