@@ -23,7 +23,10 @@ const generateSignedCookies = (videoId, expirationMinutes = 15) => {
         // const privateKey = fs.readFileSync(privateKeyPath, 'utf8');
         // console.log('Private key loaded:', privateKey.startsWith('-----BEGIN'));
         // console.log('Private key length:', privateKey.length);
-        const privateKey = process.env.CLOUDFRONT_PRIVATE_KEY.replace(/\\n/g, '\n');
+      const privateKey = fs.readFileSync(
+  process.env.CLOUDFRONT_PRIVATE_KEY_PATH,
+  'utf8'
+);
         const expires = Math.floor(Date.now() / 1000) + (expirationMinutes * 60);
 
         // กำหนด Resource ให้ตรงกับ URL ที่จะใช้เป็นพารามิเตอร์ตัวแรกของ getSignedCookies

@@ -23,7 +23,7 @@ HLS_OUTPUT_BUCKET=hls-output-bucket-photong
 MEDIACONVERT_ENDPOINT=https://mediaconvert.us-east-1.amazonaws.com
 CLOUDFRONT_DOMAIN=cdn.toteja.co
 CLOUDFRONT_KEY_PAIR_ID=KM18YXD93MX5V
-CLOUDFRONT_PRIVATE_KEY_PATH=/app/keys/cloudfront-private-key.pem
+CLOUDFRONT_PRIVATE_KEY_PATH=/vault/secrets/cloudfront-private-key.pem
 
 PROJECT_ID=1
 COLLECTION_AGENT=b329e4682f5a4731bb28e4719291303e.profiling.ap-southeast-1.aws.cloud.es.io
@@ -66,11 +66,6 @@ JWT_REFRESH_SECRET="{{ .Data.data.JWT_REFRESH_SECRET }}"
 {{ with secret "secret/data/stripe/production" }}
 STRIPE_SECRET_KEY="{{ .Data.data.STRIPE_SECRET_KEY }}"
 STRIPE_WEBHOOK_SECRET="{{ .Data.data.STRIPE_WEBHOOK_SECRET }}"
-{{ end }}
-
-# 🌐 CloudFront Keys
-{{ with secret "secret/data/cloudfront/keys" }}
-CLOUDFRONT_PRIVATE_KEY="{{ .Data.data.CLOUDFRONT_PRIVATE_KEY }}"
 {{ end }}
 
 # 📧 Email Secrets

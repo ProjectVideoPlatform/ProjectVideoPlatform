@@ -10,17 +10,12 @@ if [ -z "$ROLE_ID" ] || [ -z "$SECRET_ID" ]; then
 fi
 
 echo "[*] Writing ephemeral credentials to tmpfs..."
-
-# /tmp ต้องถูก mount เป็น tmpfs ใน docker-compose (tmpfs: - /tmp)
-# ถึงจะมั่นใจได้ว่าอยู่ใน RAM ไม่แตะ disk
 mkdir -p /tmp/vault-auth
 printf '%s' "$ROLE_ID"   > /tmp/vault-auth/role_id
 printf '%s' "$SECRET_ID" > /tmp/vault-auth/secret_id
 chmod 600 /tmp/vault-auth/role_id /tmp/vault-auth/secret_id
 
-unset VAULT_ROLE_ID
-unset VAULT_SECRET_ID
+unset VAULT_ROLE_ID VAULT_SECRET_ID
 
 echo "[*] Credentials written — starting vault agent..."
-
 exec vault agent -config=/vault/config/agent.hcl

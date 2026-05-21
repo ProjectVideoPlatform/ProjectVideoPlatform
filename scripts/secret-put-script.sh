@@ -3,7 +3,7 @@
 # ===== VAULT PUT SECRETS SCRIPT =====
 
 VAULT_ADDR="http://127.0.0.1:8200"
-VAULT_TOKEN="root"
+VAULT_TOKEN="${VAULT_TOKEN:?ERROR: VAULT_TOKEN not set}"
 
 GREEN='\033[0;32m'
 BLUE='\033[0;34m'
@@ -83,7 +83,7 @@ echo -e "${GREEN}✅ Stripe secrets stored\n${NC}"
 echo -e "${YELLOW}Putting CloudFront secrets...${NC}"
 
 # copy key file เข้า container แล้วใช้ @ อ่านไฟล์
-docker cp ./BackEnd/keys/cloudfront-private-key.pem vault:/tmp/cloudfront.pem
+docker cp ../BackEnd/keys/cloudfront-private-key.pem vault:/tmp/cloudfront.pem
 
 docker exec -e VAULT_ADDR="$VAULT_ADDR" -e VAULT_TOKEN="$VAULT_TOKEN" vault \
   sh -c 'vault kv put secret/cloudfront/keys \
